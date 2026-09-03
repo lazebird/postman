@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Edge Mail Notifier",
-  "version": "0.9.1",
-  "description": "纯后台检查：Cookie+API 独立探测，API 模式自动捕获学习(含所有frame/sendBeacon/EventSource)，绝不自动打开标签",
+  "version": "0.9.2",
+  "description": "纯后台检查：Cookie+API 独立探测，API 模式自动捕获学习(含所有frame/sendBeacon/EventSource)；含跳转链路落点日志(多级跳转→内容页)，绝不自动打开标签",
   "minimum_chrome_version": "116",
   "permissions": [
     "alarms",
