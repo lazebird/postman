@@ -221,8 +221,19 @@ async function refreshStatus() {
   const overview = document.getElementById('status-overview');
   overview.innerHTML = '';
 
+  // 计算所有账户未读总和（用于展示在状态概览）
+  let totalUnreadAll = 0;
+  let hasAnyUnread = false;
+  (status.accountStatus || []).forEach(as => {
+    if (typeof as.unreadCount === 'number') {
+      totalUnreadAll += as.unreadCount;
+      if (as.unreadCount > 0) hasAnyUnread = true;
+    }
+  });
+
   const items = [
     ['账户数量', String(status.accountCount || 0)],
+    ['全部未读', hasAnyUnread ? `<b style="color:#dc3545;">${totalUnreadAll} 封</b>` : '0 封'],
     ['检查间隔', `${status.settings?.checkIntervalMinutes || 5} 分钟`],
     ['检查模式', providerMode(status.settings?.checkMode || 'hybrid')],
     ['163 sid', status.cachedSids?.netease_163 ? '✅ 已缓存' : '❌ 未同步'],
@@ -237,49 +248,84 @@ async function refreshStatus() {
     overview.appendChild(div);
   });
 
-  // 渲染最近结果（简要状态，区分「未授权 / 已授权但读不到未读 / 已读出未读」）
-  if (status.recentResults?.length) {
-    const latest = status.recentResults.find(r => r.unreadCount != null || r.authVerified === true || r.needsAuth === true || r.needsInboxPage === true)
-                  || status.recentResults[0];
-    const resultDiv = document.createElement('div');
-    resultDiv.className = 'status-item';
-    const time = new Date(latest.timestamp || Date.now()).toLocaleTimeString();
-    const authVerified = latest.authVerified === true;
-    const unread = latest.unreadCount;
-    const needsInbox = latest.needsInboxPage === true;
-    let badge;
-    if (typeof unread === 'number') {
-      badge = `<span class="provider-status status-ok">✅ 未读 ${unread} 封</span>`;
-    } else if (authVerified) {
-      badge = needsInbox
-        ? '<span class="provider-status status-auth">⚠️ 已授权，打开收件箱读取</span>'
-        : '<span class="provider-status status-ok">✅ 已授权</span>';
-    } else if (latest.needsAuth) {
-      badge = '<span class="provider-status status-auth">需授权（登录邮箱）</span>';
-    } else {
-      badge = '<span class="provider-status status-fail">读取失败</span>';
-    }
-    resultDiv.innerHTML = `<span class="label">最近检查 (${time})</span>${badge}`;
-    overview.appendChild(resultDiv);
-  }
-
-  // 渲染账户列表
+  // 渲染账户列表（按账户显示状态 + 未读数 + 快速跳转链接）
   const accountsList = document.getElementById('accounts-list');
   if (!status.accounts?.length) {
     accountsList.innerHTML = '<div class="empty">未配置任何邮箱账户，请前往设置添加</div>';
   } else {
     accountsList.innerHTML = '';
-    const ul = document.createElement('ul');
-    ul.className = 'provider-list';
-    status.accounts.forEach(acc => {
-      const li = document.createElement('li');
-      li.innerHTML = `
-        <span class="provider-name">${escapeHtml(acc.email)}</span>
-        <span class="badge ${acc.provider === 'qq' ? 'badge-orange' : 'badge-blue'}">${providerName(acc.provider)}</span>
-      `;
-      ul.appendChild(li);
+    // 从 getStatus 获取聚合好的 accountStatus（含 unreadCount/auth 状态）
+    const accStatusMap = {};
+    (status.accountStatus || []).forEach(as => {
+      accStatusMap[as.email] = as;
     });
-    accountsList.appendChild(ul);
+
+    status.accounts.forEach(acc => {
+      const st = accStatusMap[acc.email] || {};
+      const card = document.createElement('div');
+      card.className = 'account-card';
+
+      // 未读数
+      const unread = (typeof st.unreadCount === 'number') ? st.unreadCount : null;
+      const unreadHtml = unread !== null
+        ? `<span class="acc-unread ${unread > 0 ? 'acc-unread-num' : 'acc-unread-zero'}">${unread}</span>`
+        : '<span class="acc-unread acc-unread-zero" style="font-size:13px;">-</span>';
+
+      // 状态徽标
+      let statusBadge = '';
+      if (st.needsInboxPage === true) {
+        statusBadge = '<span class="acc-status-badge acc-status-need">⚠️ 打开收件箱</span>';
+      } else if (st.authVerified === true) {
+        statusBadge = '<span class="acc-status-badge acc-status-auth">✅ 已授权</span>';
+      } else if (st.needsAuth === true) {
+        statusBadge = '<span class="acc-status-badge acc-status-need">⚠️ 需授权</span>';
+      } else if (st.hasSid === true) {
+        statusBadge = '<span class="acc-status-badge acc-status-auth">✅ sid已缓存</span>';
+      } else {
+        statusBadge = '<span class="acc-status-badge acc-status-err">未检查</span>';
+      }
+
+      // 跳转链接
+      const jumpBtn = `<button class="acc-action-btn jump" data-email="${escapeHtml(acc.email)}" data-provider="${acc.provider}" title="跳转到未读邮件">📥</button>`;
+      const refreshBtn = `<button class="acc-action-btn" data-email="${escapeHtml(acc.email)}" data-provider="${acc.provider}" data-action="refresh" title="检查该账户">🔄</button>`;
+
+      card.innerHTML = `
+        <div class="acc-info">
+          <div class="acc-email">${escapeHtml(acc.email)} ${statusBadge}</div>
+          <div class="acc-meta">${providerName(acc.provider)}${st.timestamp ? ` · 最近 ${new Date(st.timestamp).toLocaleTimeString()}` : ''}${st.method ? ` · ${st.method}` : ''}</div>
+        </div>
+        <div style="display:flex;align-items:center;">
+          ${unreadHtml}
+          <div class="acc-actions">${refreshBtn}${jumpBtn}</div>
+        </div>
+      `;
+      accountsList.appendChild(card);
+    });
+
+    // 绑定跳转和刷新事件
+    accountsList.querySelectorAll('.acc-action-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const provider = btn.dataset.provider;
+        const action = btn.dataset.action || 'jump';
+        if (action === 'jump') {
+          try {
+            await sendMessage({ type: 'openInbox', provider });
+          } catch (err) {
+            console.error('打开邮箱失败:', err);
+          }
+        } else if (action === 'refresh') {
+          btn.disabled = true;
+          btn.textContent = '…';
+          try {
+            const r = await sendMessage({ type: 'testProvider', provider });
+            // testProvider 走 checkSingleAccount 流程，会 saveCheckResult → 展示用
+            await refreshStatus();
+          } catch (err) {
+            console.error('刷新失败:', err);
+          }
+        }
+      });
+    });
   }
 }
 

@@ -91,6 +91,68 @@
       border-radius: 10px;
     }
     .status-ok { background: #d4edda; color: #155724; }
+    .account-card {
+      background: white;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border: 1px solid #dee2e6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .account-card .acc-info {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .account-card .acc-email {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .account-card .acc-meta {
+      font-size: 11px;
+      color: #6c757d;
+      margin-top: 2px;
+    }
+    .account-card .acc-unread {
+      font-size: 18px;
+      font-weight: 700;
+      margin-right: 8px;
+    }
+    .account-card .acc-actions {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .account-card .acc-action-btn {
+      background: #e9ecef;
+      color: #495057;
+      border: none;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .account-card .acc-action-btn:hover { background: #dee2e6; }
+    .account-card .acc-action-btn.jump { background: #e3f2fd; color: #1976d2; }
+    .account-card .acc-action-btn.jump:hover { background: #bbdefb; }
+    .account-card .acc-status-badge {
+      display: inline-block;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      margin-left: 4px;
+    }
+    .acc-status-auth { background: #d4edda; color: #155724; }
+    .acc-status-need { background: #fff3cd; color: #856404; }
+    .acc-status-err  { background: #f8d7da; color: #721c24; }
+    .acc-unread-zero { color: #adb5bd; }
+    .acc-unread-num  { color: #dc3545; }
     .status-fail { background: #f8d7da; color: #721c24; }
     .status-auth { background: #fff3cd; color: #856404; }
     .status-idle { background: #e2e3e5; color: #383d41; }
@@ -259,7 +321,7 @@
       </div>
 
       <div class="section">
-        <div class="section-title">已配置账户</div>
+        <div class="section-title">账户状态 <span style="font-weight:400;color:#adb5bd;font-size:11px;">点击「📥」跳转未读邮件页</span></div>
         <div id="accounts-list">
           <div class="empty">加载中...</div>
         </div>
