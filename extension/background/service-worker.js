@@ -17,10 +17,11 @@
 
 import { createLogger } from '../shared/debug.js';
 import { getAccounts, getSettings, saveCheckResult, getCheckResults } from '../shared/storage.js';
-import { PROVIDERS } from '../shared/constants.js';
+import { PROVIDERS, API_PATTERN_KEYS } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
+import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 
 const logger = createLogger('service-worker');
 
@@ -178,6 +179,89 @@ async function handleMessage(message, sender) {
       return { success: true };
     }
 
+    case 'apiCaptureBatch': {
+      // 批量接收 API 捕获
+      const provider = message.provider;
+      const captures = message.captures || [];
+      if (provider && captures.length > 0) {
+        const patterns = captures.map(c => ({
+          url: c.url || '',
+          method: c.method || 'GET',
+          body: c.body || null,
+          headers: c.headers || {},
+          timestamp: c.timestamp || Date.now(),
+          description: `页面捕获: ${c.type || 'unknown'} ${c.method || 'GET'} ${c.url || ''}`,
+        }));
+        // 缓存 sid（从第一条捕获中获取）
+        const firstCapture = captures[0];
+        const sidToUse = firstCapture?.currentSid;
+        if (sidToUse) {
+          try {
+            const sidKey = provider === 'qq' ? 'sid_qq' : 'sid_163';
+            const sidData = await chrome.storage.local.get(sidKey);
+            if (!sidData[sidKey]) {
+              await chrome.storage.local.set({
+                [sidKey]: sidToUse,
+                [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
+              });
+            }
+          } catch(e) {}
+        }
+        const saved = await saveApiPatterns(provider, patterns);
+        logger.info(`批量保存 ${provider} API 模式 ${patterns.length} 条`, { saved });
+      }
+      return { success: true };
+    }
+
+    case 'apiCapture': {
+      // 内容脚本捕获到页面的真实 API 请求，保存供 SW 后续精确复现
+      const capture = message.capture;
+      const provider = message.provider;
+      if (capture && provider) {
+        const pattern = {
+          url: capture.url || '',
+          method: capture.method || 'GET',
+          body: capture.body || null,
+          headers: capture.headers || {},
+          timestamp: capture.timestamp || Date.now(),
+          description: `页面捕获: ${capture.type || 'unknown'} ${capture.method || 'GET'} ${capture.url || ''}`,
+        };
+        // 如果消息中带了 currentSid 且 SW 还没有缓存，先临时缓存
+        const sidToUse = capture.currentSid || message.sid;
+        if (sidToUse) {
+          try {
+            const sidKey = provider === 'qq' ? 'sid_qq' : 'sid_163';
+            await chrome.storage.local.get([sidKey, `${sidKey}_expiry`]).then(async (data) => {
+              if (!data[sidKey]) {
+                await chrome.storage.local.set({
+                  [sidKey]: sidToUse,
+                  [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
+                });
+                logger.info(`通过 API 捕获缓存 ${provider} sid`);
+              }
+            });
+          } catch(e) {}
+        }
+        const saved = await saveApiPatterns(provider, [pattern]);
+        logger.info(`已捕获并保存 ${provider} API 请求: ${pattern.method} ${pattern.url}`, { saved });
+      }
+      return { success: true };
+    }
+
+    case 'getApiPatterns': {
+      const provider = message.provider;
+      if (!provider) return { success: false, error: 'Provider required' };
+      const patterns = await getApiPatterns(provider);
+      return { success: true, patterns };
+    }
+
+    case 'clearApiPatterns': {
+      const provider = message.provider;
+      if (!provider) return { success: false, error: 'Provider required' };
+      await clearApiPatterns(provider);
+      return { success: true, message: 'API patterns cleared' };
+    }
+
     case 'settingsChanged':
       await setupAlarms();
       return { success: true, message: 'Alarms re-registered' };
@@ -203,21 +287,21 @@ const PROVIDER_HOME = {
 };
 
 // 自动打开标签时使用的「登录后直达」URL：
-// 首页（https://mail.163.com/）可能只是落地/跳转页，需额外导航到主应用。
-// 用更具体的入口可减少一步跳转，更快加载内容脚本可读的主界面。
+// QQ 新版 webmail 在 wx.mail.qq.com；mail.qq.com 仅作登录入口。
 const PROVIDER_OPEN_URL = {
   netease_163: 'https://mail.163.com/js6/main.jsp',
-  qq: 'https://mail.qq.com/cgi-bin/login?fun=passport',
+  // QQ 新版 webmail 在 wx.mail.qq.com；若未登录 mail.qq.com 会跳登录
+  qq: 'https://wx.mail.qq.com/',
 };
+
+// QQ 页面中可识别的域名
+const QQ_MAIL_DOMAINS = ['mail.qq.com', 'wx.mail.qq.com', 'exmail.qq.com'];
 
 // 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
 const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ]);
 
 /**
- * QQ 邮箱的主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com（登录后常落于
- * https://wx.mail.qq.com/home/index?sid=...#/list/1），而 mail.qq.com 是其旧入口/入口域。
- * 因此识别 QQ 邮箱页面须同时匹配 mail.qq.com 与 wx.mail.qq.com，否则会漏检已打开的标签
- * 导致每次探测都重复打开新标签。
+ * QQ 邮箱主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com 或 mail.qq.com
  */
 function isQQMailUrl(url) {
   return /^https?:\/\/(?:wx\.)?mail\.qq\.com\//i.test(url || '');
@@ -256,6 +340,19 @@ async function findMailboxTab(provider) {
 }
 
 /**
+ * 返回提供商的中文名，用于错误消息展示
+ */
+function providerNameForError(provider) {
+  switch (provider) {
+    case 'qq': return 'QQ';
+    case 'netease_163': return '163';
+    case 'ustc': return '中科大';
+    case 'gmail': return 'Gmail';
+    default: return provider || '目标';
+  }
+}
+
+/**
  * 向已打开的邮箱标签内容脚本发送探测指令
  */
 async function probeTabContent(provider, tabId, timeoutMs = 15000) {
@@ -271,7 +368,7 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
   if (!targetTabId) {
     return {
       success: false,
-      error: `未找到已打开的${provider === 'qq' ? 'QQ' : '163'}邮箱标签。请先打开邮箱页面登录，或使用 openTab 自动打开。`,
+      error: `未找到已打开的${providerNameForError(provider)}邮箱标签。请先打开邮箱页面登录，或使用 openTab 自动打开。`,
       needsTab: true,
     };
   }
@@ -518,6 +615,8 @@ async function checkSingleAccount(account, settings, context) {
   logger_acc.info(`开始检查账户 ${account.email} (provider=${account.provider})`);
 
   const mode = settings.checkMode || 'hybrid';
+  // 记录 API 探测的详细信息（含端点和错误），供最终诊断
+  let apiProbeDiagnostics = null;
 
   try {
     // ===== 模式 1：SW API 优先（hybrid / sw-api） =====
@@ -547,6 +646,14 @@ async function checkSingleAccount(account, settings, context) {
         return accountResult;
       }
 
+      // API 失败，记录诊断信息
+      apiProbeDiagnostics = {
+        error: apiResult.error,
+        sidExpired: apiResult.sidExpired,
+        authBlocked: apiResult.authBlocked,
+        needsSid: apiResult.needsSid,
+        detail: apiResult.detail,
+      };
       // API 失败，sid 可能失效
       if (apiResult.sidExpired) {
         logger_acc.warn('缓存的 sid 已失效，尝试刷新');
@@ -747,6 +854,7 @@ async function checkSingleAccount(account, settings, context) {
           : '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
       detail: {
         mode,
+        apiDiagnostics: apiProbeDiagnostics,
         hint: unsupported
           ? `提供商 ${account.provider} 尚未接入内容脚本或 API 探测，暂时无法自动读取未读数。`
           : (autoCheck && !userTriggered)
@@ -815,13 +923,21 @@ async function runSWApiProbe(provider, settings) {
     }
 
     // 检查是否 sid 过期 / 认证被拦截
-    const authBlocked = endpointResults.some(r => r.authBlocked);
+    // 对于 QQ：mail.qq.com 旧域接口的 authBlocked 不代表 sid 过期——
+    // 用户会话实际在 wx.mail.qq.com，旧域接口因 cookie 域不匹配必然失败。
+    // 仅当 wx.mail.qq.com 域接口也报告 authBlocked 时才判定 sid 过期。
+    const isQQ = provider === PROVIDERS.QQ;
+    const authBlockedAny = endpointResults.some(r => r.authBlocked);
+    const authBlockedOnSessionDomain = isQQ
+      ? endpointResults.some(r => r.authBlocked && /wx\.mail\.qq\.com/i.test(r.url || ''))
+      : authBlockedAny;
+    const authBlocked = authBlockedAny;
     const needsSid = providerResult.needsSid === true ||
                      endpointResults.some(r => r.needsSid === true) ||
-                     (provider === PROVIDERS.QQ && !providerResult.session?.sidObtained && authBlocked);
+                     (isQQ && !providerResult.session?.sidObtained && authBlocked);
     return {
       success: false,
-      sidExpired: authBlocked,
+      sidExpired: authBlockedOnSessionDomain,
       authBlocked,
       needsSid,
       error: 'API 探测未返回未读数',
@@ -1101,6 +1217,10 @@ async function getStatus() {
   // 检查是否有缓存 sid
   const sid163 = await getCachedSid('netease_163');
   const sidQQ = await getCachedSid('qq');
+  
+  // 检查 API pattern 数量
+  const apiP163 = await getApiPatterns('netease_163');
+  const apiPQQ = await getApiPatterns('qq');
 
   // ===== 聚合每个账户的最新状态 =====
   // recentResults 中保存了各账户单独的检查结果（含 email/provider/unreadCount 字段），
@@ -1139,6 +1259,10 @@ async function getStatus() {
     cachedSids: {
       netease_163: !!sid163,
       qq: !!sidQQ,
+    },
+    apiPatternCounts: {
+      netease_163: apiP163.length,
+      qq: apiPQQ.length,
     },
     alarmConfigured: !!alarm,
     alarmInfo: alarm ? { periodInMinutes: alarm.periodInMinutes, scheduledTime: new Date(alarm.scheduledTime).toISOString() } : null,

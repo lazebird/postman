@@ -8,8 +8,8 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      width: 380px;
-      max-height: 500px;
+      width: 400px;
+      max-height: 520px;
       overflow-y: auto;
       background: #f8f9fa;
       color: #212529;
@@ -17,33 +17,53 @@
     .header {
       background: #1976d2;
       color: white;
-      padding: 12px 16px;
+      padding: 8px 16px;
       position: sticky;
       top: 0;
       z-index: 10;
     }
     .header h1 {
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 600;
     }
-    .header .subtitle {
-      font-size: 12px;
-      opacity: 0.8;
-      margin-top: 4px;
-    }
-    .content { padding: 12px 16px; }
+    .content { padding: 8px 12px 0; }
     .section {
       background: white;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
     }
     .section-title {
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       color: #495057;
       margin-bottom: 8px;
+    }
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+    .log-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #495057;
+    }
+    .log-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .log-actions .btn-copy {
+      margin-left: 0;
+    }
+    .log-actions button.danger {
+      padding: 2px 10px;
+      font-size: 11px;
     }
     .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
     button {
@@ -51,8 +71,8 @@
       color: white;
       border: none;
       border-radius: 4px;
-      padding: 6px 12px;
-      font-size: 13px;
+      padding: 5px 10px;
+      font-size: 12px;
       cursor: pointer;
       transition: background 0.2s;
     }
@@ -66,12 +86,13 @@
     button.danger { background: #dc3545; }
     button.danger:hover { background: #c82333; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.mini { font-size: 11px; padding: 3px 8px; }
     .status-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 4px 0;
-      font-size: 13px;
+      padding: 3px 0;
+      font-size: 12px;
     }
     .status-item .label { color: #6c757d; }
     .status-item .value { font-weight: 500; }
@@ -93,14 +114,15 @@
     .status-ok { background: #d4edda; color: #155724; }
     .account-card {
       background: white;
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 6px;
       border: 1px solid #dee2e6;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
+    .account-card:last-child { margin-bottom: 0; }
     .account-card .acc-info {
       flex: 1;
       min-width: 0;
@@ -114,9 +136,9 @@
       text-overflow: ellipsis;
     }
     .account-card .acc-meta {
-      font-size: 11px;
+      font-size: 10px;
       color: #6c757d;
-      margin-top: 2px;
+      margin-top: 1px;
     }
     .account-card .acc-unread {
       font-size: 18px;
@@ -125,16 +147,16 @@
     }
     .account-card .acc-actions {
       display: flex;
-      gap: 4px;
+      gap: 3px;
       align-items: center;
     }
     .account-card .acc-action-btn {
       background: #e9ecef;
       color: #495057;
       border: none;
-      border-radius: 4px;
-      padding: 3px 8px;
-      font-size: 11px;
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-size: 10px;
       cursor: pointer;
       white-space: nowrap;
     }
@@ -143,9 +165,9 @@
     .account-card .acc-action-btn.jump:hover { background: #bbdefb; }
     .account-card .acc-status-badge {
       display: inline-block;
-      font-size: 11px;
-      padding: 1px 6px;
-      border-radius: 8px;
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 6px;
       margin-left: 4px;
     }
     .acc-status-auth { background: #d4edda; color: #155724; }
@@ -159,10 +181,10 @@
     .debug-log {
       background: #f1f3f5;
       border-radius: 4px;
-      padding: 8px;
+      padding: 6px 8px;
       font-family: 'SF Mono', Consolas, monospace;
-      font-size: 11px;
-      max-height: 150px;
+      font-size: 10px;
+      max-height: 200px;
       overflow-y: auto;
       word-break: break-all;
     }
@@ -184,7 +206,7 @@
       text-align: center;
       font-size: 11px;
       color: #adb5bd;
-      padding: 8px;
+      padding: 4px 0 8px;
     }
     .empty {
       text-align: center;
@@ -224,14 +246,19 @@
     .tabs {
       display: flex;
       border-bottom: 1px solid #dee2e6;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
+      position: sticky;
+      top: 34px;
+      background: #f8f9fa;
+      z-index: 9;
     }
     .tab {
-      padding: 6px 12px;
-      font-size: 13px;
+      padding: 4px 10px;
+      font-size: 12px;
       cursor: pointer;
       border-bottom: 2px solid transparent;
       color: #6c757d;
+      white-space: nowrap;
     }
     .tab.active {
       border-bottom-color: #1976d2;
@@ -244,146 +271,396 @@
       background: #f8f9fa;
       border: 1px solid #dee2e6;
       border-radius: 4px;
-      padding: 8px;
-      margin-top: 8px;
+      padding: 6px 8px;
+      margin-top: 6px;
       font-size: 12px;
-      max-height: 200px;
+      max-height: 180px;
       overflow-y: auto;
       word-break: break-all;
     }
     .action-result pre {
       font-family: 'SF Mono', Consolas, monospace;
-      font-size: 11px;
+      font-size: 10px;
       white-space: pre-wrap;
       word-break: break-all;
+      margin: 0;
     }
     .result-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 6px;
-      padding-bottom: 6px;
+      margin-bottom: 4px;
+      padding-bottom: 4px;
       border-bottom: 1px solid #dee2e6;
-      position: sticky;
-      top: -8px;
-      background: #f8f9fa;
-      z-index: 2;
-      padding-top: 2px;
     }
     .result-title {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: #495057;
       word-break: break-all;
       min-width: 0;
       flex: 1;
-      margin-right: 8px;
+      margin-right: 6px;
     }
     .btn-copy {
       background: #6c757d;
       color: white;
       border: none;
       border-radius: 4px;
-      padding: 2px 10px;
-      font-size: 11px;
+      padding: 2px 8px;
+      font-size: 10px;
       cursor: pointer;
       transition: background 0.2s;
       white-space: nowrap;
       flex-shrink: 0;
-      margin-left: 8px;
+      margin-left: 6px;
     }
     .btn-copy:hover { background: #5a6268; }
-    .btn-copy.copied {
-      background: #28a745;
+    .btn-copy.copied { background: #28a745; }
+    /* Settings form styles */
+    .form-group {
+      margin-bottom: 6px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #495057;
+      margin-bottom: 3px;
+    }
+    .form-group select,
+    .form-group input[type="text"] {
+      width: 100%;
+      padding: 4px 8px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      font-size: 12px;
+      background: white;
+    }
+    .form-group select:focus,
+    .form-group input[type="text"]:focus {
+      border-color: #1976d2;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(25,118,210,0.2);
+    }
+    .form-group .hint {
+      font-size: 10px;
+      color: #6c757d;
+      margin-top: 2px;
+    }
+    .form-inline {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .form-inline select { flex: 0 0 auto; }
+    .form-inline input { flex: 1; min-width: 0; }
+    .form-inline button { flex: 0 0 auto; }
+    .save-status {
+      margin-top: 6px;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: none;
+    }
+    .save-status.success { background: #d4edda; color: #155724; display: block; }
+    .save-status.error { background: #f8d7da; color: #721c24; display: block; }
+    .accounts-manage { margin-top: 6px; }
+    .acc-manage-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 12px;
+    }
+    .acc-manage-item:last-child { border-bottom: none; }
+    .endpoint-checkbox {
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 2px 0;
+      font-size: 11px;
+    }
+    .endpoint-checkbox input { margin-top: 1px; flex-shrink: 0; }
+    .endpoint-group {
+      margin-bottom: 6px;
+    }
+    .endpoint-group .ep-provider {
+      font-weight: 600;
+      font-size: 11px;
+      margin-bottom: 2px;
+    }
+    .collapsible-content { display: none; }
+    .collapsible-content.open { display: block; }
+    .collapse-btn {
+      background: transparent;
+      color: #1976d2;
+      border: none;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 0;
+      text-align: left;
+      display: block;
+      width: 100%;
+    }
+    .collapse-btn:hover { background: transparent; color: #1565c0; }
+    .sid-chip {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 10px;
+      margin-left: 4px;
+    }
+    .sid-ok { background: #d4edda; color: #155724; }
+    .sid-no { background: #f8d7da; color: #721c24; }
+    .hint {
+      font-size: 10px;
+      color: #6c757d;
+      margin-top: 2px;
+    }
+    .divider {
+      border-top: 1px solid #eee;
+      margin: 6px 0;
+    }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 8px;
+    }
+    .stat-grid .stat-cell {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      padding: 3px 0;
+      border-bottom: 1px solid #f5f5f5;
+    }
+    .stat-grid .stat-cell:last-child,
+    .stat-grid .stat-cell:nth-last-child(2):nth-child(odd) { border-bottom: none; }
+    .stat-grid .s-label { color: #6c757d; }
+    .stat-grid .s-value { font-weight: 600; }
+    .recent-checks {
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .recent-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      padding: 3px 0;
+      border-bottom: 1px solid #f5f5f5;
+    }
+    .recent-item:last-child { border-bottom: none; }
+    .recent-item .r-time { color: #adb5bd; flex-shrink: 0; }
+    .recent-item .r-provider { font-weight: 600; flex-shrink: 0; }
+    .recent-item .r-status { flex-shrink: 0; }
+    .recent-item .r-detail { color: #6c757d; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .section-hint {
+      font-size: 10px;
+      color: #adb5bd;
+      margin-bottom: 6px;
+    }
+    .row { display: flex; gap: 6px; margin-bottom: 6px; }
+    .row:last-child { margin-bottom: 0; }
+    .row > * { flex: 1; }
+    .compact-label {
+      font-size: 10px;
+      color: #6c757d;
+      margin-bottom: 2px;
+      display: block;
     }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>📧 Mail Notifier</h1>
-    <div class="subtitle">混合方案 · 内容脚本 + SW API</div>
   </div>
 
   <div class="content">
     <div class="tabs">
       <div class="tab active" data-tab="overview">状态</div>
       <div class="tab" data-tab="probe">探测</div>
-      <div class="tab" data-tab="logs">日志</div>
       <div class="tab" data-tab="settings">设置</div>
+      <div class="tab" data-tab="stats">统计</div>
+      <div class="tab" data-tab="logs">日志</div>
     </div>
 
-    <!-- Tab 1: 状态概览 -->
+    <!-- ═══ Tab: 状态 ═══ -->
     <div class="tab-content active" id="tab-overview">
-      <div class="section">
-        <div class="section-title">账户状态 <span style="font-weight:400;color:#adb5bd;font-size:11px;">点击「📥」跳转未读邮件页</span></div>
-        <div id="accounts-list">
-          <div class="empty">加载中...</div>
-        </div>
+      <div id="accounts-list">
+        <div class="empty">加载中...</div>
+      </div>
+      <div id="status-no-account" style="display:none;">
+        <div class="empty">未配置邮箱账户<br><span style="font-size:11px;">请前往 <b>设置</b> 标签添加</span></div>
       </div>
     </div>
 
-    <!-- Tab 2: 手动探测 -->
+    <!-- ═══ Tab: 探测 ═══ -->
     <div class="tab-content" id="tab-probe">
+      <!-- 同步会话 -->
       <div class="section">
-        <div class="section-title">获取未读数（内容脚本）</div>
-        <div class="btn-group" style="margin-bottom:8px;">
-          <button id="btn-content-163" class="success">📥 获取未读数 · 163</button>
-          <button id="btn-content-qq" class="success">📥 获取未读数 · QQ</button>
-          <button id="btn-diagnose-cookies" class="warning">🍪 诊断会话 Cookie</button>
+        <div class="row">
+          <button id="btn-sync-163" class="primary">🔑 同步163</button>
+          <button id="btn-sync-qq" class="primary">🔑 同步QQ</button>
         </div>
-        <div style="font-size:11px;color:#6c757d;margin-bottom:4px;">
-          先点击获取：扩展打开邮箱 → 提取会话（授权）并读取未读数。<br>
-          <b>若返回未读为空</b>：说明落在辅助页，请在邮箱中打开「收件箱」主页面后重试。
-        </div>
+        <div class="hint">打开邮箱页 → 提取会话令牌(sid) → 缓存供后台检查</div>
       </div>
 
+      <!-- 获取未读数 -->
       <div class="section">
-        <div class="section-title">手动探测 · SW 接口（旧方式，仅供对比）</div>
-        <div class="btn-group" style="margin-bottom:8px;">
-          <button id="btn-probe-163" class="warning">探测 163</button>
-          <button id="btn-probe-qq" class="warning">探测 QQ</button>
-          <button id="btn-check-bridge" class="secondary">检查认证</button>
-          <button id="btn-refresh-session" class="secondary">🔄 刷新会话</button>
+        <div class="row">
+          <button id="btn-content-163" class="success">📥 未读数·163</button>
+          <button id="btn-content-qq" class="success">📥 未读数·QQ</button>
+          <button id="btn-full-check" class="warning">🚀 全量检查</button>
         </div>
+        <div class="hint">若未读为空：请在邮箱中打开「收件箱」后重试</div>
       </div>
 
+      <!-- 诊断 & 高级探测 -->
       <div class="section">
-        <div class="section-title">全量检查</div>
-        <button id="btn-full-check" class="success" style="width:100%;">🚀 运行全量检查</button>
-        <div id="probe-result" class="action-result" style="display:none;margin-top:8px;">
-          <div class="result-header" id="probe-result-header">
-            <span class="result-title" id="probe-result-title"></span>
-            <button id="btn-copy-result" class="btn-copy">📋 复制</button>
+        <button id="btn-diagnose-cookies" class="secondary mini" style="width:100%;">🍪 诊断会话 Cookie</button>
+        <div class="divider"></div>
+        <button id="btn-toggle-advanced" class="collapse-btn">▸ 高级探测（SW 直调）</button>
+        <div class="collapsible-content" id="advanced-probe">
+          <div class="divider"></div>
+          <div class="row">
+            <button id="btn-probe-163" class="secondary mini">探测163</button>
+            <button id="btn-probe-qq" class="secondary mini">探测QQ</button>
+            <button id="btn-check-bridge" class="secondary mini">检查认证</button>
+            <button id="btn-refresh-session" class="secondary mini">🔄刷新会话</button>
           </div>
-          <pre id="probe-result-text"></pre>
+        </div>
+      </div>
+
+      <!-- 结果区 -->
+      <div id="probe-result" class="action-result" style="display:none;margin-bottom:8px;">
+        <div class="result-header">
+          <span class="result-title" id="probe-result-title"></span>
+          <button id="btn-copy-result" class="btn-copy">📋</button>
+        </div>
+        <pre id="probe-result-text"></pre>
+      </div>
+    </div>
+
+    <!-- ═══ Tab: 设置 ═══ -->
+    <div class="tab-content" id="tab-settings">
+      <!-- 账户管理 -->
+      <div class="section">
+        <div class="form-inline">
+          <select id="provider-select" style="width:90px;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
+            <option value="netease_163">163邮箱</option>
+            <option value="qq">QQ邮箱</option>
+            <option value="ustc">中科大</option>
+          </select>
+          <input type="text" id="email-input" placeholder="邮箱地址" style="flex:1;min-width:0;padding:4px 8px;font-size:11px;border:1px solid #ced4da;border-radius:4px;">
+          <button id="btn-add-account" class="mini">添加</button>
+        </div>
+        <div id="settings-accounts-list" class="accounts-manage">
+          <div class="hint">暂无账户</div>
+        </div>
+      </div>
+
+      <!-- 检查设置 -->
+      <div class="section">
+        <div class="row">
+          <div>
+            <label class="compact-label">检查间隔</label>
+            <select id="interval-select" style="width:100%;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
+              <option value="1">1分钟</option>
+              <option value="5" selected>5分钟</option>
+              <option value="10">10分钟</option>
+              <option value="15">15分钟</option>
+              <option value="30">30分钟</option>
+            </select>
+          </div>
+          <div>
+            <label class="compact-label">日志级别</label>
+            <select id="loglevel-select" style="width:100%;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
+              <option value="DEBUG">DEBUG</option>
+              <option value="INFO">INFO</option>
+              <option value="WARN">WARN</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="compact-label">检查模式</label>
+          <select id="mode-select" style="width:100%;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
+            <option value="hybrid">混合模式（推荐）</option>
+            <option value="content-script">仅内容脚本</option>
+            <option value="sw-api">仅 SW API</option>
+          </select>
+        </div>
+        <div class="hint" style="margin-top:3px;">
+          <b>混合</b>：SW缓存sid直调，失效回退内容脚本。<br>
+          <b>仅内容脚本</b>：需常驻邮箱页。<b>仅SW API</b>：无需开页，定期同步。
+        </div>
+      </div>
+
+      <!-- 探测接口配置（可折叠） -->
+      <div class="section">
+        <button id="btn-toggle-endpoints" class="collapse-btn">▸ 探测接口（163 / QQ）</button>
+        <div class="collapsible-content" id="endpoint-config" style="margin-top:4px;"></div>
+      </div>
+
+      <!-- 保存 / 重置 -->
+      <div class="section" style="margin-bottom:4px;">
+        <div class="row">
+          <button id="btn-save" style="flex:1;">💾 保存设置</button>
+          <button id="btn-reset" class="secondary" style="flex:1;">🔄 重置</button>
+        </div>
+        <div id="save-status" class="save-status"></div>
+      </div>
+
+      <!-- 页脚信息（放入设置标签页内） -->
+      <div class="footer">
+        <a href="#" id="link-options" style="color:#1976d2;text-decoration:none;">打开完整设置页</a>
+        <span style="color:#adb5bd;"> · Edge Mail Notifier v0.8.0</span>
+      </div>
+    </div>
+
+    <!-- ═══ Tab: 统计 ═══ -->
+    <div class="tab-content" id="tab-stats">
+      <!-- 会话授权状态 -->
+      <div class="section">
+        <div id="session-status">
+          <div class="hint">加载中...</div>
+        </div>
+      </div>
+
+      <!-- 数据统计 -->
+      <div class="section">
+        <div class="stat-grid" id="stats-grid"></div>
+      </div>
+
+      <!-- 最近检查 -->
+      <div class="section">
+        <div class="section-title">最近检查</div>
+        <div id="recent-checks" class="recent-checks">
+          <div class="empty" style="padding:8px;">暂无数据</div>
         </div>
       </div>
     </div>
 
-    <!-- Tab 3: 调试日志 -->
+    <!-- ═══ Tab: 日志（最后） ═══ -->
     <div class="tab-content" id="tab-logs">
       <div class="section">
-        <div class="section-title">调试日志</div>
-        <button id="btn-refresh-logs" class="secondary" style="margin-bottom:8px;">🔄 刷新日志</button>
+        <div class="log-header">
+          <span class="log-title">调试日志</span>
+          <div class="log-actions">
+            <button id="btn-copy-logs" class="btn-copy" title="复制全部日志">📋 复制</button>
+            <button id="btn-clear-logs" class="danger" title="清空日志">🗑 清除</button>
+          </div>
+        </div>
         <div id="logs-container" class="debug-log">
           <div class="empty">加载中...</div>
         </div>
       </div>
     </div>
 
-    <!-- Tab 4: 设置 -->
-    <div class="tab-content" id="tab-settings">
-      <div class="section">
-        <div class="section-title">扩展状态</div>
-        <div id="settings-overview">
-          <div class="empty">加载中...</div>
-        </div>
-      </div>
-    </div>
 
-    <div class="footer">
-      <a href="#" id="link-options">打开设置</a> · Edge Mail Notifier v0.4.1
-    </div>
   </div>
 
   <script src="popup.js"></script>

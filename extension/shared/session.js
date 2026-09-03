@@ -88,3 +88,27 @@ export function replaceSidInUrl(url, sid) {
   if (!sid) return url;
   return url.replace(/\{sid\}/g, sid);
 }
+
+/**
+ * 带超时的 fetch。
+ *
+ * 背景：纯后台（SW 无标签）探测邮箱接口时，部分跨源 fetch 可能长期
+ * 不返回（hang），导致该接口既不打「收到响应」也不打「请求异常」日志，
+ * 造成诊断黑洞。给 fetch 加一个显式超时，超时后以明确错误落日志，
+ * 便于区分「请求挂起」与「响应解析失败」两类情况。
+ *
+ * @param {string} url
+ * @param {RequestInit} options
+ * @param {number} timeoutMs 超时毫秒数（默认 12s，SW 30s 生命周期内留出余量）
+ * @returns {Promise<Response>}
+ */
+export async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const { signal, ...rest } = options || {};
+  try {
+    return await fetch(url, { ...rest, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
