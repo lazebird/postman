@@ -17,11 +17,18 @@ const PROVIDER_LABELS = {
 // 各提供商可选的探测接口
 const ENDPOINT_OPTIONS = {
   netease_163: [
-    { name: 'js6_rpc', label: 'js6 RPC 网关 (mbox:listMessages)' },
+    { name: 'js6_rpc_list', label: 'js6/s RPC - mbox:listMessages 收件箱列表' },
+    { name: 'js6_rpc_getfolder', label: 'js6/s RPC - mbox:getFolderCount 文件夹计数' },
+    { name: 'js6_rpc_getunread', label: 'js6/s RPC - mbox:getUnread 未读计数' },
+    { name: 'js6_sys_getfolder', label: 'js6/s - global:getSessionInfo 会话信息' },
   ],
   qq: [
-    { name: 'cgi_mail_list', label: 'cgi-bin/mail_list (收件箱列表)' },
-    { name: 'cgi_fr_show', label: 'cgi-bin/fr_show (轻量未读)' },
+    { name: 'wx_readdata', label: 'wx.mail.qq.com - readdata 读取收件箱' },
+    { name: 'wx_readindex', label: 'wx.mail.qq.com - readindex 读取邮箱索引' },
+    { name: 'wx_mail_list', label: 'wx.mail.qq.com - mail_list 收件箱列表' },
+    { name: 'wx_unread', label: 'wx.mail.qq.com - unread 未读计数' },
+    { name: 'cgi_mail_list', label: 'mail.qq.com - cgi-bin/mail_list 收件箱列表' },
+    { name: 'cgi_fr_show', label: 'mail.qq.com - cgi-bin/fr_show 轻量未读' },
   ],
 };
 

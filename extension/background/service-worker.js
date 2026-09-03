@@ -340,6 +340,19 @@ async function findMailboxTab(provider) {
 }
 
 /**
+ * 返回提供商的中文名，用于错误消息展示
+ */
+function providerNameForError(provider) {
+  switch (provider) {
+    case 'qq': return 'QQ';
+    case 'netease_163': return '163';
+    case 'ustc': return '中科大';
+    case 'gmail': return 'Gmail';
+    default: return provider || '目标';
+  }
+}
+
+/**
  * 向已打开的邮箱标签内容脚本发送探测指令
  */
 async function probeTabContent(provider, tabId, timeoutMs = 15000) {
@@ -355,7 +368,7 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
   if (!targetTabId) {
     return {
       success: false,
-      error: `未找到已打开的${provider === 'qq' ? 'QQ' : '163'}邮箱标签。请先打开邮箱页面登录，或使用 openTab 自动打开。`,
+      error: `未找到已打开的${providerNameForError(provider)}邮箱标签。请先打开邮箱页面登录，或使用 openTab 自动打开。`,
       needsTab: true,
     };
   }
@@ -910,13 +923,21 @@ async function runSWApiProbe(provider, settings) {
     }
 
     // 检查是否 sid 过期 / 认证被拦截
-    const authBlocked = endpointResults.some(r => r.authBlocked);
+    // 对于 QQ：mail.qq.com 旧域接口的 authBlocked 不代表 sid 过期——
+    // 用户会话实际在 wx.mail.qq.com，旧域接口因 cookie 域不匹配必然失败。
+    // 仅当 wx.mail.qq.com 域接口也报告 authBlocked 时才判定 sid 过期。
+    const isQQ = provider === PROVIDERS.QQ;
+    const authBlockedAny = endpointResults.some(r => r.authBlocked);
+    const authBlockedOnSessionDomain = isQQ
+      ? endpointResults.some(r => r.authBlocked && /wx\.mail\.qq\.com/i.test(r.url || ''))
+      : authBlockedAny;
+    const authBlocked = authBlockedAny;
     const needsSid = providerResult.needsSid === true ||
                      endpointResults.some(r => r.needsSid === true) ||
-                     (provider === PROVIDERS.QQ && !providerResult.session?.sidObtained && authBlocked);
+                     (isQQ && !providerResult.session?.sidObtained && authBlocked);
     return {
       success: false,
-      sidExpired: authBlocked,
+      sidExpired: authBlockedOnSessionDomain,
       authBlocked,
       needsSid,
       error: 'API 探测未返回未读数',

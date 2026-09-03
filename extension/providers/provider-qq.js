@@ -205,10 +205,18 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     const authInfo = analyzeQQAuth(text, response.status, response.url);
 
     if (authInfo.authBlocked) {
-      logger_ep.warn('QQ 会话已失效或未登录，清除缓存 sid');
-      try {
-        await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
-      } catch (e) {}
+      // 仅当请求目标为 wx.mail.qq.com（当前实际会话域）时才清除 sid。
+      // mail.qq.com 旧接口因 cookie 域不匹配总会报未登录，sid 在 wx.mail.qq.com 上仍有效，
+      // 不应因旧域接口失败而误删有效 sid。
+      const isWxDomain = /wx\.mail\.qq\.com/i.test(url);
+      if (isWxDomain) {
+        logger_ep.warn('QQ 会话已失效或未登录，清除缓存 sid');
+        try {
+          await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
+        } catch (e) {}
+      } else {
+        logger_ep.debug('mail.qq.com 域接口认证失败（sid 可能仍适用于 wx.mail.qq.com），不清除 sid');
+      }
     }
 
     const parseResult = parseQQResponse(text);
