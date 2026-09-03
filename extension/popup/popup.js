@@ -6,6 +6,7 @@
  * 2. 添加"刷新会话"按钮
  * 3. 更清晰的探测结果显示
  * 4. 结果自动展开查看完整数据
+ * 5. 输出栏增加快速复制按钮（含标题 + 数据）
  */
 
 // Tab 切换
@@ -289,8 +290,73 @@ function providerName(provider) {
 function showProbeResult(title, data) {
   const container = document.getElementById('probe-result');
   const text = document.getElementById('probe-result-text');
+  const titleEl = document.getElementById('probe-result-title');
+  const copyBtn = document.getElementById('btn-copy-result');
+
   container.style.display = 'block';
-  text.textContent = `【${title}】\n${JSON.stringify(data, null, 2)}`;
+  text.textContent = JSON.stringify(data, null, 2);
+
+  // 设置标题
+  if (titleEl) titleEl.textContent = `【${title}】`;
+
+  // 重置复制按钮状态
+  if (copyBtn) {
+    copyBtn.textContent = '📋 复制';
+    copyBtn.classList.remove('copied');
+  }
+}
+
+// 快速复制输出内容
+const btnCopyResult = document.getElementById('btn-copy-result');
+if (btnCopyResult) {
+  btnCopyResult.addEventListener('click', async () => {
+    const textEl = document.getElementById('probe-result-text');
+    const titleEl = document.getElementById('probe-result-title');
+    if (!textEl.textContent) return;
+    const copyText = titleEl.textContent
+      ? `${titleEl.textContent}\n${textEl.textContent}`
+      : textEl.textContent;
+    try {
+      await navigator.clipboard.writeText(copyText);
+      btnCopyResult.textContent = '✅ 已复制';
+      btnCopyResult.classList.add('copied');
+      setTimeout(() => {
+        btnCopyResult.textContent = '📋 复制';
+        btnCopyResult.classList.remove('copied');
+      }, 2000);
+    } catch (err) {
+      // clipboard API 不可用时回退到 execCommand
+      try {
+        // Fallback: temporarily set the combined text to select & copy
+        const originalText = textEl.textContent;
+        const titleEl2 = document.getElementById('probe-result-title');
+        const fullText = titleEl2.textContent
+          ? `${titleEl2.textContent}\n${originalText}`
+          : originalText;
+        textEl.textContent = fullText;
+        const range = document.createRange();
+        range.selectNodeContents(textEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        const ok = document.execCommand('copy');
+        textEl.textContent = originalText;
+        sel.removeAllRanges();
+        if (ok) {
+          btnCopyResult.textContent = '✅ 已复制';
+          btnCopyResult.classList.add('copied');
+          setTimeout(() => {
+            btnCopyResult.textContent = '📋 复制';
+            btnCopyResult.classList.remove('copied');
+          }, 2000);
+        } else {
+          btnCopyResult.textContent = '❌ 复制失败';
+        }
+      } catch (e2) {
+        btnCopyResult.textContent = '❌ 复制失败';
+      }
+    }
+  });
 }
 
 async function refreshLogs() {
