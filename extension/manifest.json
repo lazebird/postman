@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Edge Mail Notifier",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "免常驻标签页：Cookie+API后台独立探测+自动保活邮箱标签读取未读，实现无页面状态下的自动检查",
   "minimum_chrome_version": "116",
   "permissions": [
