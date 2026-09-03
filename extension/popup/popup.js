@@ -93,11 +93,11 @@ if (btnContent163) {
     btn.disabled = true; btn.textContent = '探测中...';
     try {
       const result = await sendMessage({ type: 'probeContent163', openTab: true });
-      showProbeResult('方案C · 内容脚本探测 163', result);
+      showProbeResult('获取未读数 · 163', result);
       await refreshStatus();
     } catch (err) {
       showProbeResult('探测失败', { success: false, error: err.message });
-    } finally { btn.disabled = false; btn.textContent = '📄 内容脚本探测 163'; }
+    } finally { btn.disabled = false; btn.textContent = '📥 获取未读数 · 163'; }
   });
 }
 
@@ -109,11 +109,11 @@ if (btnContentQQ) {
     btn.disabled = true; btn.textContent = '探测中...';
     try {
       const result = await sendMessage({ type: 'probeContentQQ', openTab: true });
-      showProbeResult('方案C · 内容脚本探测 QQ', result);
+      showProbeResult('获取未读数 · QQ', result);
       await refreshStatus();
     } catch (err) {
       showProbeResult('探测失败', { success: false, error: err.message });
-    } finally { btn.disabled = false; btn.textContent = '📄 内容脚本探测 QQ'; }
+    } finally { btn.disabled = false; btn.textContent = '📥 获取未读数 · QQ'; }
   });
 }
 
@@ -207,6 +207,7 @@ function sendMessage(message) {
 function formatAuthResult(result) {
   if (!result) return { error: 'No result' };
   return {
+    authState: result.authState || 'needs_auth',
     loggedIn: result.loggedIn,
     needsAuth: result.needsAuth,
     detail: result.detail || {},
@@ -236,18 +237,28 @@ async function refreshStatus() {
     overview.appendChild(div);
   });
 
-  // 渲染最近结果（简要状态）
+  // 渲染最近结果（简要状态，区分「未授权 / 已授权但读不到未读 / 已读出未读」）
   if (status.recentResults?.length) {
-    const latest = status.recentResults[0];
+    const latest = status.recentResults.find(r => r.unreadCount != null || r.authVerified === true || r.needsAuth === true || r.needsInboxPage === true)
+                  || status.recentResults[0];
     const resultDiv = document.createElement('div');
     resultDiv.className = 'status-item';
     const time = new Date(latest.timestamp || Date.now()).toLocaleTimeString();
     const authVerified = latest.authVerified === true;
-    const badge = authVerified
-      ? '<span class="provider-status status-ok">认证成功</span>'
-      : (latest.needsAuth
-        ? '<span class="provider-status status-auth">需登录</span>'
-        : '<span class="provider-status status-fail">失败</span>');
+    const unread = latest.unreadCount;
+    const needsInbox = latest.needsInboxPage === true;
+    let badge;
+    if (typeof unread === 'number') {
+      badge = `<span class="provider-status status-ok">✅ 未读 ${unread} 封</span>`;
+    } else if (authVerified) {
+      badge = needsInbox
+        ? '<span class="provider-status status-auth">⚠️ 已授权，打开收件箱读取</span>'
+        : '<span class="provider-status status-ok">✅ 已授权</span>';
+    } else if (latest.needsAuth) {
+      badge = '<span class="provider-status status-auth">需授权（登录邮箱）</span>';
+    } else {
+      badge = '<span class="provider-status status-fail">读取失败</span>';
+    }
     resultDiv.innerHTML = `<span class="label">最近检查 (${time})</span>${badge}`;
     overview.appendChild(resultDiv);
   }

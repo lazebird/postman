@@ -18,6 +18,11 @@
 
   const HOST = location.host;
   const isQQ = HOST.includes('qq.com');
+  // 判断当前 frame 是否为主（顶层）frame。
+  // webmail 收件箱的主体内容通常渲染在顶层文档或主业务 iframe 中，
+  // 而 /contacts/call.do 等子 frame 只有业务但无未读角标。区分可避免拿错 frame 的 null 结果。
+  let isTopFrame = false;
+  try { isTopFrame = window === window.top; } catch (e) { isTopFrame = false; }
 
   /**
    * 提取页面 DOM 中的未读数
@@ -159,6 +164,31 @@
     return { unread: null, source: 'none' };
   }
 
+  /**
+   * 判断当前页面是否为「能反映未读数」的主收件箱页面。
+   * 163/QQ 登录后可能打开在收件箱、联系人、文件夹等子模块 iframe。
+   * 只有主收件箱页面才会渲染「收件箱(未读数)」或含未读的标题。
+   * 若当前 frame 不含未读数，则视为辅助 frame，不作为授权成功的依据（但 sid 仍有效）。
+   */
+  function classifyPage(diag, best) {
+    // 判断页面 URL / title 是否指向主收件箱
+    const path = (location.pathname || '');
+    const is163InboxPath = /js6\/main|main\.jsp|s\?func=mbox/i.test(path + ' ' + location.href);
+    const isQQInboxPath = /cgi-bin\/(mail_list|frame_html|login)/i.test(location.href);
+    const hasMailTitle = /邮箱|mail|收件箱|未读/i.test(diag.title || '');
+    const hasUnread = typeof best.unread === 'number';
+
+    let pageType;
+    if (hasUnread) {
+      pageType = 'inbox'; // 能读到未读数 → 主收件箱
+    } else if (is163InboxPath || isQQInboxPath || hasMailTitle) {
+      pageType = 'mailbox'; // 是邮箱主框架但未解析到未读数
+    } else {
+      pageType = 'aux'; // 辅助 frame（联系人/设置等）
+    }
+    return { pageType, isTopFrame, hasUnread };
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || (message.type !== 'probeContent163' && message.type !== 'probeContentQQ')) {
       return false;
@@ -170,17 +200,22 @@
         const best = computeBest(diag);
         // 获取 sid（URL 或 DOM）
         const sid = diag.sidFromUrl || diag.sidFromDom;
+        const cls = classifyPage(diag, best);
 
         const detail = {
           provider: isQQ ? 'qq' : 'netease_163',
           host: HOST,
           documentReady: document.readyState,
           pageUrl: location.href,
+          pageType: cls.pageType,
+          isTopFrame: cls.isTopFrame,
           dom: diag,
           best,
         };
 
-        const loggedIn = !!best.unread || !!sid;
+        // 已登录判定：只要拿到 sid 即可认为登录态有效（可能命中辅助 frame）。
+        // 能读到未读 → 强登录信号；只有 sid 而无未读 → 已授权但需切到收件箱主框架才能读数。
+        const loggedIn = !!sid || !!best.unread;
 
         // 通过消息通知 SW 缓存 sid（内容脚本无法直接访问 chrome.storage.session）
         if (sid) {
@@ -189,6 +224,7 @@
               type: 'contentPageReady',
               detail: {
                 host: HOST,
+                url: location.href,
                 sid,
                 provider: isQQ ? 'qq' : 'netease_163',
               }
@@ -201,6 +237,10 @@
         sendResponse({
           success: true,
           loggedIn,
+          // 明确标记是否已授权（拿到 sid）与是否能读到未读数
+          authVerified: !!sid,
+          needsInboxPage: cls.pageType !== 'inbox',
+          pageType: cls.pageType,
           unreadCount: best.unread,
           unreadSource: best.source,
           sid: sid || null,  // 显式返回 sid
@@ -217,13 +257,16 @@
   // 主动上报一次（页面加载完成后立即给 SW 一份基线数据）
   try {
     const diag = extractUnreadFromDom();
+    const best = computeBest(diag);
+    const cls = classifyPage(diag, best);
     chrome.runtime.sendMessage({
       type: 'contentPageReady',
       detail: {
         host: HOST,
         url: location.href,
         title: document.title,
-        unreadCount: computeBest(diag).unread,
+        pageType: cls.pageType,
+        unreadCount: best.unread,
         sid: diag.sidFromUrl || diag.sidFromDom,
         hasBody: !!(document.body && document.body.innerText),
       }
