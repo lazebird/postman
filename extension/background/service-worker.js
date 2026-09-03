@@ -1,16 +1,18 @@
 /**
  * service-worker.js - MV3 Service Worker 入口
  *
- * 混合方案（v0.7.0）：
+ * 混合方案（v0.8.0）：
  *   1. 内容脚本在邮箱页面（同源）提取 sid → 缓存到 chrome.storage.local
  *   2. SW 使用缓存 sid + 登录 Cookie 调用 webmail 内部 API → 后台独立检查
- *   3. 无缓存 sid 或 API 失败 → 回退到内容脚本 DOM 探测（需页面打开）
+ *   3. 无缓存 sid 或 API 失败 → 自动打开后台邮箱标签恢复会话（10分钟冷却控制）
  *
- * v0.7.0 修复（本版核心）：自动检查绝不自动打开可见标签
- *   - 后台定时检查（alarm）失败时仅标记「需手动同步会话」，不自动开标签
- *   - 仅用户主动触发（手动检查/同步）才打开邮箱标签获取 sid
- *   - sid 持久化至 chrome.storage.local（7天 TTL），浏览器重启不丢失
+ * v0.8.0 修复（本版核心）：alarm 自动检查不再因无标签/无 sid 而必然失败
+ *   - 手动全量检查成功后关闭标签，后续 alarm 检查失败时自动恢复会话
+ *   - alarm 检查允许自动打开后台邮箱标签（active:false 不抢焦点），读取后立即关闭
+ *   - 10 分钟冷却期控制避免反复弹标签打扰用户
+ *   - 自动打开的标签页获取信息后确保关闭
  *
+ * v0.7.0：alarm 检查不自动打开可见标签，sid 持久化至 chrome.storage.local（7天 TTL）
  * v0.6.0：标签页关闭时全量/自动检查均能执行
  * v0.5.0：不再依赖标签页开启即可独立运行，延长 sid 缓存有效期
  */
@@ -34,6 +36,35 @@ const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 function isUserInitiated(context) {
   const src = (context && context.source) || 'unknown';
   return src === 'manual' || src === 'manual-test';
+}
+
+// 自动恢复冷却期：同一提供商两次"自动打开邮箱标签"的最小间隔（毫秒）。
+// alarm 自动检查失败时允许短暂自动打开后台邮箱标签恢复会话。
+// 冷却期避免反复弹标签打扰用户。
+const AUTO_RECOVER_COOLDOWN_MS = 10 * 60 * 1000; // 10 分钟
+
+// 检查某提供商是否可自动打开标签恢复会话（冷却控制）
+// 用户主动触发不受限；alarm 自动触发受冷却期限制
+async function canAutoRecover(provider, context) {
+  // 用户主动触发不设冷却
+  if (isUserInitiated(context)) {
+    return { allowed: true, remainingMs: 0, source: 'user' };
+  }
+  try {
+    const key = `autoRecoverCooldown_${provider}`;
+    const data = await chrome.storage.local.get(key);
+    const lastTry = data[key] || 0;
+    const now = Date.now();
+    const elapsed = now - lastTry;
+    if (elapsed < AUTO_RECOVER_COOLDOWN_MS) {
+      return { allowed: false, remainingMs: AUTO_RECOVER_COOLDOWN_MS - elapsed, source: 'cooldown' };
+    }
+    // 记录本次尝试时间
+    await chrome.storage.local.set({ [key]: now });
+    return { allowed: true, remainingMs: 0, source: 'alarm' };
+  } catch (e) {
+    return { allowed: true, remainingMs: 0, source: 'alarm' };
+  }
 }
 
 // ===== 事件监听 =====
@@ -553,31 +584,36 @@ async function checkSingleAccount(account, settings, context) {
         await clearCachedSid(account.provider);
       }
 
-      // 如果 sw-api 模式且 API 失败 → 仅用户主动触发时尝试自动恢复 sid
-      // （自动检查不自动开标签，避免影响用户体验）
-      if (mode === 'sw-api' && isUserInitiated(context)) {
-        // 尝试自动打开后台标签恢复 sid，然后重试 API
-        const rec = await autoRecoverSid(account.provider);
-        if (rec.success) {
-          const apiResult2 = await runSWApiProbe(account.provider, settings);
-          if (apiResult2.success) {
-            const accountResult = {
-              email: account.email,
-              provider: account.provider,
-              authVerified: true,
-              needsAuth: false,
-              allFailed: false,
-              source: context.source,
-              method: 'sw-api',
-              unreadCount: apiResult2.unreadCount,
-              unreadSource: apiResult2.unreadSource,
-              detail: apiResult2.detail,
-              timestamp: new Date().toISOString(),
-            };
-            await saveCheckResult(accountResult);
-            logger_acc.info(`自动恢复 sid 后 SW API 探测成功: unread=${apiResult2.unreadCount}`);
-            return accountResult;
+      // sw-api 模式且 API 失败时自动恢复 sid
+      // 所有触发源（含 alarm）均允许，alarm 受 10 分钟冷却期限制
+      if (mode === 'sw-api') {
+        const swCooldown = await canAutoRecover(account.provider, context);
+        if (swCooldown.allowed) {
+          // 尝试自动打开后台标签恢复 sid，然后重试 API
+          const rec = await autoRecoverSid(account.provider);
+          if (rec.success) {
+            const apiResult2 = await runSWApiProbe(account.provider, settings);
+            if (apiResult2.success) {
+              const accountResult = {
+                email: account.email,
+                provider: account.provider,
+                authVerified: true,
+                needsAuth: false,
+                allFailed: false,
+                source: context.source,
+                method: 'sw-api',
+                unreadCount: apiResult2.unreadCount,
+                unreadSource: apiResult2.unreadSource,
+                detail: apiResult2.detail,
+                timestamp: new Date().toISOString(),
+              };
+              await saveCheckResult(accountResult);
+              logger_acc.info(`自动恢复 sid 后 SW API 探测成功: unread=${apiResult2.unreadCount}`);
+              return accountResult;
+            }
           }
+        } else {
+          logger_acc.debug(`sw-api 自动恢复受冷却期限制，跳过（剩余 ${Math.round(swCooldown.remainingMs / 60000)} 分钟）`);
         }
       }
     }
@@ -645,14 +681,16 @@ async function checkSingleAccount(account, settings, context) {
       }
 
       // 标签页关闭后自动检查。
-      // 仅用户主动触发（手动全量检查等）时自动打开邮箱后台标签读未读；
-      // 后台定时检查（alarm）绝不自动开可见标签，改为标记「需手动同步会话」。
-      if ((mode === 'hybrid' || mode === 'content-script') && isUserInitiated(context)) {
-        // 跳过不支持内容脚本探测的提供商
-        if (!CONTENT_PROBE_PROVIDERS.has(account.provider)) {
-          logger_acc.warn(`提供商 ${account.provider} 不支持内容脚本探测，跳过自动恢复`);
-        } else {
-          logger_acc.info('API 与现有标签探测均失败，尝试自动打开邮箱后台标签读取未读...');
+      // 自动恢复会话：当 API 失败且无已打开邮箱标签时，自动打开后台邮箱标签读取未读数。
+      // - 用户主动触发 → 直接允许自动恢复（读取后立即关闭标签）
+      // - alarm 自动触发 → 也允许自动恢复（此前版本不允许导致自动检查总失败），
+      //   但受 10 分钟冷却期限制，避免反复弹标签打扰用户。
+      // 标签打开为后台方式（active:false 不抢焦点），读取完成后立即关闭。
+      {
+        // 检查冷却控制（用户触发直接放行，alarm 受 10 分钟冷却期限制）
+        const cooldown = await canAutoRecover(account.provider, context);
+        if (cooldown.allowed) {
+          logger_acc.info('API 与现有标签探测均失败，自动打开邮箱后台标签读取未读...');
           // 自动打开/复用邮箱后台标签，由内容脚本 in-origin 读取未读（最可靠路径）
           const auto = await runContentProbe(account.provider, { openTab: true, closeAfterProbe: true });
           const ap = (auto && auto.probe) || {};
@@ -721,9 +759,14 @@ async function checkSingleAccount(account, settings, context) {
               return accountResult;
             }
           }
+
+          // 自动恢复也失败了（可能邮箱确实未登录或网络不可达）
+          logger_acc.warn('自动恢复失败：无法从邮箱页面读取未读数或提取 sid');
+        } else {
+          // 冷却期限制，暂不自动打开标签
+          logger_acc.debug(`自动恢复处于冷却期，剩余 ${Math.round(cooldown.remainingMs / 60000)} 分钟（source=${context.source || 'unknown'}）`);
         }
       }
-
     }
 
     // ===== 所有方法都失败 =====
@@ -743,14 +786,14 @@ async function checkSingleAccount(account, settings, context) {
       error: unsupported
         ? `提供商 ${account.provider} 暂不支持自动读取`
         : (autoCheck && !userTriggered)
-          ? '会话已过期：自动检查无法获取邮箱未读数（无有效会话，后台检查不会自动打开标签）'
+          ? '自动检查失败：无法读取邮箱未读数（已尝试自动恢复会话但未成功）'
           : '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
       detail: {
         mode,
         hint: unsupported
           ? `提供商 ${account.provider} 尚未接入内容脚本或 API 探测，暂时无法自动读取未读数。`
           : (autoCheck && !userTriggered)
-            ? '请在浏览器中打开并登录对应邮箱网页，扩展会自动同步会话并恢复后台自动检查。'
+            ? '扩展已尝试自动恢复邮箱会话但未成功。请打开并登录对应邮箱网页一次，之后扩展将恢复正常自动检查。'
             : '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
         action: unsupported ? 'providerNotSupported' : 'openMailboxAndSync',
       },
