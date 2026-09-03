@@ -605,6 +605,23 @@ async function runFullCheck() {
   }
 }
 
+
+// 「全可能性」后台无标签测试
+async function runPossibilityTest() {
+  const btn = document.getElementById('btn-possibility');
+  const origText = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 测试中（请耐心等待，涉及多接口）...'; }
+  showProbeResult('🧪 全可能性后台测试', { message: '正在逐策略探测 163/QQ 各接口，结果将输出为日志，请稍候...' });
+  try {
+    const result = await sendMessage({ type: 'possibilityTest', provider: 'all' });
+    showProbeResult('🧪 全可能性后台测试结果', result);
+  } catch (err) {
+    showProbeResult('全可能性测试失败', { success: false, error: err.message });
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText || '🧪 全可能性后台测试'; }
+  }
+}
+
 // ========== 结果显示 ==========
 function showProbeResult(title, data) {
   const container = document.getElementById('probe-result');
@@ -818,6 +835,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-probe-qq')?.addEventListener('click', () => runSWProbe('qq'));
   document.getElementById('btn-check-bridge')?.addEventListener('click', runCheckBridge);
   document.getElementById('btn-refresh-session')?.addEventListener('click', runRefreshSession);
+  document.getElementById('btn-possibility')?.addEventListener('click', runPossibilityTest);
 
   // 设置标签页
   document.getElementById('btn-add-account')?.addEventListener('click', _addAccount);
