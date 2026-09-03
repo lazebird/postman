@@ -10,15 +10,15 @@ export const PROVIDERS = {
   GMAIL: 'gmail',
 };
 
-// 会话密钥（存储于 chrome.storage.session，浏览器重启即清空）
+// 会话密钥（存储于 chrome.storage.local，持久化跨浏览器重启保留）
 export const SESSION_KEYS = {
   SID_163: 'sid_163',
   SID_QQ: 'sid_qq',
   SESSION_EXPIRY: 'session_expiry',
 };
 
-// sid 缓存有效期：12 小时（原 30 分钟过短，导致无标签时后台检查频繁失效）
-export const SID_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+// sid 缓存有效期：7 天（webmail 会话通常持续数周，持久化后无需频繁重新同步）
+export const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 /**
  * 提供商配置

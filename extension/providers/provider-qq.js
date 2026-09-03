@@ -2,7 +2,7 @@
  * provider-qq.js - QQ邮箱未读接口探测实现
  *
  * 混合方案下：
- *   1. 优先从 chrome.storage.session 读取缓存 sid（内容脚本提取）
+ *   1. 优先从 chrome.storage.local 读取缓存 sid（内容脚本提取）
  *   2. 带 sid 调 API 获取未读数
  *
  * 修复：不再因无缓存 sid 就直接中止探测。
@@ -93,15 +93,15 @@ export async function probeQQ(options = {}) {
 }
 
 /**
- * 从 chrome.storage.session 读取 QQ 的缓存 sid
+ * 从 chrome.storage.local 读取 QQ 的缓存 sid
  */
 async function getSidFromStorage() {
   try {
-    const data = await chrome.storage.session.get(['sid_qq', 'sid_qq_expiry']);
+    const data = await chrome.storage.local.get(['sid_qq', 'sid_qq_expiry']);
     if (data.sid_qq) {
       if (data.sid_qq_expiry && Date.now() > data.sid_qq_expiry) {
         logger.debug('缓存 sid 已过期');
-        await chrome.storage.session.remove(['sid_qq', 'sid_qq_expiry']);
+        await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
         return { sid: null, source: 'expired' };
       }
       return { sid: data.sid_qq, source: 'cache' };
@@ -189,7 +189,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     if (authInfo.authBlocked) {
       logger_ep.warn('QQ 会话已失效或未登录，清除缓存 sid');
       try {
-        await chrome.storage.session.remove(['sid_qq', 'sid_qq_expiry']);
+        await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
       } catch (e) { /* ignore */ }
     }
 

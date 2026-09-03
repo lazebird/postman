@@ -2,7 +2,7 @@
  * provider-163.js - 163邮箱未读接口探测实现
  *
  * 混合方案下：
- *   1. 优先从 chrome.storage.session 读取缓存 sid（内容脚本提取）
+ *   1. 优先从 chrome.storage.local 读取缓存 sid（内容脚本提取）
  *   2. 带 sid 调 API 获取未读数
  *   3. 解析响应中的未读消息
  *
@@ -93,16 +93,16 @@ export async function probe163(options = {}) {
 }
 
 /**
- * 从 chrome.storage.session 读取 163 的缓存 sid
+ * 从 chrome.storage.local 读取 163 的缓存 sid
  */
 async function getSidFromStorage() {
   try {
-    const data = await chrome.storage.session.get(['sid_163', 'sid_163_expiry']);
+    const data = await chrome.storage.local.get(['sid_163', 'sid_163_expiry']);
     if (data.sid_163) {
-      // 检查过期（12 小时 TTL，由 SW 统一管理）
+      // 检查过期（7 天 TTL，由 SW 统一管理）
       if (data.sid_163_expiry && Date.now() > data.sid_163_expiry) {
         logger.debug('缓存 sid 已过期');
-        await chrome.storage.session.remove(['sid_163', 'sid_163_expiry']);
+        await chrome.storage.local.remove(['sid_163', 'sid_163_expiry']);
         return { sid: null, source: 'expired' };
       }
       return { sid: data.sid_163, source: 'cache' };
@@ -200,7 +200,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     if (authInfo.authBlocked) {
       logger_ep.warn('163 会话已失效，清除缓存的 sid');
       try {
-        await chrome.storage.session.remove(['sid_163', 'sid_163_expiry']);
+        await chrome.storage.local.remove(['sid_163', 'sid_163_expiry']);
       } catch (e) { /* ignore */ }
     }
 

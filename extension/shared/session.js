@@ -2,8 +2,8 @@
  * session.js - 会话管理工具（简化版）
  *
  * 混合方案下 sid 来源：
- *   - 内容脚本从邮箱页面 URL / DOM 提取 sid → 缓存到 chrome.storage.session
- *   - provider 直接从 storage.session 读取缓存 sid → 调 API
+ *   - 内容脚本从邮箱页面 URL / DOM 提取 sid → 缓存到 chrome.storage.local
+ *   - provider 直接从 storage.local 读取缓存 sid → 调 API
  *
  * 本模块提供纯工具函数（URL/内容解析、Headers 转换等），
  * 不再负责从远程页面主动获取 sid（因为 163 新版 SPA 页面无法在静态 HTML 中提取）。
@@ -74,7 +74,7 @@ export function extractSidFromContent(text) {
 export async function clearSid(provider) {
   const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
   try {
-    await chrome.storage.session.remove([key, `${key}_expiry`]);
+    await chrome.storage.local.remove([key, `${key}_expiry`]);
   } catch (e) {
     logger.warn(`清除 ${provider} sid 失败: ${e.message}`);
   }

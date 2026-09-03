@@ -1,19 +1,18 @@
 /**
  * service-worker.js - MV3 Service Worker 入口
  *
- * 混合方案（v0.6.0）：
- *   1. 内容脚本在邮箱页面（同源）提取 sid → 缓存到 chrome.storage.session
+ * 混合方案（v0.7.0）：
+ *   1. 内容脚本在邮箱页面（同源）提取 sid → 缓存到 chrome.storage.local
  *   2. SW 使用缓存 sid + 登录 Cookie 调用 webmail 内部 API → 后台独立检查
  *   3. 无缓存 sid 或 API 失败 → 回退到内容脚本 DOM 探测（需页面打开）
  *
- * v0.6.0 修复（本版核心）：标签页关闭时全量/自动检查均能执行
- *   - 原因：hybrid 模式自动恢复后，抛弃了内容脚本已读到的未读，转而重试不可靠的 SW API
- *   - 修复：自动打开邮箱后台标签，优先采用内容脚本 in-origin 读到的未读数
+ * v0.7.0 修复（本版核心）：自动检查绝不自动打开可见标签
+ *   - 后台定时检查（alarm）失败时仅标记「需手动同步会话」，不自动开标签
+ *   - 仅用户主动触发（手动检查/同步）才打开邮箱标签获取 sid
+ *   - sid 持久化至 chrome.storage.local（7天 TTL），浏览器重启不丢失
  *
- * v0.5.0 修复：不再依赖标签页开启即可独立运行
- *   - 163/QQ provider 不再因缺少缓存 sid 而直接中止 API 探测
- *   - 自动检查（alarm）与全量检查失败时，自动开隐藏标签页恢复 sid
- *   - 延长 sid 缓存有效期（30min → 12h），降低频繁失效概率
+ * v0.6.0：标签页关闭时全量/自动检查均能执行
+ * v0.5.0：不再依赖标签页开启即可独立运行，延长 sid 缓存有效期
  */
 
 import { createLogger } from '../shared/debug.js';
@@ -26,8 +25,16 @@ import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 const logger = createLogger('service-worker');
 
 // ===== 常量 =====
-// sid 缓存有效期：12 小时（原为 30 分钟，过短导致后台检查频繁失效）
-const SID_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+// sid 缓存有效期：7 天（webmail 会话通常持续数周，持久化后减少频繁同步）
+const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// 判断检查是否为用户主动触发（只有用户主动触发时才允许自动开标签）
+// 用户主动触发来源：manual（Popup 全量检查）、manual-test（Popup/Options 单提供商测试）
+// 自动触发来源：alarm（后台定时检查）—— 此类检查绝不自动打开可见标签
+function isUserInitiated(context) {
+  const src = (context && context.source) || 'unknown';
+  return src === 'manual' || src === 'manual-test';
+}
 
 // ===== 事件监听 =====
 
@@ -153,7 +160,7 @@ async function handleMessage(message, sender) {
       if (sid) {
         try {
           const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
-          await chrome.storage.session.set({
+          await chrome.storage.local.set({
             [key]: sid,
             [`${key}_expiry`]: Date.now() + SID_TTL_MS,
           });
@@ -457,7 +464,7 @@ async function probeWithRetry(provider, tabId, maxAttempts = 10, intervalMs = 20
 async function cacheProviderSid(provider, sid) {
   const key = provider === PROVIDERS.QQ ? 'sid_qq' : provider === PROVIDERS.NETEASE_163 ? 'sid_163' : `sid_${provider}`;
   try {
-    await chrome.storage.session.set({
+    await chrome.storage.local.set({
       [key]: sid,
       [`${key}_expiry`]: Date.now() + SID_TTL_MS,
     });
@@ -475,9 +482,9 @@ async function cacheProviderSid(provider, sid) {
 async function getCachedSid(provider) {
   const key = provider === PROVIDERS.QQ ? 'sid_qq' : provider === PROVIDERS.NETEASE_163 ? 'sid_163' : `sid_${provider}`;
   try {
-    const data = await chrome.storage.session.get([key, `${key}_expiry`]);
+    const data = await chrome.storage.local.get([key, `${key}_expiry`]);
     if (data[key]) {
-      // 检查过期（TTL 12 小时）
+      // 检查过期（TTL 7 天）
       if (data[`${key}_expiry`] && Date.now() > data[`${key}_expiry`]) {
         logger.debug(`${provider} sid 已过期`);
         return null;
@@ -546,8 +553,9 @@ async function checkSingleAccount(account, settings, context) {
         await clearCachedSid(account.provider);
       }
 
-      // 如果 sw-api 模式且 API 失败 → 尝试自动恢复 sid
-      if (mode === 'sw-api') {
+      // 如果 sw-api 模式且 API 失败 → 仅用户主动触发时尝试自动恢复 sid
+      // （自动检查不自动开标签，避免影响用户体验）
+      if (mode === 'sw-api' && isUserInitiated(context)) {
         // 尝试自动打开后台标签恢复 sid，然后重试 API
         const rec = await autoRecoverSid(account.provider);
         if (rec.success) {
@@ -637,9 +645,9 @@ async function checkSingleAccount(account, settings, context) {
       }
 
       // 标签页关闭后自动检查。
-      // 对支持内容脚本的提供商（163/QQ）：自动打开邮箱后台标签，内容脚本读未读。
-      // 对不支持的提供商（USTC/Gmail）：直接跳过，不尝试开标签（会徒增视觉干扰）。
-      if ((mode === 'hybrid' || mode === 'content-script') && context.source !== 'content-probe' && context.source !== 'unknown') {
+      // 仅用户主动触发（手动全量检查等）时自动打开邮箱后台标签读未读；
+      // 后台定时检查（alarm）绝不自动开可见标签，改为标记「需手动同步会话」。
+      if ((mode === 'hybrid' || mode === 'content-script') && isUserInitiated(context)) {
         // 跳过不支持内容脚本探测的提供商
         if (!CONTENT_PROBE_PROVIDERS.has(account.provider)) {
           logger_acc.warn(`提供商 ${account.provider} 不支持内容脚本探测，跳过自动恢复`);
@@ -721,6 +729,8 @@ async function checkSingleAccount(account, settings, context) {
     // ===== 所有方法都失败 =====
     // 区分「不支持提供商」与「未授权/无法读取」两种情况
     const unsupported = !CONTENT_PROBE_PROVIDERS.has(account.provider);
+    const userTriggered = isUserInitiated(context);
+    const autoCheck = context.source === 'alarm';
     const accountResult = {
       email: account.email,
       provider: account.provider,
@@ -732,12 +742,16 @@ async function checkSingleAccount(account, settings, context) {
       needsTab: unsupported ? false : true,
       error: unsupported
         ? `提供商 ${account.provider} 暂不支持自动读取`
-        : '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
+        : (autoCheck && !userTriggered)
+          ? '会话已过期：自动检查无法获取邮箱未读数（无有效会话，后台检查不会自动打开标签）'
+          : '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
       detail: {
         mode,
         hint: unsupported
           ? `提供商 ${account.provider} 尚未接入内容脚本或 API 探测，暂时无法自动读取未读数。`
-          : '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
+          : (autoCheck && !userTriggered)
+            ? '请在浏览器中打开并登录对应邮箱网页，扩展会自动同步会话并恢复后台自动检查。'
+            : '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
         action: unsupported ? 'providerNotSupported' : 'openMailboxAndSync',
       },
       timestamp: new Date().toISOString(),
@@ -915,7 +929,7 @@ async function autoRecoverSid(provider, { keepTabOpen = false } = {}) {
 async function clearCachedSid(provider) {
   const key = provider === PROVIDERS.QQ ? 'sid_qq' : provider === PROVIDERS.NETEASE_163 ? 'sid_163' : `sid_${provider}`;
   try {
-    await chrome.storage.session.remove([key, `${key}_expiry`]);
+    await chrome.storage.local.remove([key, `${key}_expiry`]);
     logger.info(`已清除 ${provider} 的 sid 缓存`);
   } catch (e) {
     logger.warn(`清除 ${provider} sid 失败: ${e.message}`);

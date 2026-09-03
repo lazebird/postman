@@ -9,7 +9,7 @@
  *  │ 账号配置 accounts            │ chrome.storage.local（持久化）          │ ✅ 保留              │
  *  │ 用户设置 settings            │ chrome.storage.local（持久化）          │ ✅ 保留              │
  *  │ 检查历史 checkResults        │ chrome.storage.local（持久化）          │ ✅ 保留              │
- *  │ sid 会话令牌                 │ chrome.storage.session（会话级）        │ ⚠️ 清空，可自动重建  │
+ *  │ sid 会话令牌                 │ chrome.storage.local（持久化）         │ ✅ 保留              │
  *  │ 调试日志 debugLogs           │ chrome.storage.session（会话级）        │ ⚠️ 清空              │
  *  └──────────────────────────────┴─────────────────────────────────────────┴──────────────────────┘
  *
@@ -17,8 +17,8 @@
  *  - 账号配置、用户设置、检查历史等【用户数据】一律写入 chrome.storage.local，
  *    该存储区在扩展更新（update）时不丢失，卸载前始终保留 —— 避免"每次插件更新后
  *    账号配置丢失、需重新添加"的体验问题。
- *  - sid 会话令牌属【短期会话数据】（30 分钟 TTL），即便 chrome.storage.session
- *    在扩展更新/浏览器重启后被清空，探测流程也会自动重新获取 sid，无需用户干预。
+ *  - sid 会话令牌持久化到 chrome.storage.local（7 天 TTL），浏览器重启不清空，
+ *    减少因 sid 丢失导致的后台检查失败与频繁自动打开标签。
  *  - MV3 Service Worker 上下文【没有】页面级 localStorage，跨上下文共享用户数据
  *    只能使用 chrome.storage.local（等价于持久化的 localStorage 语义）。
  *
