@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Edge Mail Notifier - PoC",
-  "version": "0.3.0",
-  "description": "方案C：内容脚本 in-origin 探测（绕开 SW 跨域 Cookie/sid 死结）",
+  "name": "Edge Mail Notifier",
+  "version": "0.4.0",
+  "description": "混合方案：内容脚本提取sid + SW独立API探测，实现免常驻邮箱页的后台未读检查",
   "minimum_chrome_version": "116",
   "permissions": [
     "alarms",
@@ -39,7 +39,7 @@
   ],
   "action": {
     "default_popup": "popup/index.html",
-    "default_title": "Mail Notifier PoC"
+    "default_title": "Mail Notifier"
   },
   "options_page": "options/index.html"
 }

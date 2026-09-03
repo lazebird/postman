@@ -169,8 +169,9 @@ if (btnRefreshSession) {
         results[provider === 'netease_163' ? '163邮箱' : 'QQ邮箱'] = {
           loggedIn: r.loggedIn,
           needsAuth: r.needsAuth,
-          source: r.session?.source || 'none',
-          detail: r.session?.detail || {},
+          hasSid: r.hasSid,
+          sid: r.sid || null,
+          contentUnread: r.contentProbe?.probe?.unreadCount ?? null,
         };
       }
       showProbeResult('会话刷新结果', results);
@@ -221,6 +222,9 @@ async function refreshStatus() {
   const items = [
     ['账户数量', String(status.accountCount || 0)],
     ['检查间隔', `${status.settings?.checkIntervalMinutes || 5} 分钟`],
+    ['检查模式', providerMode(status.settings?.checkMode || 'hybrid')],
+    ['163 sid', status.cachedSids?.netease_163 ? '✅ 已缓存' : '❌ 未同步'],
+    ['QQ sid', status.cachedSids?.qq ? '✅ 已缓存' : '❌ 未同步'],
     ['闹钟', status.alarmConfigured ? `✅ ${status.alarmInfo?.periodInMinutes || '?'}分钟/次` : '❌ 未配置'],
   ];
 
@@ -265,6 +269,11 @@ async function refreshStatus() {
     });
     accountsList.appendChild(ul);
   }
+}
+
+function providerMode(mode) {
+  const modes = { 'hybrid': '混合', 'content-script': '内容脚本', 'sw-api': 'SW API' };
+  return modes[mode] || mode;
 }
 
 function providerName(provider) {

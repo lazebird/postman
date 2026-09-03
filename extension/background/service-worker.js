@@ -1,14 +1,14 @@
 /**
  * service-worker.js - MV3 Service Worker 入口
  *
- * 方案 C PoC 核心（v0.3.0）：
- *   经多轮验证，纯 SW 跨源 fetch 无法复用 163/QQ 的 SameSite=Lax 登录 Cookie，
- *   因此切换到「内容脚本 in-origin 探测」：
- *     1. 用户在真实邮箱页面打开/刷新时，内容脚本自动注入并上报基线
- *     2. SW 可发送探测指令给已加载的内容脚本，读取页面真实未读数
- *     3. 附带 Cookie 诊断（chrome.cookies），用数据判定会话可复用性
+ * 混合方案（v0.4.0）：
+ *   1. 内容脚本在邮箱页面（同源）提取 sid → 缓存到 chrome.storage.session
+ *   2. SW 使用缓存 sid + 登录 Cookie 调用 webmail 内部 API → 后台独立检查
+ *   3. 无缓存 sid 或 API 失败 → 回退到内容脚本 DOM 探测（需页面打开）
  *
- * 仍保留 alarms + 账户管理 + 全量检查调度框架。
+ * 相比纯内容脚本方案，混合方案的核心优势：
+ *   - 只需用户偶尔打开邮箱页面「激活」一次会话
+ *   - 之后 SW 可定期调用 API 获取未读数，无需持续保持邮箱页面打开
  */
 
 import { createLogger } from '../shared/debug.js';
@@ -89,7 +89,7 @@ async function handleMessage(message, sender) {
     case 'diagnoseCookies':
       return await runCookieDiagnosis(message.provider);
 
-    // ===== 方案 C：内容脚本 in-origin 探测 =====
+    // ===== 混合方案：内容脚本 in-origin 探测 =====
     case 'probeContent163':
     case 'probeContentQQ': {
       const provider = message.type === 'probeContent163' ? 'netease_163' : 'qq';
@@ -99,9 +99,31 @@ async function handleMessage(message, sender) {
     case 'openMailboxTab':
       return await openMailboxTab(message.provider);
 
-    case 'contentPageReady':
-      logger.info(`内容脚本就绪 @ ${message.detail?.host || 'unknown'}`);
+    case 'contentPageReady': {
+      // 内容脚本上报：如果有 sid，缓存下来供 SW 后续独立调用
+      const sid = message.detail?.sid;
+      const provider = message.detail?.provider ||
+                       (message.detail?.host?.includes('qq.com') ? 'qq' : 'netease_163');
+      if (sid) {
+        try {
+          const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+          await chrome.storage.session.set({
+            [key]: sid,
+            [`${key}_expiry`]: Date.now() + 30 * 60 * 1000,
+          });
+          logger.info(`从内容脚本缓存 ${provider} sid (来自页面 URL)`);
+        } catch (e) {
+          logger.warn(`缓存 ${provider} sid 失败: ${e.message}`);
+        }
+      }
+      const unread = message.detail?.unreadCount;
+      if (typeof unread === 'number') {
+        logger.info(`内容脚本上报: ${provider} 未读=${unread} @ ${message.detail?.host}`);
+      } else {
+        logger.debug(`内容脚本就绪 @ ${message.detail?.host || 'unknown'}`);
+      }
       return { success: true };
+    }
 
     case 'settingsChanged':
       await setupAlarms();
@@ -120,7 +142,7 @@ async function handleMessage(message, sender) {
   }
 }
 
-// ===== 方案 C 内容脚本探测 =====
+// ===== 混合方案：内容脚本探测 & sid 管理 =====
 
 const PROVIDER_HOME = {
   netease_163: 'https://mail.163.com/',
@@ -128,7 +150,7 @@ const PROVIDER_HOME = {
 };
 
 /**
- * 打开目标邮箱首页（用于注入内容脚本并获取真实登录态）
+ * 打开目标邮箱首页（用于注入内容脚本并获取真实登录态 + sid）
  */
 async function openMailboxTab(provider) {
   const url = PROVIDER_HOME[provider];
@@ -139,17 +161,24 @@ async function openMailboxTab(provider) {
 }
 
 /**
- * 向已打开的目标邮箱标签内容脚本发送探测指令
+ * 查找已打开的目标邮箱标签
  */
-async function probeTabContent(provider, tabId, timeoutMs = 12000) {
+async function findMailboxTab(provider) {
   const url = PROVIDER_HOME[provider];
+  const tabs = await chrome.tabs.query({});
+  return tabs.find(t => t.url && t.url.startsWith(url));
+}
+
+/**
+ * 向已打开的邮箱标签内容脚本发送探测指令
+ */
+async function probeTabContent(provider, tabId, timeoutMs = 15000) {
   const type = provider === 'qq' ? 'probeContentQQ' : 'probeContent163';
 
-  // 若未指定 tab，则查找已打开的对应邮箱标签
+  // 若未指定 tab，查找已打开的目标邮箱标签
   let targetTabId = tabId;
   if (!targetTabId) {
-    const tabs = await chrome.tabs.query({});
-    const match = tabs.find(t => t.url && t.url.startsWith(url));
+    const match = await findMailboxTab(provider);
     if (match) targetTabId = match.id;
   }
 
@@ -183,19 +212,23 @@ async function probeTabContent(provider, tabId, timeoutMs = 12000) {
 }
 
 /**
- * 运行一次内容脚本探测：优先用已有邮箱标签，必要时自动打开。
+ * 运行内容脚本探测（优先用已有邮箱标签，必要时自动打开）
  */
 async function runContentProbe(provider, opts = {}) {
-  logger.info(`运行内容脚本探测: provider=${provider}, openTab=${opts.openTab}`);
+  logger.info(`运行内容脚本探测: provider=${provider}, openTab=${opts.openTab !== false}`);
 
   // 先看是否有现成标签
   let probe = await probeTabContent(provider, null);
-  if (!probe.success && probe.needsTab && opts.openTab) {
+  if (!probe.success && probe.needsTab && opts.openTab !== false) {
     logger.info(`无现成邮箱标签，自动打开 ${provider} 邮箱页`);
     await openMailboxTab(provider);
-    // 等待页面加载与内容脚本注入
     await new Promise(r => setTimeout(r, 3500));
     probe = await probeTabContent(provider, null);
+  }
+
+  // 如果内容脚本返回了 sid，缓存供 SW 独立使用
+  if (probe.success && probe.sid) {
+    await cacheProviderSid(provider, probe.sid);
   }
 
   return {
@@ -204,6 +237,45 @@ async function runContentProbe(provider, opts = {}) {
     method: 'content-script',
     probe,
   };
+}
+
+/**
+ * 缓存某提供商的 sid
+ */
+async function cacheProviderSid(provider, sid) {
+  const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+  try {
+    await chrome.storage.session.set({
+      [key]: sid,
+      [`${key}_expiry`]: Date.now() + 30 * 60 * 1000,
+    });
+    logger.info(`已缓存 ${provider} sid (来自内容脚本)`);
+    return true;
+  } catch (e) {
+    logger.warn(`缓存 ${provider} sid 失败: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * 读取某提供商缓存的 sid
+ */
+async function getCachedSid(provider) {
+  const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+  try {
+    const data = await chrome.storage.session.get([key, `${key}_expiry`]);
+    if (data[key]) {
+      // 检查过期（30 分钟 TTL）
+      if (data[`${key}_expiry`] && Date.now() > data[`${key}_expiry`]) {
+        logger.debug(`${provider} sid 已过期`);
+        return null;
+      }
+      return data[key];
+    }
+  } catch (e) {
+    logger.warn(`读取 ${provider} sid 失败: ${e.message}`);
+  }
+  return null;
 }
 
 /**
@@ -216,6 +288,204 @@ async function runCookieDiagnosis(provider) {
 
 // ===== 核心检查逻辑 =====
 
+/**
+ * 混合模式检查单个账户：
+ *   1. 尝试用缓存的 sid 调 API（无需页面打开）
+ *   2. 若 API 失败或无缓存 sid → 内容脚本 DOM 探测
+ *   3. 若内容脚本不可用（无页面）→ 尝试自动打开页面获取 sid
+ */
+async function checkSingleAccount(account, settings, context) {
+  const logger_acc = createLogger(`account:${account.email}`);
+  logger_acc.info(`开始检查账户 ${account.email} (provider=${account.provider})`);
+
+  const mode = settings.checkMode || 'hybrid';
+
+  try {
+    // ===== 模式 1：SW API 优先（hybrid / sw-api） =====
+    if (mode === 'hybrid' || mode === 'sw-api') {
+      // 先看有没有缓存 sid
+      const cachedSid = await getCachedSid(account.provider);
+      logger_acc.debug(`缓存 sid 状态: ${cachedSid ? '存在' : '无'}`);
+
+      if (cachedSid) {
+        // 使用缓存的 sid 调 API
+        const apiResult = await runSWApiProbe(account.provider, settings);
+        if (apiResult.success) {
+          const accountResult = {
+            email: account.email,
+            provider: account.provider,
+            authVerified: true,
+            needsAuth: false,
+            allFailed: false,
+            source: context.source,
+            method: 'sw-api',
+            unreadCount: apiResult.unreadCount,
+            unreadSource: apiResult.unreadSource,
+            detail: apiResult.detail,
+            timestamp: new Date().toISOString(),
+          };
+          await saveCheckResult(accountResult);
+          logger_acc.info(`SW API 探测成功: unread=${apiResult.unreadCount}`);
+          return accountResult;
+        }
+
+        // API 失败，sid 可能失效
+        if (apiResult.sidExpired) {
+          logger_acc.warn('缓存的 sid 已失效，尝试刷新');
+          await clearCachedSid(account.provider);
+        }
+      }
+
+      // 无缓存 sid 或 API 失败
+      // 如果是 sw-api 模式（不需要页面），返回失败
+      if (mode === 'sw-api' && !cachedSid) {
+        logger_acc.warn('sw-api 模式但无缓存 sid，无法独立探测');
+      }
+    }
+
+    // ===== 模式 2：内容脚本探测 =====
+    if (mode === 'hybrid' || mode === 'content-script') {
+      const contentResult = await runContentProbe(account.provider, { openTab: false });
+
+      if (contentResult.probe && contentResult.probe.success &&
+          typeof contentResult.probe.unreadCount === 'number') {
+        const accountResult = {
+          email: account.email,
+          provider: account.provider,
+          authVerified: true,
+          needsAuth: false,
+          allFailed: false,
+          source: context.source,
+          method: 'content-script',
+          unreadCount: contentResult.probe.unreadCount,
+          unreadSource: contentResult.probe.unreadSource,
+          detail: contentResult.probe.detail,
+          timestamp: new Date().toISOString(),
+        };
+        await saveCheckResult(accountResult);
+        logger_acc.info(`内容脚本探测成功: unread=${contentResult.probe.unreadCount}`);
+        return accountResult;
+      }
+
+      // 内容脚本不可用，且 hybrid 模式下 API 也失败了
+      // 此时无法独立检查，标记为 needsTab
+      logger_acc.warn('内容脚本不可用，无法获取未读数', {
+        contentError: contentResult.probe?.error,
+        needsTab: contentResult.probe?.needsTab,
+      });
+    }
+
+    // ===== 所有方法都失败 =====
+    const accountResult = {
+      email: account.email,
+      provider: account.provider,
+      authVerified: false,
+      needsAuth: true,
+      allFailed: true,
+      source: context.source,
+      method: 'none',
+      needsTab: true,
+      error: '无法获取未读数：无缓存 sid 且无打开的邮箱页面',
+      detail: {
+        mode,
+        hint: '请打开邮箱网页登录一次，扩展会自动提取会话信息。之后可后台自动检查。',
+      },
+      timestamp: new Date().toISOString(),
+    };
+    await saveCheckResult(accountResult);
+    return accountResult;
+  } catch (err) {
+    logger_acc.error(`账户 ${account.email} 检查异常: ${err.message}`);
+    const accountResult = {
+      email: account.email,
+      provider: account.provider,
+      success: false,
+      authVerified: false,
+      needsAuth: false,
+      allFailed: true,
+      error: err.message,
+      source: context.source,
+      timestamp: new Date().toISOString(),
+    };
+    await saveCheckResult(accountResult);
+    return accountResult;
+  }
+}
+
+/**
+ * 使用 SW fetch + 缓存 sid 调用邮箱 API
+ * 需要: chrome.storage.session 中缓存了 sid
+ */
+async function runSWApiProbe(provider, settings) {
+  try {
+    // 获取缓存 sid
+    const cachedSid = await getCachedSid(provider);
+    if (!cachedSid) {
+      return { success: false, sidExpired: false, error: 'No cached sid' };
+    }
+
+    // 直接调用 provider 的探测接口（provider 内部会读取缓存 sid）
+    const commonOpts = {
+      endpointNames: settings.enabledEndpoints?.[provider] || [],
+      captureRequestHeaders: false,
+    };
+
+    let providerResult;
+    switch (provider) {
+      case PROVIDERS.NETEASE_163:
+        providerResult = await probe163(commonOpts);
+        break;
+      case PROVIDERS.QQ:
+        providerResult = await probeQQ(commonOpts);
+        break;
+      default:
+        return { success: false, error: `Unsupported provider: ${provider}` };
+    }
+
+    // 解析结果
+    const endpointResults = providerResult.results || [];
+    const successfulEndpoints = endpointResults.filter(r => r.success && typeof r.unreadCount === 'number');
+
+    if (successfulEndpoints.length > 0) {
+      return {
+        success: true,
+        unreadCount: successfulEndpoints[0].unreadCount,
+        unreadSource: `api:${successfulEndpoints[0].endpointName}`,
+        detail: providerResult,
+      };
+    }
+
+    // 检查是否 sid 过期 / 认证被拦截
+    const authBlocked = endpointResults.some(r => r.authBlocked);
+    return {
+      success: false,
+      sidExpired: authBlocked,
+      authBlocked,
+      error: 'API 探测未返回未读数',
+      detail: providerResult,
+    };
+  } catch (err) {
+    logger.error(`SW API 探测异常: ${err.message}`, { provider });
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * 清除某提供商的 sid 缓存
+ */
+async function clearCachedSid(provider) {
+  const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+  try {
+    await chrome.storage.session.remove([key, `${key}_expiry`]);
+    logger.info(`已清除 ${provider} 的 sid 缓存`);
+  } catch (e) {
+    logger.warn(`清除 ${provider} sid 失败: ${e.message}`);
+  }
+}
+
+/**
+ * 全量检查所有账户
+ */
 async function runAllChecks(context = {}) {
   const source = context.source || 'unknown';
   logger.info(`开始全量检查, 触发源=${source}`);
@@ -245,78 +515,15 @@ async function runAllChecks(context = {}) {
     results: allResults,
   };
 
-  logger.info('全量检查完成', { authVerified: summary.successfulChecks, needsAuth: summary.authBlocked });
+  logger.info('全量检查完成', {
+    authVerified: summary.successfulChecks,
+    needsAuth: summary.authBlocked,
+    methods: allResults.map(r => r.method || 'none').join(','),
+  });
+
   await saveCheckResult(summary);
   await updateBadge(summary);
   return summary;
-}
-
-async function checkSingleAccount(account, settings, context) {
-  const logger_acc = createLogger(`account:${account.email}`);
-  logger_acc.info(`开始检查账户 ${account.email} (provider=${account.provider})`);
-
-  try {
-    // 方案 C：优先用内容脚本探测真实页面
-    const contentResult = await runContentProbe(account.provider, { openTab: false });
-
-    // 若内容脚本探测成功拿到未读数，直接作为结果
-    if (contentResult.probe && contentResult.probe.success && typeof contentResult.probe.unreadCount === 'number') {
-      const accountResult = {
-        email: account.email,
-        provider: account.provider,
-        authVerified: true,
-        needsAuth: false,
-        allFailed: false,
-        source: context.source,
-        method: 'content-script',
-        unreadCount: contentResult.probe.unreadCount,
-        unreadSource: contentResult.probe.unreadSource,
-        detail: contentResult.probe.detail,
-        contentResult,
-      };
-      await saveCheckResult(accountResult);
-      return accountResult;
-    }
-
-    // 内容脚本不可用（无打开标签）→ 回退到原 SW 接口探测（记录到诊断，便于对比）
-    logger_acc.warn('内容脚本不可用或无未读数，回退到 SW 接口探测（仅供诊断对比）', {
-      contentError: contentResult.probe?.error,
-    });
-
-    let providerResult;
-    const commonOpts = {
-      endpointNames: settings.enabledEndpoints?.[account.provider] || [],
-      captureRequestHeaders: false,
-    };
-
-    switch (account.provider) {
-      case PROVIDERS.NETEASE_163: providerResult = await probe163(commonOpts); break;
-      case PROVIDERS.QQ: providerResult = await probeQQ(commonOpts); break;
-      case PROVIDERS.USTC:
-        providerResult = { provider: 'ustc', success: false, needsAuth: true, authVerified: false, allFailed: true, message: 'USTC not implemented' };
-        break;
-      default:
-        providerResult = { provider: account.provider, success: false, authVerified: false, allFailed: true, message: `Unsupported: ${account.provider}` };
-    }
-
-    const accountResult = {
-      email: account.email,
-      provider: account.provider,
-      ...providerResult,
-      source: context.source,
-      contentResult,
-    };
-    await saveCheckResult(accountResult);
-    return accountResult;
-  } catch (err) {
-    logger_acc.error(`账户 ${account.email} 检查异常: ${err.message}`);
-    const accountResult = {
-      email: account.email, provider: account.provider, success: false,
-      authVerified: false, needsAuth: false, allFailed: true, error: err.message, source: context.source,
-    };
-    await saveCheckResult(accountResult);
-    return accountResult;
-  }
 }
 
 async function runSingleProvider(provider, context = {}) {
@@ -325,10 +532,29 @@ async function runSingleProvider(provider, context = {}) {
   const matchingAccounts = accounts.filter(a => a.provider === provider);
 
   if (!matchingAccounts.length) {
-    // 即使没配置账户，也允许手动触发内容脚本探测 + Cookie 诊断（诊断场景）
-    const contentProbe = await runContentProbe(provider, { openTab: true });
+    // 即使没配置账户，也允许手动触发探测（诊断场景）
+    const cachedSid = await getCachedSid(provider);
     const cookieDiag = await diagnoseCookies(provider);
-    return { success: true, provider, results: [], contentProbe, cookieDiag };
+
+    // 如果有缓存 sid，尝试 API 探测
+    let apiResult = null;
+    if (cachedSid) {
+      const settings = await getSettings();
+      apiResult = await runSWApiProbe(provider, settings);
+    }
+
+    // 再试内容脚本
+    const contentProbe = await runContentProbe(provider, { openTab: true });
+
+    return {
+      success: true,
+      provider,
+      results: [],
+      cachedSid: !!cachedSid,
+      apiResult,
+      contentProbe,
+      cookieDiag,
+    };
   }
 
   const settings = await getSettings();
@@ -352,23 +578,52 @@ async function runEndpointTest(provider, endpointName, context = {}) {
 
 async function checkAuthStatus(provider) {
   logger.info(`检查 ${provider} 的认证状态`);
-  const { getProviderSid } = await import('../shared/session.js');
-  const sessionResult = await getProviderSid(provider, { forceRefresh: false });
+  const cachedSid = await getCachedSid(provider);
   const cookieDiag = await diagnoseCookies(provider);
+  const contentProbe = await runContentProbe(provider, { openTab: false });
+
+  const hasSid = !!cachedSid;
+  const contentLoggedIn = contentProbe.probe?.loggedIn === true;
+  const hasUnreadData = typeof contentProbe.probe?.unreadCount === 'number';
+
   return {
-    success: true, provider,
-    loggedIn: sessionResult.loggedIn,
-    needsAuth: !sessionResult.loggedIn,
-    detail: { session: sessionResult, cookieDiag },
+    success: true,
+    provider,
+    loggedIn: hasSid || contentLoggedIn,
+    needsAuth: !(hasSid || contentLoggedIn),
+    hasCachedSid: hasSid,
+    detail: {
+      cachedSid: hasSid,
+      contentScriptLoggedIn: contentLoggedIn,
+      contentUnreadCount: contentProbe.probe?.unreadCount ?? null,
+      cookieDiag,
+    },
   };
 }
 
 async function refreshSession(provider) {
-  logger.info(`强制刷新 ${provider} 的会话 sid`);
-  const { getProviderSid, clearSid } = await import('../shared/session.js');
-  await clearSid(provider);
-  const sessionResult = await getProviderSid(provider, { forceRefresh: true });
-  return { success: true, provider, loggedIn: sessionResult.loggedIn, needsAuth: !sessionResult.loggedIn, session: sessionResult };
+  logger.info(`刷新 ${provider} 的会话`);
+
+  // 清除旧 sid
+  await clearCachedSid(provider);
+
+  // 尝试内容脚本获取（可能需要打开页面）
+  const contentProbe = await runContentProbe(provider, { openTab: true });
+  const sid = contentProbe.probe?.sid;
+
+  if (sid) {
+    await cacheProviderSid(provider, sid);
+  }
+
+  return {
+    success: true,
+    provider,
+    loggedIn: !!sid,
+    needsAuth: !sid,
+    hasSid: !!sid,
+    sid: sid ? sid.substring(0, 8) + '...' : null,
+    contentProbe,
+  };
 }
 
 async function getStatus() {
@@ -376,11 +631,20 @@ async function getStatus() {
   const settings = await getSettings();
   const checkResults = await getCheckResults(10);
   const alarm = await chrome.alarms.get('check-email');
+
+  // 检查是否有缓存 sid
+  const sid163 = await getCachedSid('netease_163');
+  const sidQQ = await getCachedSid('qq');
+
   return {
     success: true,
     accounts: accounts.map(a => ({ email: a.email, provider: a.provider })),
     accountCount: accounts.length,
     settings,
+    cachedSids: {
+      netease_163: !!sid163,
+      qq: !!sidQQ,
+    },
     alarmConfigured: !!alarm,
     alarmInfo: alarm ? { periodInMinutes: alarm.periodInMinutes, scheduledTime: new Date(alarm.scheduledTime).toISOString() } : null,
     recentResults: checkResults,
@@ -407,10 +671,17 @@ async function updateBadge(summary) {
     let totalUnread = 0;
     let hasUnreadData = false;
     for (const result of summary.results) {
-      if (typeof result.unreadCount === 'number') { totalUnread += result.unreadCount; hasUnreadData = true; }
+      if (typeof result.unreadCount === 'number') {
+        totalUnread += result.unreadCount;
+        hasUnreadData = true;
+      }
+      // 兼容嵌套的 results 数组
       if (result.results && Array.isArray(result.results)) {
         for (const er of result.results) {
-          if (typeof er.unreadCount === 'number') { totalUnread += er.unreadCount; hasUnreadData = true; }
+          if (typeof er.unreadCount === 'number') {
+            totalUnread += er.unreadCount;
+            hasUnreadData = true;
+          }
         }
       }
     }

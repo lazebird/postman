@@ -51,37 +51,22 @@ export const PROVIDER_CONFIG = {
         method: 'GET',
         description: '163 邮箱根入口（登录后自动跳转到含 sid 的页面）',
       },
-      {
-        name: 'js6_entry',
-        url: 'https://mail.163.com/js6/',
-        method: 'GET',
-        description: '163 JS6 入口',
-      },
     ],
     // 163 的未读检查候选接口（URL 支持 {sid} 占位符）
     probeEndpoints: [
       {
         name: 'js6_rpc',
-        url: 'https://mail.163.com/js6/s?func=mbox:listMessages',
+        url: 'https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}',
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'Accept': '*/*',
+          'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          'Origin': 'https://mail.163.com',
+        },
         requiresSid: true,
-        bodyTemplate: 'var=@{type:"getunreadmsgs",ver:0}',
-        description: '邮箱 RPC 网关 - 获取未读消息',
-      },
-      {
-        name: 'js6_rpc2',
-        url: 'https://mail.163.com/js6/s?func=mbox:getUnread',
-        method: 'GET',
-        requiresSid: true,
-        description: '邮箱 RPC 网关 - 获取未读数',
-      },
-      {
-        name: 'unread_count',
-        url: 'https://mail.163.com/js6/s?func=mbox:getUnreadCount',
-        method: 'GET',
-        requiresSid: true,
-        description: '轻量级未读计数接口',
+        bodyTemplate: 'var=@{type:"listMessages",ver:0,pageSize:1,start:0,folderId:"1",mailto:"",readFlag:"2"}',
+        description: '邮箱 RPC 网关 - 获取未读消息列表',
       },
     ],
   },
@@ -164,6 +149,8 @@ export const CHECK_INTERVALS = [
 export const DEFAULT_SETTINGS = {
   checkIntervalMinutes: 5,
   logLevel: 'DEBUG',
+  // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
+  checkMode: 'hybrid',
   // 每个提供商启用的探测接口名
   enabledEndpoints: {
     netease_163: ['js6_rpc'],

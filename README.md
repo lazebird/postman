@@ -1,75 +1,101 @@
 # 浏览器邮箱插件（Edge Mail Notifier）
 
 - Microsoft Edge 浏览器插件（MV3）
-- 支持 163 / Gmail / USTC / QQ 等邮箱
+- 支持 163 / QQ / Gmail / USTC 等邮箱
 - 支持邮件检查、未读计数、桌面通知、快速跳转邮件
-- 低消耗、及时通知、通用/适配/兼容
-- 部署简单：不需要额外部署服务器
+- 混合方案：内容脚本提取会话 + SW 独立 API 检查
 
 ## 目录结构
 
 ```
 ├── doc/
 │   └── 技术选型文档.md          # 技术选型与方案设计
-├── extension/                   # MV3 扩展（方案 C PoC）
+├── extension/                   # MV3 扩展
 │   ├── manifest.json
 │   ├── background/
-│   │   └── service-worker.js    # 定时任务 + 内容脚本调度 + Cookie 诊断
+│   │   └── service-worker.js    # 定时任务 + 混合检查调度 + Cookie 诊断
 │   ├── content/
-│   │   └── probe-content.js     # 内容脚本：in-origin 未读探测（方案 C 核心）
+│   │   └── probe-content.js     # 内容脚本：提取 sid + in-origin 未读探测
 │   ├── providers/
-│   │   ├── provider-163.js      # 163 SW 接口探测（保留，仅诊断对比）
-│   │   └── provider-qq.js       # QQ SW 接口探测（保留，仅诊断对比）
+│   │   ├── provider-163.js      # 163 SW 接口探测（使用缓存 sid）
+│   │   └── provider-qq.js       # QQ SW 接口探测（使用缓存 sid）
 │   ├── shared/
-│   │   ├── constants.js         # 提供商配置/接口端点
+│   │   ├── constants.js         # 提供商配置/接口端点/检查模式
 │   │   ├── debug.js             # 调试日志工具
-│   │   ├── session.js           # 会话 sid 获取与缓存（旧）
-│   │   ├── session-diagnose.js  # Cookie 会话诊断（判定 SW 可复用性）
-│   │   └── storage.js           # chrome.storage 封装
+│   │   ├── session.js           # sid 工具函数
+│   │   ├── session-diagnose.js  # Cookie 会话诊断
+│   │   └── storage.js           # chrome.storage 分层封装
 │   ├── popup/                   # Popup UI
 │   ├── options/                 # 设置页面
 │   └── debug/                   # 调试与验证指南
 ```
 
-## 当前进度与结论
+## 核心架构：混合检查模式
+
+本项目采用「混合模式」实现**免常驻邮箱页**的后台未读检查：
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                       混合模式检查流程                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  用户偶尔打开邮箱页登录                                                 │
+│       │                                                             │
+│       ▼                                                             │
+│  内容脚本注入（同源上下文）→ 读取真实未读数 + 从URL提取sid                    │
+│       │                                                             │
+│       ▼                                                             │
+│  chrome.storage.session 缓存 sid（30分钟TTL）                           │
+│       │                                                             │
+│       ▼                                                             │
+│  SW 定时（chrome.alarms）→ 用缓存sid + Cookie 调 API → 获取未读数        │
+│       │                                                             │
+│       ├── API成功 → 未读 badge + 桌面通知                              │
+│       └── API失败(sid过期/无缓存)                                     │
+│             │                                                       │
+│             └── 回退：内容脚本探测（若邮箱标签存在）                       │
+│                     └── 仍失败 → 提示用户同步会话                       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 为什么需要「混合」而不是纯内容脚本？
+
+| 方案 | 需常驻邮箱页 | 定时后台检查 | 可靠度 | 说明 |
+|------|------------|------------|--------|------|
+| **混合模式（当前）** | ❌（偶尔打开一次即可） | ✅ | ⭐⭐⭐ | 内容脚本提取 sid → SW 独立调 API |
+| 纯内容脚本 | ✅ 需要 | 仅页面存活时 | ⭐⭐⭐⭐ | DOM 读取最可靠，但需常驻页面 |
+| 纯 SW API | ❌ | ✅ | ⭐⭐ | 依赖 sid 有效性，sid 过期即失效 |
+
+### 关键流程
+
+1. **首次设置**：在浏览器打开并登录 `mail.163.com` / `mail.qq.com`
+2. **同步会话**：Options → 点「同步163会话」→ 扩展自动打开邮箱页 → 内容脚本提取 sid → 缓存
+3. **日常使用**：SW 每 N 分钟用缓存 sid 调邮箱 API → 获取未读数 → badge + 通知
+4. **sid 过期**（30 分钟 TTL）：自动回退到内容脚本探测；若仍失败则提示重新同步
+
+## 当前进度
 
 - [x] 技术选型文档
 - [x] 方案 B PoC：SW 跨源 fetch 未读接口探测
-- [x] 真实环境验证（多轮）：**结论 = SW 跨源无法复用 SameSite=Lax 登录 Cookie，方案 B 不可行**
-- [x] 转向 **方案 C：内容脚本 in-origin 探测**（在真实邮箱页面内读未读数）
-- [ ] 方案 C 真实环境验证
+- [x] 真实环境验证（多轮）：修正 cookie 分析结论，确认 MV3 特权上下文可附带 Cookie
+- [x] 方案 C：内容脚本 in-origin 探测
+- [x] **混合方案 v0.4.0：内容脚本提取 sid + SW 独立 API 检查**
 - [ ] Gmail REST API 接入
 - [ ] 完整 UI 与生产功能
-
-## 核心结论（为什么换方案 C）
-
-前 4 轮在 SW 里始终拿不到 163 登录态（`No sid` / 未登录），根因不是代码缺陷，而是**架构边界**：
-
-> MV3 Service Worker 的跨源 fetch 属于第三方上下文，163/QQ 的登录 Cookie 多为
-> `SameSite=Lax`，浏览器不会把它们随 SW 的跨站后台请求发送。
-
-内容脚本注入邮箱页面后与页面**同源**，天然携带第一方 Cookie、无 CORS 限制，
-可直接读取页面已渲染的真实未读数。这是绕开上述死结的有效路径。
-
-新增 **🍪 诊断会话 Cookie** 功能，用 `chrome.cookies` 输出目标站登录 Cookie 的
-SameSite/Secure 标志，用数据证明上述结论并指导后续走向。
+- [ ] 多邮箱统一通知
+- [ ] 深度验证 163/QQ API 实际返回格式
 
 ## 数据持久化与存储分层
 
-为避免"每次插件更新后账号配置丢失、需重新添加"，本项目对存储做了明确分层：
-
 | 存储区 | 存放的数据 | 插件更新时 |
 |--------|-----------|-----------|
-| `chrome.storage.local`（持久化） | 账号配置 `accounts`、用户设置 `settings`、检查历史 | ✅ **保留** |
-| `chrome.storage.session`（会话级） | sid 会话令牌、调试日志 | ⚠️ 清空，自动重建 |
-
-- 账号等**用户数据统一存 `chrome.storage.local`**，扩展更新/重启均不丢失（见 `shared/storage.js`）。
-- sid 会话令牌为短期数据（30 分钟 TTL），即便扩展更新后被清空，探测流程也会自动重新获取，无需用户干预。
-- MV3 的 Service Worker 无页面级 `localStorage`，跨上下文共享用户数据使用 `chrome.storage.local` 即可（等价持久化语义）。
+| `chrome.storage.local`（持久化） | 账号配置、用户设置、检查历史 | ✅ **保留** |
+| `chrome.storage.session`（会话级） | sid 会话令牌（30分钟TTL）、调试日志 | ⚠️ 清空，可重新同步 |
 
 ## 快速开始
 
-详见 [`extension/debug/VALIDATION.md`](extension/debug/VALIDATION.md) 进行方案 C 真实环境验证。
+详见 [`extension/debug/VALIDATION.md`](extension/debug/VALIDATION.md)。
 
 ## 技术文档
 

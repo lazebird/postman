@@ -1,20 +1,15 @@
 /**
  * session-diagnose.js - 会话 Cookie 诊断模块
  *
- * 目标：用「数据」而非「猜测」判定方案 B 是否可行。
+ * 目标：用「数据」判定 MV3 SW 是否能在跨源 fetch 中复用浏览器登录 Cookie。
  *
- * 关键判断依据：
- *   MV3 Service Worker 的跨源 fetch 属于第三方上下文。只有当目标站登录 Cookie
- *   满足以下条件时，SW fetch(credentials:'include') 才会附带它们：
- *     - SameSite=None 且 Secure（可跨站发送），或
- *     - Chrome 把扩展请求视作 first-party（chrome.cookies + host_permissions 下，
- *       从扩展页面/背景页发出的请求在 cookie 属性层面通常被视为 first-party）
+ * Chrome MV3 扩展机制说明：
+ *   扩展声明了 host_permissions 后，从 SW / 扩展页面发出的对该源的 fetch
+ *   在 Cookie 属性层面通常被视为 first-party（扩展是 "privileged context"）。
+ *   因此 SameSite=Lax 的 Cookie 在这些请求中应当被附带。
  *
- * 但 163/QQ 的登录 Cookie 若为 SameSite=Lax（默认），在「浏览器未打开该站页面」时
- * 跨站背景请求是带不上这些 Cookie 的——这正是前 4 轮在 SW 里怎么都拿不到登录态的原因。
- *
- * 本诊断通过 chrome.cookies.getAll 输出扩展可见的目标站 Cookie 及其 SameSite/Secure/HttpOnly
- * 标志，一次性判断「SW 是否真能复用浏览器登录会话」。
+ * 本诊断输出 Cookie 的 SameSite 标志，用于判断是否有跨站发送的能力。
+ * 注意：诊断仅反映 Cookie 属性，实际是否生效需通过接口响应验证。
  */
 
 import { createLogger } from './debug.js';
@@ -22,12 +17,60 @@ import { createLogger } from './debug.js';
 const logger = createLogger('session-diagnose');
 
 /**
- * 目标站的 Cookie 域名
+ * 目标站的 Cookie 域名（限定到具体邮箱服务域名，避免误抓无关子域）
  */
 const COOKIE_DOMAINS = {
-  netease_163: ['.163.com', 'mail.163.com', '.mail.163.com'],
-  qq: ['.qq.com', 'mail.qq.com', '.mail.qq.com'],
+  netease_163: ['.163.com', '.mail.163.com'],
+  qq: ['.qq.com', '.mail.qq.com'],
 };
+
+/**
+ * 各提供商的「真实登录会话」Cookie 名称特征
+ * 只将高置信度的会话 Cookie 视为 auth cookie
+ */
+const AUTH_COOKIE_PATTERNS = {
+  netease_163: [
+    // 网易通行证登录 Cookie
+    { name: 'NTES_SESS', domains: ['.163.com'] },
+    // 163 邮箱独立会话
+    { name: 'MAIL_SESS', domains: ['.mail.163.com'] },
+    { name: 'MAIL_PASSPORT', domains: ['.mail.163.com'] },
+    { name: 'Coremail', domains: ['.mail.163.com'] },
+    { name: 'mixmailTokens', domains: ['.mail.163.com'] },
+    { name: 'NTES_P_UTID', domains: ['.163.com'] },
+  ],
+  qq: [
+    // QQ 邮箱会话
+    { name: 'qm_sk', domains: ['mail.qq.com', '.mail.qq.com', '.qq.com'] },
+    { name: 'p_skey', domains: ['.qq.com'] },
+    { name: 'skey', domains: ['.qq.com'] },
+    { name: 'p_uin', domains: ['.qq.com'] },
+    { name: 'pt2gguin', domains: ['.ptlogin2.qq.com', '.qq.com'] },
+    { name: 'uin', domains: ['.qq.com'] },
+    // QQ 邮箱的 cookie 通常在 mail.qq.com 域下
+  ],
+};
+
+/**
+ * 判断 Cookie 是否属于指定提供商的「高置信度 auth cookie」
+ */
+function isAuthCookie(provider, cookie) {
+  const patterns = AUTH_COOKIE_PATTERNS[provider] || [];
+  const domain = cookie.domain || '';
+  const name = cookie.name || '';
+
+  for (const pattern of patterns) {
+    if (name !== pattern.name) continue;
+    // 域名匹配：检查 cookie.domain 是否以 pattern.domain 结尾（或相等）
+    for (const patternDomain of pattern.domains) {
+      const pd = patternDomain.startsWith('.') ? patternDomain : `.${patternDomain}`;
+      if (domain === patternDomain || domain.endsWith(pd)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 /**
  * 读取指定提供商域下的所有 Cookie，并判断能否在 SW 跨源 fetch 中附带。
@@ -49,7 +92,7 @@ export async function diagnoseCookies(provider) {
     try {
       const cookies = await chrome.cookies.getAll({ domain });
       for (const c of cookies || []) {
-        const key = `${c.domain}|${c.name}`;
+        const key = `${c.domain}|${c.name}|${c.path}`;
         if (seen.has(key)) continue;
         seen.add(key);
         allCookies.push(c);
@@ -67,18 +110,13 @@ export async function diagnoseCookies(provider) {
     secure: c.secure,
     httpOnly: c.httpOnly,
     session: c.session,
-    sameSite: c.sameSite,          // 'no_restriction'|'lax'|'strict'|'unspecified'
+    sameSite: c.sameSite,
     valueLen: (c.value || '').length,
   }));
 
-  // 判断是否存在「登录会话」级 Cookie（名称特征 + 长度）
-  const authHints = ['SESS', 'sk', 'sid', 'session', 'P_INFO', 'NTES', 'login', 'S_INFO', 'UT_LOGIN', 'MAIL', 'qm_sk', 'eudb'];
-  const likelyAuth = allCookies.filter((c) => {
-    const name = c.name.toUpperCase();
-    return authHints.some((h) => name.includes(h.toUpperCase()));
-  });
-
-  result.authCookies = likelyAuth.map((c) => ({
+  // 高置信度 auth cookie
+  const authCookies = allCookies.filter(c => isAuthCookie(provider, c));
+  result.authCookies = authCookies.map((c) => ({
     name: c.name,
     domain: c.domain,
     sameSite: c.sameSite,
@@ -87,28 +125,36 @@ export async function diagnoseCookies(provider) {
     valueLen: (c.value || '').length,
   }));
 
-  // 核心结论判定
-  // 场景A：能看到 auth cookie 且为 no_restriction（SameSite=None）→ SW 大概率可行
-  // 场景B：能看到 auth cookie 但 sameSite 是 lax/strict → SW 跨站请求带不上 → 方案B基本不可行
-  // 场景C：完全看不到任何 auth cookie → 浏览器没有该站登录会话，或 cookie 为 host-only 未匹配
-  const crossSiteOk = likelyAuth.some((c) => c.sameSite === 'no_restriction' && c.secure);
-  const onlyLax = likelyAuth.length > 0 && likelyAuth.every((c) => c.sameSite !== 'no_restriction');
-  const noAuth = likelyAuth.length === 0;
+  // ===== 核心结论判定 =====
+  // 在 Chrome MV3 中，扩展具有 host_permissions 时，SW fetch 被视为 first-party 请求
+  // SameSite=Lax 的 Cookie 应当被附带
+  // 因此只要有 auth cookie（不管 SameSite 是什么），SW 理论上有机会带上
 
-  if (crossSiteOk) {
-    result.conclusion = 'SW_CAN_ATTACH_COOKIES';
-    result.summary = '存在 SameSite=None(no_restriction)+Secure 的登录 Cookie，SW 跨源 fetch 大概率能带上登录态。方案 B 可行性较高。';
-  } else if (onlyLax) {
-    result.conclusion = 'SW_CANNOT_ATTACH_COOKIES';
-    result.summary = `检测到 ${likelyAuth.length} 个登录相关 Cookie，但均为 SameSite=Lax/Strict。浏览器未打开该站页面时，SW 的第三方跨源请求不会附带这些 Cookie → 方案 B 在纯 SW 场景下不可行，需改用内容脚本(方案C)。`;
-  } else if (noAuth) {
+  if (authCookies.length === 0) {
     result.conclusion = 'NO_AUTH_COOKIE_VISIBLE';
-    result.summary = `在扩展可见范围内未发现该站的登录会话 Cookie（共 ${allCookies.length} 个常规 Cookie）。可能原因：① 浏览器当前确实未登录该邮箱；② Cookie 被设为主机私有/隔离（CHIPS），扩展无法直接读取。请在已登录的浏览器标签里刷新一次邮箱页再诊断。`;
+    result.summary = '未发现该站的高置信度登录会话 Cookie。可能原因：① 浏览器当前确实未登录该邮箱；② Cookie 被隔离或主机私有。请先在浏览器中打开并登录邮箱页面，然后刷新扩展再诊断。';
+  } else {
+    // 记录所有 auth cookie 的 SameSite 分布
+    const sameSiteSet = new Set(authCookies.map(c => c.sameSite));
+    const hasNone = authCookies.some(c => c.sameSite === 'no_restriction' && c.secure);
+    const hasLax = authCookies.some(c => c.sameSite === 'lax' || c.sameSite === 'unspecified');
+
+    if (hasNone) {
+      result.conclusion = 'SW_CAN_ATTACH_COOKIES';
+      result.summary = `检测到 ${authCookies.length} 个登录 Cookie，其中包含 SameSite=None 的 Cookie。在 MV3 扩展 host_permissions 下，SW 跨源 fetch 大概率能携带登录态。`;
+    } else if (hasLax) {
+      // MV3 扩展 + host_permissions → first-party context → Lax cookies 也应附带
+      result.conclusion = 'SW_MAY_ATTACH_COOKIES';
+      result.summary = `检测到 ${authCookies.length} 个登录 Cookie，SameSite=${[...sameSiteSet].join('/')}。在 MV3 扩展的 host_permissions 特权上下文中，SameSite=Lax Cookie 通常会被当作 first-party 附带。需通过实际 API 调用验证。`;
+    } else {
+      result.conclusion = 'SW_MIGHT_ATTACH_COOKIES';
+      result.summary = `检测到 ${authCookies.length} 个登录 Cookie，SameSite=${[...sameSiteSet].join('/')}。SameSite=Strict 的 Cookie 在跨站请求中通常不会被附带。`;
+    }
   }
 
   logger.info(`Cookie 诊断完成 [${provider}]: ${result.conclusion}`, {
     found: result.found,
-    authCount: likelyAuth.length,
+    authCount: authCookies.length,
   });
 
   return result;
