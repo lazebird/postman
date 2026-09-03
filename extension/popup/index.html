@@ -45,6 +45,31 @@
       color: #495057;
       margin-bottom: 8px;
     }
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+    .log-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #495057;
+    }
+    .log-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .log-actions .btn-copy {
+      margin-left: 0;
+    }
+    .log-actions button.danger {
+      padding: 2px 10px;
+      font-size: 11px;
+    }
     .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
     button {
       background: #1976d2;
@@ -363,14 +388,18 @@
     <!-- Tab 3: 调试日志 -->
     <div class="tab-content" id="tab-logs">
       <div class="section">
-        <div class="section-title">调试日志</div>
-        <button id="btn-refresh-logs" class="secondary" style="margin-bottom:8px;">🔄 刷新日志</button>
+        <div class="log-header">
+          <span class="log-title">调试日志</span>
+          <div class="log-actions">
+            <button id="btn-copy-logs" class="btn-copy" title="复制全部日志">📋 复制</button>
+            <button id="btn-clear-logs" class="danger" title="清空日志">🗑 清除</button>
+          </div>
+        </div>
         <div id="logs-container" class="debug-log">
           <div class="empty">加载中...</div>
         </div>
       </div>
     </div>
-
     <!-- Tab 4: 设置 -->
     <div class="tab-content" id="tab-settings">
       <div class="section">
