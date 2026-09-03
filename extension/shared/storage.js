@@ -65,7 +65,17 @@ export async function setAccounts(accounts) {
 export async function getSettings() {
   try {
     const { [STORAGE_KEYS.SETTINGS]: settings = {} } = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-    return { ...DEFAULT_SETTINGS, ...(settings || {}) };
+    const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+    // 关键：始终合并所有默认启用的端点，确保升级后新端点可用
+    // 例如 v0.7.0 → v0.8.0 新增了 wx.mail.qq.com 端点，
+    // 用户旧设置里只有 cgi_mail_list，合并后新端点也会被启用
+    if (settings?.enabledEndpoints) {
+      merged.enabledEndpoints = {
+        ...DEFAULT_SETTINGS.enabledEndpoints,
+        ...settings.enabledEndpoints,
+      };
+    }
+    return merged;
   } catch (e) {
     console.error('[storage] getSettings failed:', e.message);
     return { ...DEFAULT_SETTINGS };
