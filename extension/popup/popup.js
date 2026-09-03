@@ -20,6 +20,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById(`tab-${tabId}`).classList.add('active');
 
     if (tabId === 'logs') refreshLogs();
+    if (tabId === 'settings') refreshStatus();
   });
 });
 
@@ -218,7 +219,7 @@ async function refreshStatus() {
   const status = await sendMessage({ type: 'getStatus' });
 
   // 渲染状态
-  const overview = document.getElementById('status-overview');
+  const overview = document.getElementById('settings-overview');
   overview.innerHTML = '';
 
   // 计算所有账户未读总和（用于展示在状态概览）
