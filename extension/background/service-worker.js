@@ -97,7 +97,8 @@ async function handleMessage(message, sender) {
     }
 
     case 'openMailboxTab':
-      return await openMailboxTab(message.provider);
+      // 显式"打开邮箱"用前台打开，便于用户操作；探测自开的后台标签不抢焦点
+      return await openMailboxTab(message.provider, { active: true });
 
     case 'contentPageReady': {
       // 内容脚本上报：如果有 sid，缓存下来供 SW 后续独立调用
@@ -152,12 +153,15 @@ const PROVIDER_HOME = {
 /**
  * 打开目标邮箱首页（用于注入内容脚本并获取真实登录态 + sid）
  */
-async function openMailboxTab(provider) {
+async function openMailboxTab(provider, opts = {}) {
   const url = PROVIDER_HOME[provider];
   if (!url) return { success: false, error: `Unknown provider: ${provider}` };
-  const tab = await chrome.tabs.create({ url, active: true });
-  logger.info(`已打开邮箱标签: ${url}, tabId=${tab.id}`);
-  return { success: true, tabId: tab.id, url };
+  // 默认后台打开（active:false）：避免当从 Popup 触发"获取未读数"时，因新建前台标签抢焦点
+  // 而把 Popup 自动关闭，导致只打开了邮箱页面却看不到任何输出。
+  const active = opts.active === true;
+  const tab = await chrome.tabs.create({ url, active });
+  logger.info(`已打开邮箱标签: ${url}, tabId=${tab.id}, active=${active}`);
+  return { success: true, tabId: tab.id, url, active };
 }
 
 /**
@@ -191,21 +195,43 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
   }
 
   const result = await new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ success: false, error: '等待内容脚本响应超时' }), timeoutMs);
+    const timer = setTimeout(() => resolve({ success: false, error: '等待内容脚本响应超时', reason: 'timeout' }), timeoutMs);
     try {
       chrome.tabs.sendMessage(targetTabId, { type }, (resp) => {
         clearTimeout(timer);
         if (chrome.runtime.lastError) {
-          resolve({ success: false, error: chrome.runtime.lastError.message });
+          resolve({ success: false, error: chrome.runtime.lastError.message, reason: 'connection' });
         } else {
-          resolve(resp || { success: false, error: '空响应' });
+          resolve(resp || { success: false, error: '空响应', reason: 'empty' });
         }
       });
     } catch (e) {
       clearTimeout(timer);
-      resolve({ success: false, error: e.message });
+      resolve({ success: false, error: e.message, reason: 'throw' });
     }
   });
+
+  // 内容脚本无法注入（连接失败）时，读取标签当前 URL，判断是否被重定向到了登录页等
+  if (result.reason && result.reason !== 'timeout') {
+    try {
+      const tab = await chrome.tabs.get(targetTabId);
+      const tabUrl = (tab && tab.url) || '';
+      const hostPattern = provider === 'qq'
+        ? /^https:\/\/mail\.qq\.com\//i
+        : /^https:\/\/mail\.163\.com\//i;
+      // QQ 未登录时 mail.qq.com 会重定向到 ptlogin2/xui.qq.com 等登录域（不在内容脚本注入范围）
+      if (/ptlogin|ssl\.ptlogin|login\.qq|xui\.qq|passport/i.test(tabUrl) && !hostPattern.test(tabUrl)) {
+        result.qqLoginRedirect = true;
+        result.loginRequired = true;
+        result.error = 'QQ 邮箱未登录：标签已被重定向到 QQ 登录页。请先在浏览器中登录 QQ 邮箱后重试。';
+      } else if (!hostPattern.test(tabUrl)) {
+        result.hostMismatch = true;
+        result.tabUrl = tabUrl;
+      } else {
+        result.tabUrl = tabUrl;
+      }
+    } catch (e) { /* 忽略 URL 读取失败 */ }
+  }
 
   result.tabId = targetTabId;
   return result;

@@ -43,11 +43,27 @@
     }
     const joined = allTexts.join(' ');
 
-    // 2. 匹配「收件箱(8)」「收件箱 (8)」等
+    // 2. 匹配「收件箱(8)」「收件箱 (8)」等（163 用括号包裹）
     const folderRegex = /收件箱\s*[\(（]\s*(\d+)\s*[\)）]/g;
     let m;
     while ((m = folderRegex.exec(joined))) {
       candidates.push({ type: 'folder', value: parseInt(m[1], 10) });
+    }
+
+    // 2b. QQ 邮箱特有结构：未读数常以「收件箱 (8)」的紧邻括号、或「收件箱[未读]8」等方式呈现。
+    //     仅匹配紧邻收件箱、且明确用括号/方括号包裹的独立小整数，避免把页面其它无关数字误判为未读数。
+    const qqFolderPatterns = [
+      /收件箱\s*[\(（\[\[]\s*(\d{1,4})\s*[\)）\]\]]/g,
+      /收件箱\s*(?:\|)?\s*[【\[]?\s*(\d{1,4})\s*[】\]]?\s*(?:未读|封)?/g,
+    ];
+    for (const re of qqFolderPatterns) {
+      re.lastIndex = 0;
+      let qm;
+      while ((qm = re.exec(joined)) !== null) {
+        const val = parseInt(qm[1], 10);
+        if (val > 0) candidates.push({ type: 'folder', value: val });
+        re.lastIndex = qm.index + 1;
+      }
     }
 
     // 3. 匹配侧栏常见未读字段（如 unread、badge）
@@ -56,6 +72,16 @@
     while ((bm = badgeRegex.exec(joined))) {
       candidates.push({ type: 'attr', value: parseInt(bm[1], 10) });
     }
+
+    // 3b. QQ/163 常把未读数放在带 class 的计数元素（如 <span class="folder-count">8</span>）
+    doc.querySelectorAll('[class*="unread"],[class*="new"],[class*="count"],[class*="badge"],[data-unread]').forEach((el) => {
+      const own = el.textContent ? el.textContent.trim() : '';
+      if (/^\d{1,4}$/.test(own)) candidates.push({ type: 'attr', value: parseInt(own, 10) });
+      const dataUnread = el.getAttribute && el.getAttribute('data-unread');
+      if (dataUnread && /^\d{1,4}$/.test(dataUnread.trim())) {
+        candidates.push({ type: 'attr', value: parseInt(dataUnread.trim(), 10) });
+      }
+    });
 
     // 4. 查找含 sid 的 iframe 或链接
     let sid = null;
@@ -174,7 +200,7 @@
     // 判断页面 URL / title 是否指向主收件箱
     const path = (location.pathname || '');
     const is163InboxPath = /js6\/main|main\.jsp|s\?func=mbox/i.test(path + ' ' + location.href);
-    const isQQInboxPath = /cgi-bin\/(mail_list|frame_html|login)/i.test(location.href);
+    const isQQInboxPath = /cgi-bin\/(mail_list|frame_html|frame|mail|login|readdata)/i.test(location.href);
     const hasMailTitle = /邮箱|mail|收件箱|未读/i.test(diag.title || '');
     const hasUnread = typeof best.unread === 'number';
 
