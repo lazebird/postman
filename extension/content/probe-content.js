@@ -259,7 +259,7 @@
         // 能读到未读 → 强登录信号；只有 sid 而无未读 → 已授权但需切到收件箱主框架才能读数。
         const loggedIn = !!sid || !!best.unread;
 
-        // 通过消息通知 SW 缓存 sid（内容脚本无法直接访问 chrome.storage.session）
+        // 通过消息通知 SW 缓存 sid（内容脚本无法直接访问 chrome.storage.local）
         if (sid) {
           try {
             chrome.runtime.sendMessage({
