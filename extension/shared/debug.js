@@ -1,12 +1,10 @@
 /**
  * debug.js - 统一调试日志工具
- * 
- * 调试信息策略：
- * 1. 所有关键操作都有日志记录
- * 2. 日志带时间戳、级别、模块标识
- * 3. 支持持久化到 chrome.storage.local，方便查看历史
- * 4. 日志分级：DEBUG / INFO / WARN / ERROR
- * 5. 可通过 chrome.storage 动态开关 verbose 级别
+ *
+ * 优化：
+ * 1. 添加 chrome.storage.session 不可用时的降级处理（内存环形缓冲区）
+ * 2. 提高日志持久化的健壮性
+ * 3. 同步 Console 输出与异步持久化分离，避免 await 阻塞主流程
  */
 
 const LOG_LEVELS = {
@@ -18,6 +16,7 @@ const LOG_LEVELS = {
 
 // 内存中的最近日志（环形缓冲区）
 const MAX_MEMORY_LOGS = 200;
+const memoryLogs = [];
 
 class DebugLogger {
   constructor(module) {
@@ -38,46 +37,81 @@ class DebugLogger {
 
   /**
    * 记录一条日志
-   * @param {string} level - 'DEBUG'|'INFO'|'WARN'|'ERROR'
-   * @param {string} message - 日志消息
-   * @param {object} detail - 附加数据
    */
   async _log(level, message, detail) {
-    const currentLevel = await this._getLogLevel();
+    let currentLevel = LOG_LEVELS.INFO;
+    try {
+      currentLevel = await this._getLogLevel();
+    } catch (e) {
+      currentLevel = LOG_LEVELS.INFO;
+    }
     if (LOG_LEVELS[level] < currentLevel) return;
 
     const entry = {
       ts: new Date().toISOString(),
       level,
       module: this.module,
-      message,
-      detail: detail ? JSON.stringify(detail) : undefined,
+      message: String(message),
+      detail: detail ? (typeof detail === 'string' ? detail : safeStringify(detail)) : undefined,
     };
 
-    // Console 输出
+    // Console 输出（同步执行，不阻塞）
     const prefix = `[${entry.ts}] [${level}] [${this.module}]`;
-    if (level === 'ERROR') {
-      console.error(prefix, message, detail || '');
-    } else if (level === 'WARN') {
-      console.warn(prefix, message, detail || '');
-    } else {
-      console.log(prefix, message, detail || '');
+    try {
+      if (level === 'ERROR') {
+        console.error(prefix, entry.message, entry.detail || '');
+      } else if (level === 'WARN') {
+        console.warn(prefix, entry.message, entry.detail || '');
+      } else {
+        console.log(prefix, entry.message, entry.detail || '');
+      }
+    } catch (e) {
+      // console 不可用（理论上不会发生）
     }
 
-    // 持久化到内存日志（通过 chrome.storage.session 不持久化到磁盘，浏览器重启即清空）
+    // 写入内存环形缓冲区
+    memoryLogs.unshift(entry);
+    if (memoryLogs.length > MAX_MEMORY_LOGS) {
+      memoryLogs.length = MAX_MEMORY_LOGS;
+    }
+
+    // 异步持久化到 chrome.storage.session（不 await，避免阻塞主流程）
     try {
-      const { debugLogs = [] } = await chrome.storage.session.get('debugLogs');
-      const newLogs = [entry, ...debugLogs].slice(0, MAX_MEMORY_LOGS);
-      await chrome.storage.session.set({ debugLogs: newLogs });
+      chrome.storage.session.get('debugLogs')
+        .then(({ debugLogs = [] }) => {
+          const merged = [entry, ...(Array.isArray(debugLogs) ? debugLogs : [])].slice(0, MAX_MEMORY_LOGS);
+          return chrome.storage.session.set({ debugLogs: merged });
+        })
+        .catch(() => { /* session storage 不可用时静默失败 */ });
     } catch (e) {
       // storage 不可用时静默失败
     }
   }
 
-  debug(msg, detail) { return this._log('DEBUG', msg, detail); }
-  info(msg, detail) { return this._log('INFO', msg, detail); }
-  warn(msg, detail) { return this._log('WARN', msg, detail); }
-  error(msg, detail) { return this._log('ERROR', msg, detail); }
+  debug(msg, detail) { this._log('DEBUG', msg, detail); }
+  info(msg, detail) { this._log('INFO', msg, detail); }
+  warn(msg, detail) { this._log('WARN', msg, detail); }
+  error(msg, detail) { this._log('ERROR', msg, detail); }
+}
+
+/**
+ * 安全 JSON.stringify，避免循环引用
+ */
+function safeStringify(obj) {
+  try {
+    const seen = new Set();
+    return JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    }, 2);
+  } catch (e) {
+    return String(obj);
+  }
 }
 
 // 便捷工具：创建一个模块的 logger
@@ -87,3 +121,8 @@ export function createLogger(module) {
 
 // 全局日志工具
 export const logger = new DebugLogger('global');
+
+// 导出内存日志（供调试用）
+export function getMemoryLogs(limit = 50) {
+  return memoryLogs.slice(0, limit);
+}

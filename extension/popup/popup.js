@@ -1,5 +1,11 @@
 /**
  * popup.js - Popup 逻辑
+ *
+ * 优化：
+ * 1. 显示会话 sid 获取状态
+ * 2. 添加"刷新会话"按钮
+ * 3. 更清晰的探测结果显示
+ * 4. 结果自动展开查看完整数据
  */
 
 // Tab 切换
@@ -85,14 +91,13 @@ document.getElementById('btn-check-bridge').addEventListener('click', async () =
   btn.textContent = '检查中...';
 
   try {
-    // 检查两个主要提供商的认证状态
     const [result163, resultQQ] = await Promise.all([
       sendMessage({ type: 'checkBridge', provider: 'netease_163' }),
       sendMessage({ type: 'checkBridge', provider: 'qq' })
     ]);
     showProbeResult('认证状态检查', {
-      '163邮箱': result163,
-      'QQ邮箱': resultQQ,
+      '163邮箱': formatAuthResult(result163),
+      'QQ邮箱': formatAuthResult(resultQQ),
     });
   } catch (err) {
     showProbeResult('认证检查失败', { success: false, error: err.message });
@@ -101,6 +106,35 @@ document.getElementById('btn-check-bridge').addEventListener('click', async () =
     btn.textContent = '检查认证';
   }
 });
+
+// 刷新会话 sid
+const btnRefreshSession = document.getElementById('btn-refresh-session');
+if (btnRefreshSession) {
+  btnRefreshSession.addEventListener('click', async () => {
+    const btn = btnRefreshSession;
+    btn.disabled = true;
+    btn.textContent = '刷新中...';
+
+    try {
+      const results = {};
+      for (const provider of ['netease_163', 'qq']) {
+        const r = await sendMessage({ type: 'refreshSession', provider });
+        results[provider === 'netease_163' ? '163邮箱' : 'QQ邮箱'] = {
+          loggedIn: r.loggedIn,
+          needsAuth: r.needsAuth,
+          source: r.session?.source || 'none',
+          detail: r.session?.detail || {},
+        };
+      }
+      showProbeResult('会话刷新结果', results);
+    } catch (err) {
+      showProbeResult('会话刷新失败', { success: false, error: err.message });
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔄 刷新会话';
+    }
+  });
+}
 
 // 刷新日志
 document.getElementById('btn-refresh-logs').addEventListener('click', () => {
@@ -121,6 +155,15 @@ function sendMessage(message) {
   });
 }
 
+function formatAuthResult(result) {
+  if (!result) return { error: 'No result' };
+  return {
+    loggedIn: result.loggedIn,
+    needsAuth: result.needsAuth,
+    detail: result.detail || {},
+  };
+}
+
 async function refreshStatus() {
   const status = await sendMessage({ type: 'getStatus' });
 
@@ -129,10 +172,9 @@ async function refreshStatus() {
   overview.innerHTML = '';
 
   const items = [
-    ['账户数量', String(status.accountCount)],
+    ['账户数量', String(status.accountCount || 0)],
     ['检查间隔', `${status.settings?.checkIntervalMinutes || 5} 分钟`],
-    ['闹钟', status.alarmConfigured ? `✅ ${status.alarmInfo?.periodInMinutes}分钟/次` : '❌ 未配置'],
-    ['本地桥接', status.nativeMessagingAvailable ? '✅ 可用' : '未安装（方案B不需要）'],
+    ['闹钟', status.alarmConfigured ? `✅ ${status.alarmInfo?.periodInMinutes || '?'}分钟/次` : '❌ 未配置'],
   ];
 
   items.forEach(([label, value]) => {
@@ -142,15 +184,18 @@ async function refreshStatus() {
     overview.appendChild(div);
   });
 
-  // 渲染最近结果
+  // 渲染最近结果（简要状态）
   if (status.recentResults?.length) {
     const latest = status.recentResults[0];
     const resultDiv = document.createElement('div');
     resultDiv.className = 'status-item';
     const time = new Date(latest.timestamp || Date.now()).toLocaleTimeString();
-    const badge = latest.success
-      ? '<span class="provider-status status-ok">成功</span>'
-      : '<span class="provider-status status-fail">失败</span>';
+    const authVerified = latest.authVerified === true;
+    const badge = authVerified
+      ? '<span class="provider-status status-ok">认证成功</span>'
+      : (latest.needsAuth
+        ? '<span class="provider-status status-auth">需登录</span>'
+        : '<span class="provider-status status-fail">失败</span>');
     resultDiv.innerHTML = `<span class="label">最近检查 (${time})</span>${badge}`;
     overview.appendChild(resultDiv);
   }
@@ -202,10 +247,10 @@ async function refreshLogs() {
       return;
     }
 
-    container.innerHTML = debugLogs.slice(0, 50).map(log => {
+    container.innerHTML = debugLogs.slice(0, 80).map(log => {
       const cls = log.level.toLowerCase();
       const detail = log.detail ? `<br><small>${escapeHtml(log.detail)}</small>` : '';
-      return `<div class="${cls}">[${new Date(log.ts).toLocaleTimeString()}] [${log.level}] [${log.module}] ${escapeHtml(log.message)}${detail}</div>`;
+      return `<div class="${cls}">[${new Date(log.ts).toLocaleTimeString()}] [${log.level}] [${escapeHtml(log.module)}] ${escapeHtml(log.message)}${detail}</div>`;
     }).join('');
   } catch (err) {
     document.getElementById('logs-container').innerHTML = `<div class="error">读取日志失败: ${escapeHtml(err.message)}</div>`;
@@ -213,6 +258,7 @@ async function refreshLogs() {
 }
 
 function escapeHtml(text) {
+  if (text === undefined || text === null) return '';
   const div = document.createElement('div');
   div.textContent = String(text);
   return div.innerHTML;
