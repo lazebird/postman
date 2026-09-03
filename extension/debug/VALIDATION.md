@@ -1,63 +1,68 @@
-# 方案 C PoC — 真实环境验证计划 v3
+# 混合方案 v0.4.0 — 真实环境验证计划
 
-> 前 4 轮验证确认：纯 SW 跨源 fetch 无法复用 163/QQ 的 SameSite=Lax 登录 Cookie，
-> 导致「在 SW 里通过访问页面提取 sid」路径不可行。
-> 故切换为 **方案 C：内容脚本 in-origin 探测** —— 在真实邮箱页面内读取未读数。
+## 背景：为什么需要混合方案
 
-## 为什么换方案 C（结论先给）
+经真实环境验证发现：
+1. **内容脚本可以读取真实未读数**（如 163 邮箱 8 封未读）✅
+2. **内容脚本可以从页面 URL 提取 sid**（如 `INdDcKKhuxodUgDvjUZVHhzIloQcYmuA`）✅
+3. **163/QQ 的 webmail 是 SPA**，sid 由前端 JS 动态生成，SW 静态 fetch 无法获取
 
-| 方案 | 会话 Cookie 来源 | 结果 |
-|------|------------------|------|
-| 方案B(SW跨源fetch) | 第三方上下文，SameSite=Lax 不附带 | ❌ 前4轮均 `No sid`/未登录 |
-| **方案C(内容脚本)** | 页面第一方上下文，天然携带 | ✅ 可行 |
-
-内容脚本注入 `mail.163.com`/`mail.qq.com` 后，与页面**同源**：
-- fetch/读取不触发 CORS，不丢 Cookie
-- 可直接读 DOM 里已渲染的「收件箱(8)」等真实未读数
-- 可从页面 iframe/URL/window 取 sid（如需走内部接口）
+因此设计**混合方案**：
+- 内容脚本在页面中提取 sid → 缓存
+- SW 用缓存 sid + Cookie 调 API → 实现后台独立检查
+- 仅需用户偶尔打开邮箱页同步一次会话
 
 ## 验证步骤
 
 ### Step 1：加载扩展
 1. `edge://extensions/` → 开发者模式
-2. 移除旧版扩展 → 重新 **加载已解压的扩展程序** 选 `extension/`
-3. 确认权限弹窗接受（新增了 `cookies`、`scripting` 权限）
+2. 移除旧版扩展 → 重新加载选择 `extension/` 目录
+3. 接受新增的 `cookies` / `scripting` / `tabs` 权限
 
-### Step 2：打开并登录邮箱页面
-- 访问 https://mail.163.com/ 并登录（能看到收件箱，未读约 8 封）
-- 访问 https://mail.qq.com/ 并登录（如需验证 QQ）
+### Step 2：同步会话（获取 sid）
+1. 打开 Options 设置页
+2. 找到「混合方案 · 会话与探测」卡片
+3. 点击 **🔄 同步163会话**
+4. 扩展会自动打开 `mail.163.com`（若已登录则直接进入邮箱）
+5. 内容脚本在页面加载后自动提取 sid 并缓存
 
-> ⚠️ 邮箱页面需保持打开，内容脚本才能读到未读数。
+**预期结果**：
+- 会话状态卡片显示 **163邮箱 sid ✅**
+- 探测结果显示 `sidObtained: true`
 
-### Step 3：运行方案 C 探测
-1. 右键扩展图标 → **选项**，找到「**方案C · 内容脚本探测（推荐）**」卡片
-2. 点 **📄 内容脚本探测 163**
-3. 若没有打开的 163 邮箱标签，扩展会**自动打开**并稍候重试
-4. 查看下方 JSON 结果
+### Step 3：验证 SW 独立 API 探测
+1. 关闭 163 邮箱标签页（保留浏览器不关闭）
+2. 回到 Options 页 → 点击 **测试**（对应账户）
+3. 或在 Popup → 运行全量检查
 
-**预期**：`probe.unreadCount` 能读到真实未读数（如 8），`probe.loggedIn` 为 true。
+**预期**：
+- 若 API 调用成功：能看到 `method: "sw-api"` 和正确的 `unreadCount`
+- 若 API 失败但内容脚本能读：会回退到内容脚本模式
+- 若两者都失败：提示需要重新同步会话
 
-### Step 4：Cookie 诊断（定位「SW 能否复用登录态」）
-在 Options 点 **🍪 诊断会话 Cookie**，查看结论字段：
+### Step 4：诊断结果解读
 
-| conclusion | 含义 | 结论 |
-|-----------|------|------|
-| `SW_CAN_ATTACH_COOKIES` | 存在 SameSite=None 的登录 Cookie | 方案B理论上可救 |
-| `SW_CANNOT_ATTACH_COOKIES` | 登录 Cookie 均为 SameSite=Lax | 方案B基本不可行，坚持方案C ✅ |
-| `NO_AUTH_COOKIE_VISIBLE` | 未看到登录 Cookie | 确认浏览器确实未登录，或 Cookie 被主机隔离 |
+| conclusion | 含义 |
+|-----------|------|
+| `SW_CAN_ATTACH_COOKIES` | 存在 SameSite=None 的 Cookie → SW 跨源大概率可带 |
+| `SW_MAY_ATTACH_COOKIES` | 登录 Cookie 为 SameSite=Lax → MV3 特权上下文可能可带，需实测 |
+| `NO_AUTH_COOKIE_VISIBLE` | 未检测到登录 Cookie → 需先在浏览器中登录邮箱 |
 
-### Step 5：结果判定
+## 关键日志观察
 
-**✅ 方案 C 可行**：`probe.unreadCount` 与网页显示一致 → 说明「读真实登录页」这条路通了。
+打开扩展的 Service Worker 控制台（`edge://extensions/` → 点击「Service Worker」链接）查看：
 
-在此基础上可继续做「保活/自动打开邮箱标签」以达成后台自动提醒：
-- 用 `chrome.tabs` 保持一个后台邮箱标签存活（最小化/固定）
-- 定时用内容脚本读取未读数 → 桌面通知
+- `[service-worker] 从内容脚本缓存 netease_163 sid (来自页面 URL)` — sid 已缓存
+- `[account:xxx@163.com] SW API 探测成功: unread=8` — API 独立探测成功
+- `[account:xxx@163.com] 缓存的 sid 已失效，尝试刷新` — sid 过期回退
 
-## 需要记录的关键信息
-| 信息 | 来源 |
-|------|------|
-| Cookie 诊断 conclusion | Options → 方案C → 🍪 诊断会话 Cookie |
-| 内容脚本读取的未读数 | Options → 方案C → 📄 内容脚本探测 |
-| 页面 URL / host | 探测结果 detail |
-| 浏览器版本 | 浏览器关于页 |
+## 常见问题
+
+**Q: 为什么我点击同步后 sid 还是显示 ❌？**
+A: 可能原因：① 邮箱未登录；② 页面未加载完成内容脚本未执行。请确认已登录邮箱并等待页面加载完成后再试。
+
+**Q: SW API 探测总是失败？**
+A: 先确认 Cookie 诊断结论。若 `NO_AUTH_COOKIE_VISIBLE` 说明浏览器未登录；若 `SW_MAY_ATTACH_COOKIES` 需确认 sid 是否有效（可能已过期）。
+
+**Q: 需要经常同步吗？**
+A: sid 缓存 30 分钟。如果每次检查间隔都较短且 sid 频繁过期，可能需要更频繁地同步。未来版本将增加自动刷新机制。

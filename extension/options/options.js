@@ -1,10 +1,10 @@
 /**
  * options.js - 设置页逻辑
  *
- * 优化：
- * 1. 添加会话状态检查和刷新按钮
- * 2. 更清晰的账户管理
- * 3. 更健壮的错误处理
+ * 混合方案：
+ *   1. 添加检查模式选择（hybrid/content-script/sw-api）
+ *   2. 添加「同步会话」按钮（打开邮箱页 → 提取 sid → 缓存供 SW 使用）
+ *   3. 会话状态卡片展示缓存 sid 状态
  */
 
 const PROVIDER_LABELS = {
@@ -18,8 +18,6 @@ const PROVIDER_LABELS = {
 const ENDPOINT_OPTIONS = {
   netease_163: [
     { name: 'js6_rpc', label: 'js6 RPC 网关 (mbox:listMessages)' },
-    { name: 'js6_rpc2', label: 'js6 网关 (mbox:getUnread)' },
-    { name: 'unread_count', label: '轻量未读计数接口' },
   ],
   qq: [
     { name: 'cgi_mail_list', label: 'cgi-bin/mail_list (收件箱列表)' },
@@ -32,11 +30,9 @@ let currentSettings = {};
 
 async function init() {
   try {
-    // 加载账户
     const { accounts = [] } = await chrome.storage.local.get('accounts');
     currentAccounts = Array.isArray(accounts) ? accounts : [];
 
-    // 加载设置
     const { settings = {} } = await chrome.storage.local.get('settings');
     currentSettings = { ...settings };
 
@@ -53,7 +49,7 @@ function renderAccounts() {
   const list = document.getElementById('accounts-list');
 
   if (!currentAccounts.length) {
-    list.innerHTML = '<div class="help-text">暂无账户，请先在下方添加。添加邮箱账户后，需确保在浏览器中已登录对应邮箱网页。</div>';
+    list.innerHTML = '<div class="help-text">暂无账户，请先在下方添加。添加邮箱账户后，需先在浏览器中打开并登录对应邮箱网页。</div>';
   } else {
     list.innerHTML = '';
     const ul = document.createElement('ul');
@@ -66,7 +62,6 @@ function renderAccounts() {
         <div class="account-info">
           <strong>${escapeHtml(acc.email)}</strong>
           <span style="color:#6c757d;font-size:12px;margin-left:8px;">${PROVIDER_LABELS[acc.provider] || acc.provider}</span>
-          <span style="color:#adb5bd;font-size:11px;margin-left:8px;">${new Date(acc.addedAt || Date.now()).toLocaleDateString()}</span>
         </div>
         <div class="account-actions">
           <button onclick="testAccount(${idx})" class="secondary">测试</button>
@@ -82,12 +77,16 @@ function renderAccounts() {
 function renderSettings() {
   const intervalSelect = document.getElementById('interval-select');
   const logLevelSelect = document.getElementById('loglevel-select');
+  const modeSelect = document.getElementById('mode-select');
 
   if (currentSettings.checkIntervalMinutes) {
     intervalSelect.value = String(currentSettings.checkIntervalMinutes);
   }
   if (currentSettings.logLevel) {
     logLevelSelect.value = currentSettings.logLevel;
+  }
+  if (currentSettings.checkMode) {
+    modeSelect.value = currentSettings.checkMode;
   }
 }
 
@@ -120,77 +119,121 @@ function renderEndpoints() {
   container.innerHTML = sections;
 }
 
+/**
+ * 渲染会话状态：展示缓存 sid 情况和内容脚本状态
+ */
 async function renderSessionStatus() {
-  // 检查各提供商的会话状态
   const container = document.getElementById('session-status');
   if (!container) return;
 
   container.innerHTML = '<div class="help-text">正在检查会话状态...</div>';
 
   try {
-    const [r163, rQQ] = await Promise.all([
-      sendSWMessage({ type: 'checkBridge', provider: 'netease_163' }).catch(() => ({ loggedIn: false })),
-      sendSWMessage({ type: 'checkBridge', provider: 'qq' }).catch(() => ({ loggedIn: false })),
-    ]);
+    // 获取 SW 状态（含缓存 sid 信息）
+    const status = await sendSWMessage({ type: 'getStatus' }).catch(() => null);
 
-    const status163 = r163?.loggedIn ? '✅ 已登录' : '❌ 未登录';
-    const statusQQ = rQQ?.loggedIn ? '✅ 已登录' : '❌ 未登录';
+    if (status) {
+      const sid163 = status.cachedSids?.netease_163;
+      const sidQQ = status.cachedSids?.qq;
 
-    container.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
-        <div>
-          <strong>163邮箱</strong>
-          <span class="provider-status ${r163?.loggedIn ? 'status-ok' : 'status-fail'}" style="margin-left:8px;">${status163}</span>
+      const sid163Badge = sid163
+        ? '<span class="sid-chip sid-ok">sid ✅</span>'
+        : '<span class="sid-chip sid-no">sid ❌</span>';
+      const sidQQBadge = sidQQ
+        ? '<span class="sid-chip sid-ok">sid ✅</span>'
+        : '<span class="sid-chip sid-no">sid ❌</span>';
+
+      // 获取最近结果
+      const recent = status.recentResults?.[0];
+      let recentInfo = '';
+      if (recent) {
+        const time = new Date(recent.timestamp || Date.now()).toLocaleTimeString();
+        const unread = recent.unreadCount;
+        const method = recent.method || 'none';
+        recentInfo = `<div class="hint" style="font-size:12px;color:#6c757d;margin-top:6px;">
+          最近检查 (${time}): ${recent.authVerified ? '✅ 成功' : '❌ 失败'}${typeof unread === 'number' ? `，未读=${unread}` : ''} (方法: ${method})
+        </div>`;
+      }
+
+      container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
+          <div style="flex:1;">
+            <strong>163邮箱</strong>
+            ${sid163Badge}
+          </div>
+          <div style="flex:1;text-align:right;">
+            <strong>QQ邮箱</strong>
+            ${sidQQBadge}
+          </div>
         </div>
-        <div>
-          <strong>QQ邮箱</strong>
-          <span class="provider-status ${rQQ?.loggedIn ? 'status-ok' : 'status-fail'}" style="margin-left:8px;">${statusQQ}</span>
+        <div class="hint" style="font-size:12px;color:#6c757d;margin-top:4px;">
+          sid = 会话令牌。无 sid 时需「同步会话」：打开邮箱页 → 内容脚本自动提取并缓存。<br>
+          缓存 30 分钟有效，过期后需重新同步。
         </div>
-        <button onclick="refreshAllSessions()" class="secondary" style="font-size:12px;padding:4px 8px;">🔄 刷新会话</button>
-      </div>
-      <div class="hint" style="font-size:12px;color:#6c757d;margin-top:4px;">
-        会话基于浏览器中已登录的邮箱网页状态。如探测失败，请先在浏览器中打开邮箱并登录，然后点击"刷新会话"。
-      </div>
-    `;
+        ${recentInfo}
+      `;
+    } else {
+      container.innerHTML = '<div class="help-text">无法获取状态。请检查 Service Worker 是否正常运行。</div>';
+    }
   } catch (err) {
     container.innerHTML = `<div class="help-text">会话状态检查失败: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-async function refreshAllSessions() {
-  const container = document.getElementById('session-status');
-  if (container) {
-    container.innerHTML = '<div class="help-text">正在刷新会话...</div>';
-  }
+/**
+ * 同步会话：打开邮箱页 → 内容脚本提取 sid → 缓存
+ */
+async function syncSession(provider) {
+  const providerLabel = PROVIDER_LABELS[provider] || provider;
+  const pre = document.getElementById('plan-c-result');
+  if (pre) { pre.style.display = 'block'; pre.textContent = `正在同步 ${providerLabel} 会话...`; }
 
   try {
-    const results = {};
-    for (const provider of ['netease_163', 'qq']) {
-      const r = await sendSWMessage({ type: 'refreshSession', provider });
-      results[provider] = r?.loggedIn ? '✅ 已登录' : '❌ 未登录';
+    // 请求 SW 打开邮箱页并等待内容脚本提取 sid
+    const msgType = provider === 'qq' ? 'probeContentQQ' : 'probeContent163';
+    const r = await sendSWMessage({ type: msgType, openTab: true });
+
+    if (r?.probe?.success) {
+      const sid = r.probe.sid;
+      const unread = r.probe.unreadCount;
+      if (pre) {
+        pre.textContent = JSON.stringify({
+          success: true,
+          sidObtained: !!sid,
+          sid: sid ? sid.substring(0, 8) + '...' : null,
+          unreadCount: unread ?? null,
+          detail: r.probe.detail,
+        }, null, 2);
+      }
+      const msg = sid
+        ? `${providerLabel} 会话同步成功${typeof unread === 'number' ? `，未读 ${unread} 封` : ''}`
+        : `${providerLabel} 同步完成但未能获取 sid`;
+      showStatus(msg, sid ? 'success' : 'error');
+    } else {
+      if (pre) pre.textContent = JSON.stringify(r, null, 2);
+      showStatus(`${providerLabel} 同步失败: ${r?.probe?.error || '未知错误'}`, 'error');
     }
-    showStatus(`会话刷新完成: 163=${results.netease_163}, QQ=${results.qq}`, 'success');
     await renderSessionStatus();
   } catch (err) {
-    showStatus(`会话刷新失败: ${err.message}`, 'error');
+    if (pre) pre.textContent = '错误: ' + err.message;
+    showStatus(`${providerLabel} 同步失败: ${err.message}`, 'error');
     await renderSessionStatus();
   }
 }
 
-
 /**
- * 方案C：内容脚本 in-origin 探测
+ * 内容脚本直接探测
  */
 async function runPlanC(provider) {
   const pre = document.getElementById('plan-c-result');
   if (pre) { pre.style.display = 'block'; pre.textContent = '探测中...'; }
 
-  const msg = provider === 'qq' ? { type: 'probeContentQQ', openTab: true }
-                                : { type: 'probeContent163', openTab: true };
+  const msgType = provider === 'qq' ? 'probeContentQQ' : 'probeContent163';
   try {
-    const r = await sendSWMessage(msg);
+    const r = await sendSWMessage({ type: msgType, openTab: true });
     if (pre) pre.textContent = JSON.stringify(r, null, 2);
-    showStatus(`内容脚本探测完成 (${provider === 'qq' ? 'QQ' : '163'})`, r?.probe?.success ? 'success' : 'error');
+    showStatus(`内容脚本探测完成 (${PROVIDER_LABELS[provider]})`, r?.probe?.success ? 'success' : 'error');
+    await renderSessionStatus();
   } catch (err) {
     if (pre) pre.textContent = '错误: ' + err.message;
     showStatus(`内容脚本探测失败: ${err.message}`, 'error');
@@ -198,7 +241,7 @@ async function runPlanC(provider) {
 }
 
 /**
- * Cookie 会话诊断（判定 SW 是否能复用浏览器登录 Cookie）
+ * Cookie 会话诊断
  */
 async function runCookieDiag() {
   const pre = document.getElementById('plan-c-result');
@@ -222,13 +265,11 @@ async function addAccount() {
     return;
   }
 
-  // 简单验证邮箱格式
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     alert('邮箱格式不正确');
     return;
   }
 
-  // 检查是否已存在相同账户
   if (currentAccounts.some(a => a.email === email && a.provider === provider)) {
     showStatus('该账户已存在', 'error');
     return;
@@ -244,7 +285,6 @@ async function addAccount() {
   renderAccounts();
   document.getElementById('email-input').value = '';
   notifySWAccountsChanged();
-
   showStatus('账户添加成功', 'success');
 }
 
@@ -260,7 +300,7 @@ function notifySWAccountsChanged() {
   try {
     chrome.runtime.sendMessage({ type: 'accountsChanged' });
   } catch (e) {
-    // SW 可能不在线，忽略
+    // SW 可能不在线
   }
 }
 
@@ -287,12 +327,11 @@ async function testAccount(index) {
     });
 
     const providerLabel = PROVIDER_LABELS[account.provider] || account.provider;
-    const authVerified = result?.results?.[0]?.authVerified ||
-                         result?.results?.[0]?.session?.loggedIn;
+    const authVerified = result?.results?.[0]?.authVerified;
     const unreadCount = findUnreadFromResult(result);
     const msg = authVerified
-      ? `${providerLabel} 认证成功${unreadCount !== null ? `，未读: ${unreadCount}` : ''}`
-      : `${providerLabel} 认证失败，可能需要登录邮箱网页`;
+      ? `${providerLabel} 检查成功${unreadCount !== null ? `，未读: ${unreadCount}` : ''}`
+      : `${providerLabel} 未能获取未读数，可能需要同步会话`;
 
     showStatus(msg, authVerified ? 'success' : 'error');
   } catch (err) {
@@ -304,6 +343,9 @@ function findUnreadFromResult(result) {
   try {
     const accountResult = result?.results?.[0];
     if (!accountResult) return null;
+    if (typeof accountResult.unreadCount === 'number') {
+      return accountResult.unreadCount;
+    }
     for (const epResult of accountResult.results || []) {
       if (typeof epResult.unreadCount === 'number') {
         return epResult.unreadCount;
@@ -316,6 +358,7 @@ function findUnreadFromResult(result) {
 async function saveSettings() {
   const interval = parseInt(document.getElementById('interval-select').value, 10);
   const logLevel = document.getElementById('loglevel-select').value;
+  const checkMode = document.getElementById('mode-select').value;
 
   // 收集接口启用状态
   const enabledEndpoints = {};
@@ -341,17 +384,15 @@ async function saveSettings() {
     ...currentSettings,
     checkIntervalMinutes: interval,
     logLevel,
+    checkMode,
     enabledEndpoints,
   };
 
   await chrome.storage.local.set({ settings: currentSettings });
 
-  // 通知 SW 重新注册闹钟
   try {
     chrome.runtime.sendMessage({ type: 'settingsChanged' });
-  } catch (e) {
-    // SW 可能不在线，忽略
-  }
+  } catch (e) {}
 
   showStatus('设置已保存', 'success');
 }
@@ -381,13 +422,13 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// 暴露全局函数供 onclick 调用
+// 暴露全局函数
 window.addAccount = addAccount;
 window.removeAccount = removeAccount;
 window.testAccount = testAccount;
 window.saveSettings = saveSettings;
 window.resetSettings = resetSettings;
-window.refreshAllSessions = refreshAllSessions;
+window.syncSession = syncSession;
 
 // 事件绑定
 document.addEventListener('DOMContentLoaded', () => {
@@ -398,7 +439,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnContent163 = document.getElementById('btn-content-163');
   const btnContentQQ = document.getElementById('btn-content-qq');
   const btnDiagCookies = document.getElementById('btn-diagnose-cookies');
+  const btnSync163 = document.getElementById('btn-sync-163');
+  const btnSyncQQ = document.getElementById('btn-sync-qq');
 
+  if (btnSync163) btnSync163.addEventListener('click', () => syncSession('netease_163'));
+  if (btnSyncQQ) btnSyncQQ.addEventListener('click', () => syncSession('qq'));
   if (btnContent163) btnContent163.addEventListener('click', () => runPlanC('netease_163'));
   if (btnContentQQ) btnContentQQ.addEventListener('click', () => runPlanC('qq'));
   if (btnDiagCookies) btnDiagCookies.addEventListener('click', runCookieDiag);

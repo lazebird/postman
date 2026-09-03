@@ -1,27 +1,20 @@
 /**
  * provider-163.js - 163邮箱未读接口探测实现
  *
- * 修复要点：
- * 1. 先通过会话初始化获取 sid，再使用 sid 调用业务接口
- * 2. POST 请求正确携带 body
- * 3. 修复 response headers 序列化（Headers → 普通对象）
- * 4. 更准确的登录/会话状态判断
- * 5. 改进响应解析（支持 XML / JSON / 自定义格式）
+ * 混合方案下：
+ *   1. 优先从 chrome.storage.session 读取缓存 sid（内容脚本提取）
+ *   2. 带 sid 调 API 获取未读数
+ *   3. 解析响应中的未读消息
  */
 
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
-import { getSid163, replaceSidInUrl, headersToObject, clearSid } from '../shared/session.js';
+import { headersToObject } from '../shared/session.js';
 
 const logger = createLogger('provider-163');
 
 /**
  * 探测 163 邮箱未读接口
- *
- * 流程：
- * 1. 获取会话 sid（先查缓存，无则访问入口页）
- * 2. 对每个启用的接口，使用 sid 构造 URL 并调用
- * 3. 解析响应中的未读数
  *
  * @param {Object} options - 探测选项
  * @param {string[]} options.endpointNames - 要探测的接口名
@@ -30,15 +23,15 @@ const logger = createLogger('provider-163');
 export async function probe163(options = {}) {
   const config = PROVIDER_CONFIG['netease_163'];
 
-  // 第一步：获取会话 sid
-  const sessionResult = await getSid163({ forceRefresh: options.forceRefreshSid });
-  const { sid, loggedIn: sessionLoggedIn, source: sidSource } = sessionResult;
+  // 读取缓存的 sid（由内容脚本从页面 URL 提取）
+  const cachedSid = await getSidFromStorage();
+  const { sid, source: sidSource } = cachedSid;
 
   let endpoints = options.endpointNames?.length
     ? config.probeEndpoints.filter(ep => options.endpointNames.includes(ep.name))
     : config.probeEndpoints;
 
-  // 如果过滤后为空（可能是旧配置引用了不存在的接口名），回退到所有接口
+  // 如果过滤后为空，回退到所有接口
   if (!endpoints.length) {
     logger.warn('没有匹配的探测接口，回退到全部接口', { requested: options.endpointNames });
     endpoints = config.probeEndpoints;
@@ -51,7 +44,7 @@ export async function probe163(options = {}) {
   });
 
   if (!sid) {
-    // 没有 sid = 会话无效或未登录
+    // 没有 sid = 无会话信息
     const result = {
       provider: 'netease_163',
       providerName: config.name,
@@ -62,11 +55,10 @@ export async function probe163(options = {}) {
       session: {
         sidObtained: false,
         loggedIn: false,
-        detail: sessionResult.detail,
       },
       results: [],
     };
-    logger.warn('163 探测中止：未能获得会话 sid');
+    logger.warn('163 探测中止：无缓存 sid，需先通过内容脚本获取');
     return result;
   }
 
@@ -88,8 +80,7 @@ export async function probe163(options = {}) {
     provider: 'netease_163',
     providerName: config.name,
     timestamp: new Date().toISOString(),
-    authVerified: anySucceeded || sessionLoggedIn,
-    // needsAuth 仅在 sid 存在但所有请求都被拦截时才为 true
+    authVerified: anySucceeded,
     needsAuth: allFailed && !anySucceeded,
     allFailed,
     session: {
@@ -111,6 +102,27 @@ export async function probe163(options = {}) {
 }
 
 /**
+ * 从 chrome.storage.session 读取 163 的缓存 sid
+ */
+async function getSidFromStorage() {
+  try {
+    const data = await chrome.storage.session.get(['sid_163', 'sid_163_expiry']);
+    if (data.sid_163) {
+      // 检查过期（30 分钟 TTL）
+      if (data.sid_163_expiry && Date.now() > data.sid_163_expiry) {
+        logger.debug('缓存 sid 已过期');
+        await chrome.storage.session.remove(['sid_163', 'sid_163_expiry']);
+        return { sid: null, source: 'expired' };
+      }
+      return { sid: data.sid_163, source: 'cache' };
+    }
+  } catch (e) {
+    logger.warn(`读取缓存 sid 失败: ${e.message}`);
+  }
+  return { sid: null, source: 'none' };
+}
+
+/**
  * 探测单个 163 接口端点
  */
 async function probeSingleEndpoint(endpoint, sid, options) {
@@ -120,48 +132,51 @@ async function probeSingleEndpoint(endpoint, sid, options) {
   const startTime = performance.now();
 
   try {
-    // 使用 sid 替换 URL 占位符
-    let url = replaceSidInUrl(endpoint.url, sid);
-    const urlObj = new URL(url);
-    // 添加 sid 参数
-    if (!urlObj.searchParams.has('sid')) {
-      urlObj.searchParams.set('sid', sid);
+    // 构造 URL：替换 {sid} 占位符 + 追加 sid 参数
+    let url = endpoint.url.replace(/\{sid\}/g, sid);
+    try {
+      const urlObj = new URL(url);
+      if (!urlObj.searchParams.has('sid')) {
+        urlObj.searchParams.set('sid', sid);
+      }
+      url = urlObj.toString();
+    } catch (e) {
+      // URL 解析失败，手动追加
+      if (!url.includes('sid=')) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = `${url}${sep}sid=${sid}`;
+      }
     }
 
     const fetchOptions = {
       method: endpoint.method || 'GET',
       credentials: 'include',
-      mode: 'cors',
       redirect: 'follow',
-      headers: { ...(endpoint.headers || {}) },
     };
 
-    // 对 POST 请求，添加正确的 body
+    // 设置 headers
+    const headers = { ...(endpoint.headers || {}) };
+    // 替换 headers 中的 {sid} 占位符
+    for (const [key, value] of Object.entries(headers)) {
+      headers[key] = String(value).replace(/\{sid\}/g, sid);
+    }
+    fetchOptions.headers = headers;
+
+    // 对 POST 请求，添加 body
     if (fetchOptions.method === 'POST' || fetchOptions.method === 'post') {
-      // 使用 bodyTemplate 或默认参数
       let body = endpoint.bodyTemplate;
-      if (!body) {
-        // 默认的 mbox:listMessages 查询参数
-        body = 'var=@{type:"getunreadmsgs",ver:0,mailid:"",folderid:""}';
+      if (body) {
+        // 替换 body 中的 {sid} 占位符
+        body = body.replace(/\{sid\}/g, sid);
+        fetchOptions.body = body;
+        logger_ep.debug(`POST body: ${body}`);
       }
-      fetchOptions.body = body;
-      logger_ep.debug(`POST body: ${body}`);
     }
 
-    // 调试选项
-    if (DEBUG_FEATURE.captureRequestHeaders && options.captureRequestHeaders) {
-      logger_ep.debug('请求详情', {
-        url: urlObj.toString(),
-        method: fetchOptions.method,
-        headers: fetchOptions.headers,
-        body: fetchOptions.body,
-      });
-    }
-
-    logger_ep.debug(`发起请求 ${fetchOptions.method} ${urlObj.toString()}`);
-    const response = await fetch(urlObj.toString(), fetchOptions);
+    logger_ep.debug(`发起请求 ${fetchOptions.method} ${url}`);
+    const response = await fetch(url, fetchOptions);
     const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms, finalUrl=${response.url}`);
+    logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms`);
 
     // 读取响应文本
     const text = await response.text();
@@ -172,21 +187,20 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     // 判断认证状态
     const authInfo = analyzeAuth(text, response.status);
 
-    // 解析响应
-    const parseResult = parse163Response(text, endpoint.name);
-
-    // 检查最终 URL 中是否出现了 sid（防止 sid 失效后重定向到登录页）
+    // 如果会话失效，清除缓存的 sid
     if (authInfo.authBlocked) {
-      // 会话失效，清除缓存的 sid
       logger_ep.warn('163 会话已失效，清除缓存的 sid');
       try {
-        await clearSid('netease_163');
+        await chrome.storage.session.remove(['sid_163', 'sid_163_expiry']);
       } catch (e) { /* ignore */ }
     }
 
+    // 解析响应
+    const parseResult = parse163Response(text);
+
     const result = {
       endpointName: endpoint.name,
-      url: urlObj.toString(),
+      url,
       success: response.ok && !authInfo.authBlocked && parseResult.hasResult,
       httpStatus: response.status,
       elapsedMs: elapsed,
@@ -195,7 +209,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       hasResult: parseResult.hasResult,
       unreadCount: parseResult.unreadCount,
       responseContentType: response.headers?.get?.('content-type') || '',
-      preview: preview,
+      preview,
       responseHeaders: headersToObject(response.headers),
     };
 
@@ -207,7 +221,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`, {
         status: response.status,
         hasResult: parseResult.hasResult,
-        parseError: parseResult.error || null,
+        preview: preview.substring(0, 300),
       });
     }
 
@@ -217,7 +231,6 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     logger_ep.error(`接口 ${endpoint.name} 请求异常: ${err.message}`, {
       url: endpoint.url,
       errorName: err.name,
-      stack: DEBUG_FEATURE.verboseFetchErrors ? err.stack : undefined,
     });
 
     return {
@@ -237,12 +250,10 @@ async function probeSingleEndpoint(endpoint, sid, options) {
  * 分析 163 接口响应，判断认证状态
  */
 function analyzeAuth(text, httpStatus) {
-  // HTTP 状态码判断
   if (httpStatus === 401 || httpStatus === 403) {
     return { authBlocked: true, reason: `HTTP ${httpStatus}` };
   }
 
-  // 163 的 XML 响应格式中的认证错误
   if (text.includes('FA_UNAUTHORIZED')) {
     return { authBlocked: true, reason: 'FA_UNAUTHORIZED' };
   }
@@ -252,15 +263,17 @@ function analyzeAuth(text, httpStatus) {
   if (text.includes('No sid parameter')) {
     return { authBlocked: true, reason: 'No sid parameter' };
   }
-
-  // 登录引导页特征
-  if (text.includes('需要登录') || text.includes('请先登录')) {
-    return { authBlocked: true, reason: 'Login required' };
+  if (text.includes('FA_SESSION_EXPIRED')) {
+    return { authBlocked: true, reason: 'FA_SESSION_EXPIRED' };
   }
-
-  // session expired
+  if (text.includes('FA_INVALID_SESSION')) {
+    return { authBlocked: true, reason: 'FA_INVALID_SESSION' };
+  }
   if (text.toLowerCase().includes('session expired')) {
     return { authBlocked: true, reason: 'Session expired' };
+  }
+  if (text.includes('登录后可使用') || text.includes('请先登录') || text.includes('需要登录')) {
+    return { authBlocked: true, reason: 'Login required' };
   }
 
   return { authBlocked: false, reason: null };
@@ -268,58 +281,64 @@ function analyzeAuth(text, httpStatus) {
 
 /**
  * 解析 163 接口响应的未读数
+ * 支持 XML / JSON / 自定义格式
  */
-function parse163Response(text, endpointName) {
-  // 策略1: XML 格式（163 的 /js6/s 在错误时返回 XML，成功时可能是 JSON 或 XML）
-  // 检查是否包含 code=FA_OK 等成功标记
-  if (text.includes('FA_OK') || text.includes('<code>FA_OK</code>')) {
-    // XML 成功响应，尝试提取未读数
-    const unreadMatch = text.match(/<count[^>]*>\s*(\d+)\s*<\/count>/i) ||
-                        text.match(/<unread[^>]*>\s*(\d+)\s*<\/unread>/i) ||
-                        text.match(/unread_count["']?\s*[=:]\s*["']?(\d+)/i);
-    if (unreadMatch) {
-      return { hasResult: true, unreadCount: parseInt(unreadMatch[1], 10) };
+function parse163Response(text) {
+  // ===== 策略1: XML 格式 =====
+  // 163 的 /js6/s 接口可能返回 XML
+  if (text.includes('<result>') || text.includes('<?xml')) {
+    // 尝试匹配各种 XML 模式中的未读计数
+    const patterns = [
+      /<unread[^>]*>\s*(\d+)\s*<\/unread>/i,
+      /<count[^>]*>\s*(\d+)\s*<\/count>/i,
+      /<unreadCount[^>]*>\s*(\d+)\s*<\/unreadCount>/i,
+      /<total[^>]*>\s*(\d+)\s*<\/total>/i,
+    ];
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m) return { hasResult: true, unreadCount: parseInt(m[1], 10) };
     }
-    // FA_OK 但找不到数字 → 可能是 data 嵌套在 XML CDATA 中
   }
 
-  // 策略2: JSON / JSONP
+  // ===== 策略2: JSON 格式 =====
   try {
+    // 尝试清理前导/尾随
     let jsonText = text.trim();
-    // 去除 JSONP 包裹
+    // JSONP 去包裹
     const jsonpMatch = jsonText.match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
     if (jsonpMatch) {
       jsonText = jsonpMatch[1];
     }
-
     const data = JSON.parse(jsonText);
     const unread = findUnreadCount(data);
-    if (unread !== null && unread !== undefined) {
+    if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
   } catch (e) {
     // JSON 解析失败，继续
   }
 
-  // 策略3: 正则匹配未读模式
-  const unreadRegex = /["']?(?:unread|unreadCount|unread_count|messageCount|totalCount)["']?\s*[:=]\s*["']?(\d+)["']?/i;
-  const unreadMatch = text.match(unreadRegex);
-  if (unreadMatch) {
-    return { hasResult: true, unreadCount: parseInt(unreadMatch[1], 10) };
-  }
-
-  // 策略4: 匹配 163 XML 结构中的变量形式
-  const xmlVarRegex = /<var[^>]*>([^<]*(?:unread|count)[^<]*)<\/var>/i;
-  const xmlMatch = text.match(xmlVarRegex);
-  if (xmlMatch) {
-    const inner = xmlMatch[1];
-    const countMatch = inner.match(/(\d+)/);
-    if (countMatch) {
-      return { hasResult: true, unreadCount: parseInt(countMatch[1], 10) };
+  // ===== 策略3: 正则提取（通用） =====
+  const regexes = [
+    /["']?(?:unread|unreadCount|unread_count|messageCount)["']?\s*[:=]\s*["']?(\d+)["']?/i,
+    /["']?(?:unreadnum|unreadnumList|unReadCount)["']?\s*[:=]\s*["']?(\d+)["']?/i,
+    /(?:unread|new|newMessage)["']?\s*[:=]\s*['"]?\s*(\d+)/i,
+  ];
+  for (const regex of regexes) {
+    const match = text.match(regex);
+    if (match) {
+      return { hasResult: true, unreadCount: parseInt(match[1], 10) };
     }
   }
 
-  return { hasResult: false, unreadCount: null, error: 'No unread count found in response' };
+  // ===== 策略4: 查找字符串中的 count 模式 =====
+  // 163 可能使用类似 {"count":8} 或 count:8 的格式
+  const countMatch = text.match(/[\[,\{]\s*["']?(?:count|total)["']?\s*[:=]\s*(\d+)/i);
+  if (countMatch) {
+    return { hasResult: true, unreadCount: parseInt(countMatch[1], 10) };
+  }
+
+  return { hasResult: false, unreadCount: null };
 }
 
 /**
@@ -329,7 +348,7 @@ function findUnreadCount(data, depth = 0) {
   if (!data || typeof data !== 'object' || depth > 8) return null;
 
   // 直接查找已知键名
-  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'messageCount', 'count', 'total', 'totalCount'];
+  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'newCount', 'newMessageCount', 'messageCount'];
   for (const key of unreadKeys) {
     if (typeof data[key] === 'number') {
       return data[key];
@@ -339,7 +358,13 @@ function findUnreadCount(data, depth = 0) {
     }
   }
 
-  // 递归查找数组中的对象
+  // 查找 var 值中可能包含的未读信息
+  if (data.var && typeof data.var === 'string') {
+    const varMatch = data.var.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
+    if (varMatch) return parseInt(varMatch[1], 10);
+  }
+
+  // 递归查找数组
   if (Array.isArray(data)) {
     for (const item of data) {
       const found = findUnreadCount(item, depth + 1);

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mail Notifier PoC - 设置</title>
+  <title>Mail Notifier - 设置</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -60,7 +60,7 @@
       color: #6c757d;
       margin-top: 4px;
     }
-    .btn-group { display: flex; gap: 8px; margin-top: 16px; }
+    .btn-group { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
     button {
       background: #1976d2;
       color: white;
@@ -76,9 +76,7 @@
     button.secondary:hover { background: #5a6268; }
     button.danger { background: #dc3545; }
     button.danger:hover { background: #c82333; }
-    .accounts-list {
-      margin-top: 12px;
-    }
+    .accounts-list { margin-top: 12px; }
     .account-item {
       display: flex;
       align-items: center;
@@ -142,19 +140,28 @@
       color: #6c757d;
       margin-top: 4px;
     }
+    .sid-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      margin-left: 6px;
+    }
+    .sid-ok { background: #d4edda; color: #155724; }
+    .sid-no { background: #f8d7da; color: #721c24; }
   </style>
 </head>
 <body>
-  <h1>📧 Mail Notifier PoC — 设置</h1>
+  <h1>📧 Mail Notifier — 设置</h1>
 
   <!-- 账户管理 -->
   <div class="card">
     <h2>邮箱账户</h2>
     <div class="hint" style="font-size:12px;color:#6c757d;margin:2px 0 10px;">
-      账户配置已自动保存到本地存储，扩展更新后不会丢失。
+      账户配置已保存到本地存储，扩展更新后不会丢失。
     </div>
     <div id="accounts-list">
-      <div class="help-text">暂无账户，请先在下方添加。添加邮箱账户后，需确保在浏览器中已登录对应邮箱网页。</div>
+      <div class="help-text">暂无账户，请先在下方添加。添加邮箱账户后，需先在浏览器中打开并登录对应邮箱网页（用于提取会话信息）。</div>
     </div>
 
     <div class="inline-form">
@@ -168,26 +175,26 @@
     </div>
   </div>
 
-  <!-- 方案C：内容脚本 in-origin 探测 & Cookie 诊断 -->
+  <!-- 混合方案控制面板 -->
   <div class="card">
-    <h2>方案C · 内容脚本探测（推荐）</h2>
-    <p class="hint" style="margin:0 0 8px 0;">
-      绕开 SW 跨域 Cookie 限制：在真实邮箱页面内读取未读数。需先打开并登录对应邮箱网页。
+    <h2>🔧 混合方案 · 会话与探测</h2>
+    <p class="hint" style="margin:0 0 10px 0;">
+      混合模式：先打开邮箱页「激活」一次会话（自动提取 sid），之后 SW 后台独立检查，无需常驻页面。
     </p>
+
+    <!-- 会话状态 -->
+    <div id="session-status" style="margin-bottom:12px;">
+      <div class="help-text">正在检查会话状态...</div>
+    </div>
+
     <div class="btn-group">
-      <button id="btn-content-163" class="primary">📄 内容脚本探测 163</button>
-      <button id="btn-content-qq" class="primary">📄 内容脚本探测 QQ</button>
-      <button id="btn-diagnose-cookies" class="secondary">🍪 诊断会话 Cookie</button>
+      <button id="btn-sync-163" class="primary">🔄 同步163会话</button>
+      <button id="btn-sync-qq" class="primary">🔄 同步QQ会话</button>
+      <button id="btn-content-163" class="secondary">📄 内容脚本探测 163</button>
+      <button id="btn-content-qq" class="secondary">📄 内容脚本探测 QQ</button>
+      <button id="btn-diag-cookies" class="secondary">🍪 诊断会话 Cookie</button>
     </div>
     <pre id="plan-c-result" style="background:#f1f3f5;border-radius:4px;padding:8px;font-size:11px;max-height:220px;overflow:auto;margin-top:8px;display:none;white-space:pre-wrap;word-break:break-all;"></pre>
-  </div>
-
-  <!-- 会话状态 -->
-  <div class="card">
-    <h2>会话状态</h2>
-    <div id="session-status">
-      <div class="help-text">检查各邮箱提供商在浏览器中的登录状态...</div>
-    </div>
   </div>
 
   <!-- 检查设置 -->
@@ -206,6 +213,20 @@
     </div>
 
     <div class="form-group">
+      <label for="mode-select">检查模式</label>
+      <select id="mode-select">
+        <option value="hybrid" selected>混合模式（推荐）</option>
+        <option value="content-script">仅内容脚本（需常驻邮箱页）</option>
+        <option value="sw-api">仅 SW API（需先同步会话）</option>
+      </select>
+      <div class="hint">
+        <b>混合模式</b>：SW 优先用缓存 sid 独立检查；无缓存或失效时回退到内容脚本。<br>
+        <b>仅内容脚本</b>：需要浏览器中始终有打开的邮箱页面。<br>
+        <b>仅 SW API</b>：完全无需打开页面，但需要定期同步会话获取 sid。
+      </div>
+    </div>
+
+    <div class="form-group">
       <label for="loglevel-select">日志级别</label>
       <select id="loglevel-select">
         <option value="DEBUG" selected>DEBUG（最详细）</option>
@@ -213,7 +234,6 @@
         <option value="WARN">WARN</option>
         <option value="ERROR">ERROR</option>
       </select>
-      <div class="hint">DEBUG 级别会记录所有请求响应细节，用于调试</div>
     </div>
   </div>
 
