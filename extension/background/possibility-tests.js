@@ -335,7 +335,7 @@ async function probeEndpointWithStrategy(provider, endpoint, sid, strategy) {
       return { ...outcome, error: 'DNR unavailable: ' + (applied.reason || '') };
     }
     dnrRuleId = applied.ruleId;
-    outcome.dnr = { ok: true, ruleId };
+    outcome.dnr = { ok: true, ruleId: dnrRuleId };
   }
 
   try {
