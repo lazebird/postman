@@ -24,6 +24,12 @@ const COOKIE_DOMAINS = {
   qq: ['.qq.com', '.mail.qq.com'],
 };
 
+// 通过邮箱首页 URL 直接读取 Cookie（能拿到 host-only 于 mail.qq.com 等子域的会话 Cookie）
+const COOKIE_URLS = {
+  netease_163: ['https://mail.163.com/', 'https://www.163.com/'],
+  qq: ['https://mail.qq.com/', 'https://mail.qq.com/cgi-bin/login'],
+};
+
 /**
  * 各提供商的「真实登录会话」Cookie 名称特征
  * 只将高置信度的会话 Cookie 视为 auth cookie
@@ -40,14 +46,17 @@ const AUTH_COOKIE_PATTERNS = {
     { name: 'NTES_P_UTID', domains: ['.163.com'] },
   ],
   qq: [
-    // QQ 邮箱会话
-    { name: 'qm_sk', domains: ['mail.qq.com', '.mail.qq.com', '.qq.com'] },
+    // QQ 邮箱真实会话 Cookie（host-only 于 mail.qq.com）
+    { name: 'qm_sk', domains: ['mail.qq.com'] },
+    { name: 'qm_ssum', domains: ['mail.qq.com'] },
+    { name: 'skey', domains: ['mail.qq.com', '.qq.com'] },
+    // QQ 通行证登录 Cookie（可佐证已登录 QQ 账号体系）
     { name: 'p_skey', domains: ['.qq.com'] },
-    { name: 'skey', domains: ['.qq.com'] },
     { name: 'p_uin', domains: ['.qq.com'] },
-    { name: 'pt2gguin', domains: ['.ptlogin2.qq.com', '.qq.com'] },
+    { name: 'pt2gguin', domains: ['.qq.com'] },
     { name: 'uin', domains: ['.qq.com'] },
-    // QQ 邮箱的 cookie 通常在 mail.qq.com 域下
+    // QQ 邮箱早期/备用会话 Cookie
+    { name: 'qqmail', domains: ['.qq.com', 'mail.qq.com'] },
   ],
 };
 
@@ -86,7 +95,7 @@ export async function diagnoseCookies(provider) {
     return result;
   }
 
-  // 收集域名下的全部 Cookie
+  // 收集域名下的全部 Cookie（含通过邮箱首页 URL 读取的 host-only 子域 Cookie）
   const seen = new Set();
   for (const domain of domains) {
     try {
@@ -99,6 +108,19 @@ export async function diagnoseCookies(provider) {
       }
     } catch (e) {
       logger.error(`读取 ${domain} Cookie 失败: ${e.message}`);
+    }
+  }
+  for (const url of (COOKIE_URLS[provider] || [])) {
+    try {
+      const cookies = await chrome.cookies.getAll({ url });
+      for (const c of cookies || []) {
+        const key = `${c.domain}|${c.name}|${c.path}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        allCookies.push(c);
+      }
+    } catch (e) {
+      logger.error(`读取 ${url} Cookie 失败: ${e.message}`);
     }
   }
 

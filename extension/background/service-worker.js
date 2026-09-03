@@ -212,18 +212,40 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
 }
 
 /**
- * 运行内容脚本探测（优先用已有邮箱标签，必要时自动打开）
+ * 打开/复用某个提供商的邮箱「收件箱」主页面标签，并尝试读出未读数。
+ * 处理两类场景：
+ *   a) 无邮箱标签 → 打开首页
+ *   b) 有邮箱标签但落在辅助页面（如 /contacts/call.do）读不到未读 → 导航到主收件箱入口刷新
  */
 async function runContentProbe(provider, opts = {}) {
   logger.info(`运行内容脚本探测: provider=${provider}, openTab=${opts.openTab !== false}`);
+  const allowOpen = opts.openTab !== false;
 
-  // 先看是否有现成标签
+  // 1) 先看是否有现成标签并探测
   let probe = await probeTabContent(provider, null);
-  if (!probe.success && probe.needsTab && opts.openTab !== false) {
-    logger.info(`无现成邮箱标签，自动打开 ${provider} 邮箱页`);
-    await openMailboxTab(provider);
+
+  // 2) 有标签但落在辅助页（无未读且已授权），或没标签需要打开时
+  const needNavigate =
+    (probe.success && probe.pageType && probe.pageType !== 'inbox' && allowOpen) ||
+    (probe.success === false && probe.needsTab && allowOpen);
+
+  if (needNavigate) {
+    // 若有标签但页面不对，导航到该标签的主入口；否则新建标签打开首页
+    let tabId = probe.tabId;
+    if (probe.needsTab) {
+      const opened = await openMailboxTab(provider);
+      tabId = opened.tabId;
+      logger.info(`无现成邮箱标签，已打开 ${provider} 邮箱首页`);
+    } else {
+      try {
+        await chrome.tabs.update(tabId, { url: PROVIDER_HOME[provider], active: false });
+        logger.info(`导航 ${provider} 标签到首页以刷新到收件箱主框架`);
+      } catch (e) {
+        logger.warn(`导航邮箱标签失败: ${e.message}`);
+      }
+    }
     await new Promise(r => setTimeout(r, 3500));
-    probe = await probeTabContent(provider, null);
+    probe = await probeTabContent(provider, tabId);
   }
 
   // 如果内容脚本返回了 sid，缓存供 SW 独立使用
@@ -367,12 +389,44 @@ async function checkSingleAccount(account, settings, context) {
         return accountResult;
       }
 
-      // 内容脚本不可用，且 hybrid 模式下 API 也失败了
-      // 此时无法独立检查，标记为 needsTab
-      logger_acc.warn('内容脚本不可用，无法获取未读数', {
-        contentError: contentResult.probe?.error,
-        needsTab: contentResult.probe?.needsTab,
+      // 内容脚本探测返回但未能读出未读数。
+      // 区分两种情况：
+      //   a) 已授权（拿到 sid / 邮箱主页面已登录）但恰好落在无未读的辅助 frame → 需切到收件箱主框架
+      //   b) 完全无 sid / 未登录 → 需要用户登录邮箱
+      const probe = contentResult.probe || {};
+      const contentSid = probe.sid || probe.loggedIn;
+      logger_acc.warn('内容脚本未能读出未读数', {
+        success: probe.success,
+        loggedIn: probe.loggedIn,
+        authVerified: probe.authVerified,
+        pageType: probe.pageType,
+        needsInboxPage: probe.needsInboxPage,
+        unreadCount: probe.unreadCount,
+        contentError: probe.error,
+        needsTab: probe.needsTab,
       });
+
+      // 已授权但仅落在辅助 frame（如 /contacts/call.do）：单独返回一个更明确的中间态，
+      // 提示用户打开收件箱主页面即可读到未读数（并缓存 sid 供 SW API 检查）。
+      if (contentSid) {
+        const accountResult = {
+          email: account.email,
+          provider: account.provider,
+          authVerified: true,        // 已授权（拿到 sid）
+          needsAuth: false,
+          allFailed: false,
+          needsInboxPage: true,      // 需切到收件箱主页面才能读未读数
+          source: context.source,
+          method: 'content-script',
+          unreadCount: typeof probe.unreadCount === 'number' ? probe.unreadCount : null,
+          unreadSource: probe.unreadSource || null,
+          detail: probe.detail || {},
+          timestamp: new Date().toISOString(),
+        };
+        await saveCheckResult(accountResult);
+        logger_acc.info('已授权（sid 已提取），但需打开收件箱主页面才能读到未读数');
+        return accountResult;
+      }
     }
 
     // ===== 所有方法都失败 =====
@@ -385,10 +439,11 @@ async function checkSingleAccount(account, settings, context) {
       source: context.source,
       method: 'none',
       needsTab: true,
-      error: '无法获取未读数：无缓存 sid 且无打开的邮箱页面',
+      error: '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
       detail: {
         mode,
-        hint: '请打开邮箱网页登录一次，扩展会自动提取会话信息。之后可后台自动检查。',
+        hint: '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
+        action: 'openMailboxAndSync',
       },
       timestamp: new Date().toISOString(),
     };
@@ -583,19 +638,34 @@ async function checkAuthStatus(provider) {
   const contentProbe = await runContentProbe(provider, { openTab: false });
 
   const hasSid = !!cachedSid;
-  const contentLoggedIn = contentProbe.probe?.loggedIn === true;
-  const hasUnreadData = typeof contentProbe.probe?.unreadCount === 'number';
+  const probe = contentProbe.probe || {};
+  const contentLoggedIn = probe.loggedIn === true || probe.authVerified === true || !!probe.sid;
+  const hasUnreadData = typeof probe.unreadCount === 'number';
+  const pageType = probe.pageType || null;
+  const needsInboxPage = probe.needsInboxPage === true;
+
+  // 明确的授权状态机：
+  //   authed        : 已授权（拿到 sid 或内容脚本确认登录）→ 可尝试读取未读数
+  //   authed_no_unread : 已授权但当前落在无未读的辅助页 → 需切到收件箱
+  //   needs_auth    : 未授权（无 sid / 无邮箱登录页）→ 需登录邮箱
+  let authState = 'needs_auth';
+  if (hasSid || contentLoggedIn) {
+    authState = needsInboxPage ? 'authed_no_unread' : 'authed';
+  }
 
   return {
     success: true,
     provider,
+    authState,
     loggedIn: hasSid || contentLoggedIn,
     needsAuth: !(hasSid || contentLoggedIn),
     hasCachedSid: hasSid,
     detail: {
       cachedSid: hasSid,
       contentScriptLoggedIn: contentLoggedIn,
-      contentUnreadCount: contentProbe.probe?.unreadCount ?? null,
+      contentUnreadCount: hasUnreadData ? probe.unreadCount : null,
+      pageType,
+      needsInboxPage,
       cookieDiag,
     },
   };

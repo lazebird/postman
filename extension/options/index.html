@@ -177,9 +177,10 @@
 
   <!-- 混合方案控制面板 -->
   <div class="card">
-    <h2>🔧 混合方案 · 会话与探测</h2>
+    <h2>🔧 授权与未读获取</h2>
     <p class="hint" style="margin:0 0 10px 0;">
-      混合模式：先打开邮箱页「激活」一次会话（自动提取 sid），之后 SW 后台独立检查，无需常驻页面。
+      流程：<b>① 授权（同步会话）</b> → 扩展打开并提取你已登录邮箱的会话令牌；<br>
+      <b>② 获取未读数</b> → 在邮箱中打开「收件箱」主页面，即可读出未读数，之后可后台定时检查。
     </p>
 
     <!-- 会话状态 -->
@@ -188,12 +189,13 @@
     </div>
 
     <div class="btn-group">
-      <button id="btn-sync-163" class="primary">🔄 同步163会话</button>
-      <button id="btn-sync-qq" class="primary">🔄 同步QQ会话</button>
-      <button id="btn-content-163" class="secondary">📄 内容脚本探测 163</button>
-      <button id="btn-content-qq" class="secondary">📄 内容脚本探测 QQ</button>
+      <button id="btn-sync-163" class="primary">🔑 授权 · 同步163会话</button>
+      <button id="btn-sync-qq" class="primary">🔑 授权 · 同步QQ会话</button>
+      <button id="btn-content-163" class="secondary">📥 获取未读数 · 163</button>
+      <button id="btn-content-qq" class="secondary">📥 获取未读数 · QQ</button>
       <button id="btn-diag-cookies" class="secondary">🍪 诊断会话 Cookie</button>
     </div>
+    <div class="hint" style="margin-top:8px;">若「获取未读数」返回空，多半是因为扩展落在了联系人等辅助页面——请在邮箱中点击左侧「收件箱」后重试。</div>
     <pre id="plan-c-result" style="background:#f1f3f5;border-radius:4px;padding:8px;font-size:11px;max-height:220px;overflow:auto;margin-top:8px;display:none;white-space:pre-wrap;word-break:break-all;"></pre>
   </div>
 

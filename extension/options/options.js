@@ -137,21 +137,29 @@ async function renderSessionStatus() {
       const sidQQ = status.cachedSids?.qq;
 
       const sid163Badge = sid163
-        ? '<span class="sid-chip sid-ok">sid ✅</span>'
-        : '<span class="sid-chip sid-no">sid ❌</span>';
+        ? '<span class="sid-chip sid-ok">已授权 ✅</span>'
+        : '<span class="sid-chip sid-no">未授权 ❌</span>';
       const sidQQBadge = sidQQ
-        ? '<span class="sid-chip sid-ok">sid ✅</span>'
-        : '<span class="sid-chip sid-no">sid ❌</span>';
+        ? '<span class="sid-chip sid-ok">已授权 ✅</span>'
+        : '<span class="sid-chip sid-no">未授权 ❌</span>';
 
-      // 获取最近结果
-      const recent = status.recentResults?.[0];
+      // 获取最近一次单账户结果，展示授权/获取的清晰状态
+      const recent = status.recentResults?.find ? status.recentResults.find(r => r.provider && !r.source) : null;
+      const sample = status.recentResults?.find(r => r.unreadCount != null || r.authVerified === true || r.needsInboxPage === true)
+                    || status.recentResults?.[0];
       let recentInfo = '';
-      if (recent) {
-        const time = new Date(recent.timestamp || Date.now()).toLocaleTimeString();
-        const unread = recent.unreadCount;
-        const method = recent.method || 'none';
+      if (sample) {
+        const time = new Date(sample.timestamp || Date.now()).toLocaleTimeString();
+        const unread = sample.unreadCount;
+        const method = sample.method || 'none';
+        const needAuth = sample.needsAuth === true;
+        const needInbox = sample.needsInboxPage === true;
+        let statusTxt = '❌ 未授权';
+        if (sample.authVerified === true) statusTxt = '✅ 已授权';
+        if (typeof unread === 'number') statusTxt = `✅ 已授权 · 未读 ${unread} 封`;
+        else if (needInbox) statusTxt = '⚠️ 已授权但需打开收件箱主页面';
         recentInfo = `<div class="hint" style="font-size:12px;color:#6c757d;margin-top:6px;">
-          最近检查 (${time}): ${recent.authVerified ? '✅ 成功' : '❌ 失败'}${typeof unread === 'number' ? `，未读=${unread}` : ''} (方法: ${method})
+          最近检查 (${time}): ${statusTxt}${typeof unread === 'number' ? '' : ''} (方法: ${method})${needAuth ? ' — 请点击下方「同步会话」授权' : ''}${needInbox ? ' — 请在邮箱中打开「收件箱」再点「内容脚本探测」' : ''}
         </div>`;
       }
 
@@ -167,8 +175,9 @@ async function renderSessionStatus() {
           </div>
         </div>
         <div class="hint" style="font-size:12px;color:#6c757d;margin-top:4px;">
-          sid = 会话令牌。无 sid 时需「同步会话」：打开邮箱页 → 内容脚本自动提取并缓存。<br>
-          缓存 30 分钟有效，过期后需重新同步。
+          <b>授权</b>：点下方「同步163/QQ会话」→ 扩展打开邮箱页 → 自动提取会话令牌 sid。<br>
+          <b>获取未读数</b>：授权后在邮箱中停留在「收件箱」主页面，再点「内容脚本探测」即可读到未读数。<br>
+          缓存 sid 约 30 分钟有效，过期后需重新同步授权。
         </div>
         ${recentInfo}
       `;
@@ -196,22 +205,34 @@ async function syncSession(provider) {
     if (r?.probe?.success) {
       const sid = r.probe.sid;
       const unread = r.probe.unreadCount;
+      const pageType = r.probe.pageType || null;
+      const needsInbox = r.probe.needsInboxPage === true || r.probe.authVerified === true;
       if (pre) {
         pre.textContent = JSON.stringify({
           success: true,
+          authVerified: !!sid,
           sidObtained: !!sid,
           sid: sid ? sid.substring(0, 8) + '...' : null,
           unreadCount: unread ?? null,
+          pageType,
           detail: r.probe.detail,
         }, null, 2);
       }
-      const msg = sid
-        ? `${providerLabel} 会话同步成功${typeof unread === 'number' ? `，未读 ${unread} 封` : ''}`
-        : `${providerLabel} 同步完成但未能获取 sid`;
-      showStatus(msg, sid ? 'success' : 'error');
+      if (sid) {
+        // 已授权
+        if (typeof unread === 'number') {
+          showStatus(`${providerLabel} 授权成功 ✅，未读 ${unread} 封`, 'success');
+        } else if (needsInbox || pageType !== 'inbox') {
+          showStatus(`${providerLabel} 已授权 ✅，但当前在辅助页面，请在邮箱中打开「收件箱」后再读取未读数`, 'success');
+        } else {
+          showStatus(`${providerLabel} 授权成功 ✅`, 'success');
+        }
+      } else {
+        showStatus(`${providerLabel} 未检测到登录会话。请先在浏览器打开并登录 ${providerLabel}，再点「同步会话」`, 'error');
+      }
     } else {
       if (pre) pre.textContent = JSON.stringify(r, null, 2);
-      showStatus(`${providerLabel} 同步失败: ${r?.probe?.error || '未知错误'}`, 'error');
+      showStatus(`${providerLabel} 同步失败: ${r?.probe?.error || '请确认已在浏览器登录 ' + providerLabel + ' 并打开邮箱页'}`, 'error');
     }
     await renderSessionStatus();
   } catch (err) {

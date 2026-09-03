@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Edge Mail Notifier",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "混合方案：内容脚本提取sid + SW独立API探测，实现免常驻邮箱页的后台未读检查",
   "minimum_chrome_version": "116",
   "permissions": [

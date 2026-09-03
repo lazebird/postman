@@ -269,14 +269,15 @@
     <!-- Tab 2: 手动探测 -->
     <div class="tab-content" id="tab-probe">
       <div class="section">
-        <div class="section-title">内容脚本探测（会话同步）</div>
+        <div class="section-title">获取未读数（内容脚本）</div>
         <div class="btn-group" style="margin-bottom:8px;">
-          <button id="btn-content-163" class="success">📄 内容脚本探测 163</button>
-          <button id="btn-content-qq" class="success">📄 内容脚本探测 QQ</button>
+          <button id="btn-content-163" class="success">📥 获取未读数 · 163</button>
+          <button id="btn-content-qq" class="success">📥 获取未读数 · QQ</button>
           <button id="btn-diagnose-cookies" class="warning">🍪 诊断会话 Cookie</button>
         </div>
-        <div style="font-size:11px;color:#6c757d;margin-bottom:6px;">
-          需先在浏览器中打开并登录对应邮箱页面（会自动打开/复用标签）。
+        <div style="font-size:11px;color:#6c757d;margin-bottom:4px;">
+          先点击获取：扩展打开邮箱 → 提取会话（授权）并读取未读数。<br>
+          <b>若返回未读为空</b>：说明落在辅助页，请在邮箱中打开「收件箱」主页面后重试。
         </div>
       </div>
 
@@ -315,7 +316,7 @@
     </div>
 
     <div class="footer">
-      <a href="#" id="link-options">打开设置</a> · Edge Mail Notifier v0.4.0
+      <a href="#" id="link-options">打开设置</a> · Edge Mail Notifier v0.4.1
     </div>
   </div>
 
