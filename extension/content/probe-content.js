@@ -6,9 +6,10 @@
  *   2. 同时从页面 URL / DOM 提取 sid 会话令牌
  *   3. 将 sid 回传给 SW → SW 缓存 sid 后可独立调 API 进行后台检查
  *
- * 这样结合了两种优势：
- *   - 有页面时：内容脚本直接读 DOM（最可靠）
- *   - 无页面时：SW 用缓存 sid + Cookie 调 API（无需页面打开）
+ * v0.8.0 新增：
+ *   - API 请求捕获：注入 main world 脚本拦截页面 fetch/XHR 请求，
+ *     将真实 API 调用（URL/method/headers/body）发送给 SW 存储，
+ *     供后台无页面时精确复现请求。
  */
 
 (() => {
@@ -18,16 +19,156 @@
 
   const HOST = location.host;
   const isQQ = HOST.includes('qq.com');
+  const is163 = HOST.includes('163.com');
   // 判断当前 frame 是否为主（顶层）frame。
-  // webmail 收件箱的主体内容通常渲染在顶层文档或主业务 iframe 中，
-  // 而 /contacts/call.do 等子 frame 只有业务但无未读角标。区分可避免拿错 frame 的 null 结果。
   let isTopFrame = false;
   try { isTopFrame = window === window.top; } catch (e) { isTopFrame = false; }
 
+  // ============================================================
+  // API 请求拦截器（main world 注入）
+  // ============================================================
+  // 在页面主世界注入脚本，拦截 fetch 与 XHR 请求，
+  // 记录 URL/method/body 等信息后回传给内容脚本。
+  const API_INTERCEPTOR_SCRIPT = `
+    (function() {
+      if (window.__mailApiInterceptorInstalled__) return;
+      window.__mailApiInterceptorInstalled__ = true;
+
+      // 避免发送过多数据
+      const MAX_BODY_LEN = 2000;
+      const MAX_PATTERNS = 30;
+      const recentUrls = new Set();
+
+      function reportCapture(capture) {
+        try {
+          window.postMessage({ source: '__mailApiCapture__', capture }, '*');
+        } catch(e) {}
+      }
+
+      // ---- 拦截 fetch ----
+      const origFetch = window.fetch;
+      if (origFetch) {
+        window.fetch = function(...args) {
+          try {
+            let url = '';
+            let method = 'GET';
+            let body = null;
+            let headers = {};
+
+            if (typeof args[0] === 'string') url = args[0];
+            else if (args[0] && args[0].url) url = args[0].url;
+
+            const opts = args[1] || {};
+            if (opts.method) method = opts.method;
+            if (opts.body) {
+              body = typeof opts.body === 'string' ? opts.body.substring(0, MAX_BODY_LEN) : null;
+            }
+            if (opts.headers) {
+              try {
+                if (opts.headers instanceof Headers) {
+                  opts.headers.forEach((v, k) => { headers[k] = v; });
+                } else if (typeof opts.headers === 'object') {
+                  headers = { ...opts.headers };
+                }
+              } catch(e) {}
+            }
+
+            // 检查 URL 是否与未读/邮箱相关，避免记录无关请求
+            const isRelevant = /(js6\/s|mbox|mail_list|readdata|readindex|unread|folder|getfolder|getSession|fr_show|mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com)/i.test(url);
+            if (isRelevant && !recentUrls.has(method + url + (body||''))) {
+              recentUrls.add(method + url + (body||''));
+              if (recentUrls.size > MAX_PATTERNS) {
+                const firstKey = recentUrls.values().next().value;
+                recentUrls.delete(firstKey);
+              }
+              // 移除 cookie header（由 fetch credentials 自动处理）
+              delete headers['cookie'];
+              delete headers['Cookie'];
+              reportCapture({
+                type: 'fetch',
+                url,
+                method,
+                body: body ? body.substring(0, MAX_BODY_LEN) : null,
+                headers,
+                timestamp: Date.now()
+              });
+            }
+          } catch(e) {}
+          return origFetch.apply(this, args);
+        };
+      }
+
+      // ---- 拦截 XHR ----
+      const origOpen = XMLHttpRequest.prototype.open;
+      const origSend = XMLHttpRequest.prototype.send;
+
+      XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+        this.__mailApiUrl = url;
+        this.__mailApiMethod = method || 'GET';
+        return origOpen.call(this, method, url, ...rest);
+      };
+
+      XMLHttpRequest.prototype.send = function(body, ...rest) {
+        try {
+          const url = String(this.__mailApiUrl || '');
+          const method = String(this.__mailApiMethod || 'GET');
+          const isRelevant = /(js6\/s|mbox|mail_list|readdata|readindex|unread|folder|getfolder|getSession|fr_show|mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com)/i.test(url);
+          if (isRelevant && !recentUrls.has(method + url)) {
+            recentUrls.add(method + url);
+            if (recentUrls.size > MAX_PATTERNS) {
+              const firstKey = recentUrls.values().next().value;
+              recentUrls.delete(firstKey);
+            }
+            const bodyStr = body ? String(body).substring(0, MAX_BODY_LEN) : null;
+            reportCapture({
+              type: 'xhr',
+              url,
+              method,
+              body: bodyStr,
+              timestamp: Date.now()
+            });
+          }
+        } catch(e) {}
+        return origSend.call(this, body, ...rest);
+      };
+    })();
+  `;
+
+  // 在所有 frame 中注入拦截器（收集不同 iframe 的 API 调用）
+  try {
+    const s = document.createElement('script');
+    s.textContent = API_INTERCEPTOR_SCRIPT;
+    (document.head || document.documentElement).appendChild(s);
+    s.remove();
+  } catch(e) {
+    // 注入失败不阻塞主功能
+  }
+
+  // 接收页面 main world 发送的 API 捕获数据
+  window.addEventListener('message', (event) => {
+    if (!event.data || event.data.source !== '__mailApiCapture__') return;
+    const capture = event.data.capture;
+    if (!capture || !capture.url) return;
+
+    // 发送给 SW 存储（只从顶层 frame 上报）
+    if (isTopFrame) {
+      try {
+        // 从页面 URL 提取当前 sid，供 SW 正确替换捕获模式中的 sid
+        const urlSid = (location.href.match(/[?&]sid=([a-zA-Z0-9_\-]{8,})/) || [])[1] || null;
+        chrome.runtime.sendMessage({
+          type: 'apiCapture',
+          provider: isQQ ? 'qq' : is163 ? 'netease_163' : null,
+          capture: {
+            ...capture,
+            currentSid: urlSid || undefined,
+          }
+        }).catch(() => {});
+      } catch(e) {}
+    }
+  });
+
   /**
    * 提取页面 DOM 中的未读数
-   * 163 / QQ 网页版收件箱左侧列表通常会渲染「收件箱(未读数)」或未读角标。
-   * 同时回传可能暴露 sid 的信息（iframe src / window 变量 / location.href）。
    */
   function extractUnreadFromDom() {
     const doc = document;
@@ -50,8 +191,7 @@
       candidates.push({ type: 'folder', value: parseInt(m[1], 10) });
     }
 
-    // 2b. QQ 邮箱特有结构：未读数常以「收件箱 (8)」的紧邻括号、或「收件箱[未读]8」等方式呈现。
-    //     仅匹配紧邻收件箱、且明确用括号/方括号包裹的独立小整数，避免把页面其它无关数字误判为未读数。
+    // 2b. QQ 邮箱特有结构
     const qqFolderPatterns = [
       /收件箱\s*[\(（\[\[]\s*(\d{1,4})\s*[\)）\]\]]/g,
       /收件箱\s*(?:\|)?\s*[【\[]?\s*(\d{1,4})\s*[】\]]?\s*(?:未读|封)?/g,
@@ -66,14 +206,14 @@
       }
     }
 
-    // 3. 匹配侧栏常见未读字段（如 unread、badge）
+    // 3. 匹配侧栏常见未读字段
     const badgeRegex = /["']?(?:unread|unreadCount|newMessageCount|count)["']?\s*[:=]\s*["']?(\d{1,4})["']?/gi;
     let bm;
     while ((bm = badgeRegex.exec(joined))) {
       candidates.push({ type: 'attr', value: parseInt(bm[1], 10) });
     }
 
-    // 3b. QQ/163 常把未读数放在带 class 的计数元素（如 <span class="folder-count">8</span>）
+    // 3b. class/data 属性中的未读数
     doc.querySelectorAll('[class*="unread"],[class*="new"],[class*="count"],[class*="badge"],[data-unread]').forEach((el) => {
       const own = el.textContent ? el.textContent.trim() : '';
       if (/^\d{1,4}$/.test(own)) candidates.push({ type: 'attr', value: parseInt(own, 10) });
@@ -97,16 +237,15 @@
       (window.location.href.match(/[?&]sid=([a-zA-Z0-9_\-]{8,})/) || [])[1] ||
       null;
 
-    // 6. 提取页面标题中的未读数（如 "(8封未读) 网易邮箱6.0版"）
+    // 6. 提取页面标题中的未读数
     let titleUnread = null;
     const titleMatch = doc.title.match(/[\(（]\s*(\d+)\s*封?未读\s*[\)）]/);
     if (titleMatch) titleUnread = parseInt(titleMatch[1], 10);
 
-    // 合并去重：优先 folder 计数
+    // 合并去重
     const folderCount = candidates.find(c => c.type === 'folder');
     const attrCounts = candidates.filter(c => c.type === 'attr').map(c => c.value);
 
-    // 收集所有候选值（去重后）
     const allValues = [];
     if (folderCount) allValues.push(folderCount.value);
     if (titleUnread !== null) allValues.push(titleUnread);
@@ -129,7 +268,7 @@
   }
 
   /**
-   * 在页面上下文内发同源 fetch（携带第一方 Cookie）
+   * 在页面上下文内发同源 fetch
    */
   function probeInPageFetch(url, options) {
     return new Promise((resolve) => {
@@ -170,10 +309,8 @@
 
   /**
    * 计算「最可信」未读数
-   * 优先：页面标题中的未读数 → DOM folder → attrCandidates
    */
   function computeBest(diag) {
-    // 页面标题是最可靠的信号：如 "(8封未读) 网易邮箱6.0版"
     if (typeof diag.titleUnread === 'number' && diag.titleUnread >= 0) {
       return { unread: diag.titleUnread, source: 'title' };
     }
@@ -183,7 +320,6 @@
     if (diag.attrCandidates && diag.attrCandidates.length) {
       const vals = diag.attrCandidates.filter(v => v >= 0);
       if (vals.length) {
-        // 保守估计取最小值
         return { unread: Math.min(...vals), source: 'attr-dom' };
       }
     }
@@ -191,13 +327,9 @@
   }
 
   /**
-   * 判断当前页面是否为「能反映未读数」的主收件箱页面。
-   * 163/QQ 登录后可能打开在收件箱、联系人、文件夹等子模块 iframe。
-   * 只有主收件箱页面才会渲染「收件箱(未读数)」或含未读的标题。
-   * 若当前 frame 不含未读数，则视为辅助 frame，不作为授权成功的依据（但 sid 仍有效）。
+   * 判断当前页面类型
    */
   function classifyPage(diag, best) {
-    // 判断页面 URL / title 是否指向主收件箱
     const path = (location.pathname || '');
     const is163InboxPath = /js6\/main|main\.jsp|s\?func=mbox/i.test(path + ' ' + location.href);
     const isQQInboxPath = /cgi-bin\/(mail_list|frame_html|frame|mail|login|readdata)|home\/index/i.test(location.href);
@@ -206,11 +338,11 @@
 
     let pageType;
     if (hasUnread) {
-      pageType = 'inbox'; // 能读到未读数 → 主收件箱
+      pageType = 'inbox';
     } else if (is163InboxPath || isQQInboxPath || hasMailTitle) {
-      pageType = 'mailbox'; // 是邮箱主框架但未解析到未读数
+      pageType = 'mailbox';
     } else {
-      pageType = 'aux'; // 辅助 frame（联系人/设置等）
+      pageType = 'aux';
     }
     return { pageType, isTopFrame, hasUnread };
   }
@@ -220,16 +352,13 @@
       return false;
     }
 
-    // === 关键修复：子 frame 无未读数据时不响应探测消息 ===
-    // 邮箱页面含多个 iframe（联系人、设置等），子 frame 的内容脚本也会收到消息。
-    // 若子 frame 先响应并返回空未读，SW 会误判为"手动探测失败"。
-    // 这里同步检查：子 frame 且读不到未读 → 返回 false，让顶层 frame 的内容脚本响应。
+    // 子 frame 无未读数据时不响应
     if (!isTopFrame) {
       try {
         const preDiag = extractUnreadFromDom();
         const preBest = computeBest(preDiag);
         if (typeof preBest.unread !== 'number') {
-          return false; // 子 frame 无未读，不响应
+          return false;
         }
       } catch (e) {
         return false;
@@ -240,7 +369,6 @@
       try {
         const diag = extractUnreadFromDom();
         const best = computeBest(diag);
-        // 获取 sid（URL 或 DOM）
         const sid = diag.sidFromUrl || diag.sidFromDom;
         const cls = classifyPage(diag, best);
 
@@ -255,11 +383,9 @@
           best,
         };
 
-        // 已登录判定：只要拿到 sid 即可认为登录态有效（可能命中辅助 frame）。
-        // 能读到未读 → 强登录信号；只有 sid 而无未读 → 已授权但需切到收件箱主框架才能读数。
         const loggedIn = !!sid || !!best.unread;
 
-        // 通过消息通知 SW 缓存 sid（内容脚本无法直接访问 chrome.storage.local）
+        // 通知 SW 缓存 sid
         if (sid) {
           try {
             chrome.runtime.sendMessage({
@@ -271,21 +397,18 @@
                 provider: isQQ ? 'qq' : 'netease_163',
               }
             }).catch(() => {});
-          } catch (e) {
-            // 发送失败不影响探测结果
-          }
+          } catch (e) {}
         }
 
         sendResponse({
           success: true,
           loggedIn,
-          // 明确标记是否已授权（拿到 sid）与是否能读到未读数
           authVerified: !!sid,
           needsInboxPage: cls.pageType !== 'inbox',
           pageType: cls.pageType,
           unreadCount: best.unread,
           unreadSource: best.source,
-          sid: sid || null,  // 显式返回 sid
+          sid: sid || null,
           detail,
         });
       } catch (err) {
@@ -296,8 +419,7 @@
     return true; // 异步
   });
 
-  // 主动上报一次（页面加载完成后立即给 SW 一份基线数据）
-  // 仅顶层 frame 上报，避免子 frame 内容脚本重复上报干扰
+  // 主动上报一次
   if (isTopFrame) {
     try {
       const diag = extractUnreadFromDom();
@@ -315,6 +437,6 @@
           hasBody: !!(document.body && document.body.innerText),
         }
       }).catch(() => {});
-    } catch (e) { /* SW 未就绪时忽略 */ }
+    } catch (e) {}
   }
 })();

@@ -17,10 +17,11 @@
 
 import { createLogger } from '../shared/debug.js';
 import { getAccounts, getSettings, saveCheckResult, getCheckResults } from '../shared/storage.js';
-import { PROVIDERS } from '../shared/constants.js';
+import { PROVIDERS, API_PATTERN_KEYS } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
+import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 
 const logger = createLogger('service-worker');
 
@@ -178,6 +179,55 @@ async function handleMessage(message, sender) {
       return { success: true };
     }
 
+    case 'apiCapture': {
+      // 内容脚本捕获到页面的真实 API 请求，保存供 SW 后续精确复现
+      const capture = message.capture;
+      const provider = message.provider;
+      if (capture && provider) {
+        const pattern = {
+          url: capture.url || '',
+          method: capture.method || 'GET',
+          body: capture.body || null,
+          headers: capture.headers || {},
+          timestamp: capture.timestamp || Date.now(),
+          description: `页面捕获: ${capture.type || 'unknown'} ${capture.method || 'GET'} ${capture.url || ''}`,
+        };
+        // 如果消息中带了 currentSid 且 SW 还没有缓存，先临时缓存
+        const sidToUse = capture.currentSid || message.sid;
+        if (sidToUse) {
+          try {
+            const sidKey = provider === 'qq' ? 'sid_qq' : 'sid_163';
+            await chrome.storage.local.get([sidKey, `${sidKey}_expiry`]).then(async (data) => {
+              if (!data[sidKey]) {
+                await chrome.storage.local.set({
+                  [sidKey]: sidToUse,
+                  [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
+                });
+                logger.info(`通过 API 捕获缓存 ${provider} sid`);
+              }
+            });
+          } catch(e) {}
+        }
+        const saved = await saveApiPatterns(provider, [pattern]);
+        logger.info(`已捕获并保存 ${provider} API 请求: ${pattern.method} ${pattern.url}`, { saved });
+      }
+      return { success: true };
+    }
+
+    case 'getApiPatterns': {
+      const provider = message.provider;
+      if (!provider) return { success: false, error: 'Provider required' };
+      const patterns = await getApiPatterns(provider);
+      return { success: true, patterns };
+    }
+
+    case 'clearApiPatterns': {
+      const provider = message.provider;
+      if (!provider) return { success: false, error: 'Provider required' };
+      await clearApiPatterns(provider);
+      return { success: true, message: 'API patterns cleared' };
+    }
+
     case 'settingsChanged':
       await setupAlarms();
       return { success: true, message: 'Alarms re-registered' };
@@ -203,21 +253,21 @@ const PROVIDER_HOME = {
 };
 
 // 自动打开标签时使用的「登录后直达」URL：
-// 首页（https://mail.163.com/）可能只是落地/跳转页，需额外导航到主应用。
-// 用更具体的入口可减少一步跳转，更快加载内容脚本可读的主界面。
+// QQ 新版 webmail 在 wx.mail.qq.com；mail.qq.com 仅作登录入口。
 const PROVIDER_OPEN_URL = {
   netease_163: 'https://mail.163.com/js6/main.jsp',
-  qq: 'https://mail.qq.com/cgi-bin/login?fun=passport',
+  // QQ 新版 webmail 在 wx.mail.qq.com；若未登录 mail.qq.com 会跳登录
+  qq: 'https://wx.mail.qq.com/',
 };
+
+// QQ 页面中可识别的域名
+const QQ_MAIL_DOMAINS = ['mail.qq.com', 'wx.mail.qq.com', 'exmail.qq.com'];
 
 // 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
 const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ]);
 
 /**
- * QQ 邮箱的主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com（登录后常落于
- * https://wx.mail.qq.com/home/index?sid=...#/list/1），而 mail.qq.com 是其旧入口/入口域。
- * 因此识别 QQ 邮箱页面须同时匹配 mail.qq.com 与 wx.mail.qq.com，否则会漏检已打开的标签
- * 导致每次探测都重复打开新标签。
+ * QQ 邮箱主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com 或 mail.qq.com
  */
 function isQQMailUrl(url) {
   return /^https?:\/\/(?:wx\.)?mail\.qq\.com\//i.test(url || '');
