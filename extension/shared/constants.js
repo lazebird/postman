@@ -149,8 +149,55 @@ export const PROVIDER_CONFIG = {
       },
     ],
     // QQ 邮箱未读接口候选 - v0.8.0 同时支持 mail.qq.com 旧接口和 wx.mail.qq.com 新接口
+    // 优先探测 wx.mail.qq.com（QQ 新版实际运行域名），因为 sid/cookie 是从该域获取的，
+    // mail.qq.com 旧版接口可能因缺少对应域的 cookie 而无法认证。
     probeEndpoints: [
-      // ===== mail.qq.com 传统接口 =====
+      // ===== wx.mail.qq.com 新版 SPA 接口（优先）=====
+      {
+        name: 'wx_readdata',
+        url: 'https://wx.mail.qq.com/cgi-bin/readdata?sid={sid}&t=inbox',
+        method: 'GET',
+        headers: {
+          'Referer': 'https://wx.mail.qq.com/',
+          'Accept': 'application/json, text/plain, */*',
+        },
+        requiresSid: true,
+        description: '新网页版 - 读取收件箱数据',
+      },
+      {
+        name: 'wx_readindex',
+        url: 'https://wx.mail.qq.com/cgi-bin/readindex?sid={sid}&t=inbox&r=0',
+        method: 'GET',
+        headers: {
+          'Referer': 'https://wx.mail.qq.com/',
+          'Accept': 'application/json, text/plain, */*',
+        },
+        requiresSid: true,
+        description: '新网页版 - 读取邮箱索引',
+      },
+      {
+        name: 'wx_mail_list',
+        url: 'https://wx.mail.qq.com/cgi-bin/mail_list?t=inbox&sid={sid}',
+        method: 'GET',
+        headers: {
+          'Referer': 'https://wx.mail.qq.com/',
+          'Accept': 'application/json, text/plain, */*',
+        },
+        requiresSid: true,
+        description: '新网页版 - 收件箱列表',
+      },
+      {
+        name: 'wx_unread',
+        url: 'https://wx.mail.qq.com/cgi-bin/unread?sid={sid}&t=inbox',
+        method: 'GET',
+        headers: {
+          'Referer': 'https://wx.mail.qq.com/',
+          'Accept': 'application/json, text/plain, */*',
+        },
+        requiresSid: true,
+        description: '新网页版 - 未读计数',
+      },
+      // ===== mail.qq.com 传统接口（fallback）=====
       {
         name: 'cgi_mail_list',
         url: 'https://mail.qq.com/cgi-bin/mail_list?t=inbox&sid={sid}',
@@ -164,35 +211,6 @@ export const PROVIDER_CONFIG = {
         method: 'GET',
         requiresSid: true,
         description: '轻量级收件箱未读数（旧版接口）',
-      },
-      // ===== wx.mail.qq.com 新版 SPA 接口 =====
-      {
-        name: 'wx_readdata',
-        url: 'https://wx.mail.qq.com/cgi-bin/readdata?sid={sid}&t=inbox',
-        method: 'GET',
-        requiresSid: true,
-        description: '新网页版 - 读取收件箱数据',
-      },
-      {
-        name: 'wx_readindex',
-        url: 'https://wx.mail.qq.com/cgi-bin/readindex?sid={sid}&t=inbox&r=0',
-        method: 'GET',
-        requiresSid: true,
-        description: '新网页版 - 读取邮箱索引',
-      },
-      {
-        name: 'wx_mail_list',
-        url: 'https://wx.mail.qq.com/cgi-bin/mail_list?t=inbox&sid={sid}',
-        method: 'GET',
-        requiresSid: true,
-        description: '新网页版 - 收件箱列表',
-      },
-      {
-        name: 'wx_unread',
-        url: 'https://wx.mail.qq.com/cgi-bin/unread?sid={sid}&t=inbox',
-        method: 'GET',
-        requiresSid: true,
-        description: '新网页版 - 未读计数',
       },
     ],
   },
@@ -234,7 +252,7 @@ export const DEFAULT_SETTINGS = {
   // 每个提供商启用的探测接口名
   enabledEndpoints: {
     netease_163: ['js6_rpc_list', 'js6_rpc_getfolder', 'js6_rpc_getunread', 'js6_sys_getfolder'],
-    qq: ['cgi_mail_list', 'cgi_fr_show', 'wx_readdata', 'wx_readindex', 'wx_mail_list', 'wx_unread'],
+    qq: ['wx_readdata', 'wx_readindex', 'wx_mail_list', 'wx_unread', 'cgi_mail_list', 'cgi_fr_show'],
   },
 };
 

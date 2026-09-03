@@ -602,6 +602,8 @@ async function checkSingleAccount(account, settings, context) {
   logger_acc.info(`开始检查账户 ${account.email} (provider=${account.provider})`);
 
   const mode = settings.checkMode || 'hybrid';
+  // 记录 API 探测的详细信息（含端点和错误），供最终诊断
+  let apiProbeDiagnostics = null;
 
   try {
     // ===== 模式 1：SW API 优先（hybrid / sw-api） =====
@@ -631,6 +633,14 @@ async function checkSingleAccount(account, settings, context) {
         return accountResult;
       }
 
+      // API 失败，记录诊断信息
+      apiProbeDiagnostics = {
+        error: apiResult.error,
+        sidExpired: apiResult.sidExpired,
+        authBlocked: apiResult.authBlocked,
+        needsSid: apiResult.needsSid,
+        detail: apiResult.detail,
+      };
       // API 失败，sid 可能失效
       if (apiResult.sidExpired) {
         logger_acc.warn('缓存的 sid 已失效，尝试刷新');
@@ -831,6 +841,7 @@ async function checkSingleAccount(account, settings, context) {
           : '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
       detail: {
         mode,
+        apiDiagnostics: apiProbeDiagnostics,
         hint: unsupported
           ? `提供商 ${account.provider} 尚未接入内容脚本或 API 探测，暂时无法自动读取未读数。`
           : (autoCheck && !userTriggered)

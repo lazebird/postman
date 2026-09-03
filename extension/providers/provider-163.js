@@ -124,27 +124,33 @@ async function probeSingleEndpoint(endpoint, sid, options) {
   const startTime = performance.now();
 
   try {
-    // 构造 URL
+    // 构造 URL：避免用 URL.searchParams.toString() 自动编码 func 参数中的冒号
+    // （163 的 js6 RPC 接口要求 func=mbox:listMessages 等未编码格式）
     let url = endpoint.url;
     try {
-      const urlObj = new URL(url);
-      urlObj.searchParams.delete('sid');
-      if (sid) {
-        urlObj.searchParams.set('sid', sid);
+      // 替换 {sid} 占位符（在 query 或 path 中）
+      if (sid && url.includes('{sid}')) {
+        url = url.replace(/\{sid\}/g, sid);
       }
-      let pathname = urlObj.pathname.replace(/\{sid\}/g, '');
-      urlObj.pathname = pathname;
-      url = urlObj.toString();
+      // 清理残留的 sid={sid} / sid=占位符（当 sid 为空时）
+      if (!sid) {
+        url = url.replace(/[?&]sid=\{sid\}/g, '');
+        url = url.replace(/\{sid\}/g, '');
+        url = url.replace(/[?&]sid=$/g, '');
+        url = url.replace(/&sid=$/g, '');
+        url = url.replace(/\?sid=$/g, '');
+      }
+      // 若无 sid 参数但已有有效 sid，需补充
+      if (sid && !url.includes('sid=') && !url.match(/[?&]sid=[a-zA-Z0-9]/)) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
+      }
     } catch (e) {
+      // fallback
       if (sid) {
         url = url.replace(/\{sid\}/g, sid);
       } else {
         url = url.replace(/[?&]sid=\{sid\}/g, '');
-        url = url.replace(/\{sid\}/g, '');
-      }
-      if (sid && !url.includes('sid=')) {
-        const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}sid=${sid}`;
       }
     }
 
@@ -223,11 +229,16 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     if (result.success) {
       logger_ep.info(`接口 ${endpoint.name} 探测成功: unreadCount=${parseResult.unreadCount}`);
     } else if (result.authBlocked) {
-      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`);
+      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`, {
+        status: response.status,
+        preview: preview.substring(0, 500),
+      });
     } else {
       logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`, {
         status: response.status,
-        preview: preview.substring(0, 200),
+        contentType: result.responseContentType,
+        preview: preview.substring(0, 500),
+        sidUsed: !!sid,
       });
     }
 
@@ -340,6 +351,66 @@ function parse163Response(text) {
     return { hasResult: true, unreadCount: parseInt(varUnread[1], 10) };
   }
 
+  // ===== 策略6: 163 js6 RPC var 编码格式 =====
+  // 163 的 js6 接口可能返回类似: var @={...} 或 var @(...)
+  // 尝试提取 var @ 包裹的数据
+  if (text.includes('var @') || text.includes('@=')) {
+    try {
+      // 尝试提取 @{...} 中的 JSON
+      const atJsonMatch = text.match(/@\{([\s\S]*)\}/);
+      if (atJsonMatch) {
+        try {
+          const data = JSON.parse(atJsonMatch[1]);
+          const unread = findUnreadCount(data);
+          if (unread !== null) return { hasResult: true, unreadCount: unread };
+        } catch (e) {}
+      }
+      // 尝试 var @=... 格式中的 JSON
+      const atEqMatch = text.match(/var\s*@=\s*([\s\S]*?)(?:;|$)/);
+      if (atEqMatch) {
+        try {
+          const data = JSON.parse(atEqMatch[1]);
+          const unread = findUnreadCount(data);
+          if (unread !== null) return { hasResult: true, unreadCount: unread };
+        } catch (e) {}
+      }
+      // 在 var 编码中搜索 unread 数字
+      const varMatch = text.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
+      if (varMatch) return { hasResult: true, unreadCount: parseInt(varMatch[1], 10) };
+      const countMatch2 = text.match(/count["']?\s*[:=]\s*["']?(\d+)/i);
+      if (countMatch2) return { hasResult: true, unreadCount: parseInt(countMatch2[1], 10) };
+    } catch (e) {}
+  }
+
+  // ===== 策略7: 163 特有的 t="..."/c="..." 编码 =====
+  // 163 可能用 base64 或转义字符串编码数据
+  if (text.includes('t="') || text.includes("t='")) {
+    const tMatch = text.match(/t=["']([^"']+)["']/);
+    if (tMatch) {
+      try {
+        const decoded = decodeURIComponent(tMatch[1]);
+        const uMatch = decoded.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
+        if (uMatch) return { hasResult: true, unreadCount: parseInt(uMatch[1], 10) };
+      } catch (e) {}
+    }
+  }
+
+  // ===== 策略8: 163 var 编码中的 @listMessages 格式 =====
+  // 检查像 "listMessages":{...} 这样的嵌套结构
+  if (text.includes('listMessages') || text.includes('getFolderCount') || text.includes('getUnread')) {
+    // 在深层 JSON 中搜索
+    const jsonMatches = text.match(/\{[^{}]*\}/g);
+    if (jsonMatches) {
+      for (const seg of jsonMatches) {
+        try {
+          const data = JSON.parse(seg);
+          const unread = findUnreadCount(data);
+          if (unread !== null) return { hasResult: true, unreadCount: unread };
+        } catch (e) {}
+      }
+    }
+  }
+
   return { hasResult: false, unreadCount: null };
 }
 
@@ -349,7 +420,7 @@ function parse163Response(text) {
 function findUnreadCount(data, depth = 0) {
   if (!data || typeof data !== 'object' || depth > 8) return null;
 
-  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'newCount', 'newMessageCount', 'messageCount'];
+  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'newCount', 'newMessageCount', 'messageCount', 'unReadCount', 'folder_unread', 'inboxCount', 'inbox_count'];
   for (const key of unreadKeys) {
     if (typeof data[key] === 'number') {
       return data[key];
