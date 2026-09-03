@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Edge Mail Notifier",
-  "version": "0.7.0",
-  "description": "纯后台检查：Cookie+API 独立探测（持久化 sid 7天），自动检查不打开可见标签，仅在用户主动同步时短暂打开邮箱页面",
+  "version": "0.8.0",
+  "description": "纯后台检查：Cookie+API 独立探测，API 模式自动捕获学习，绝不自动打开标签",
   "minimum_chrome_version": "116",
   "permissions": [
     "alarms",
@@ -30,7 +30,8 @@
         "https://mail.163.com/*",
         "https://*.mail.163.com/*",
         "https://mail.qq.com/*",
-        "https://*.mail.qq.com/*"
+        "https://*.mail.qq.com/*",
+        "https://wx.mail.qq.com/*"
       ],
       "js": [
         "content/probe-content.js"

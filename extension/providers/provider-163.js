@@ -1,34 +1,25 @@
 /**
  * provider-163.js - 163邮箱未读接口探测实现
  *
- * 混合方案下：
- *   1. 优先从 chrome.storage.local 读取缓存 sid（内容脚本提取）
- *   2. 带 sid 调 API 获取未读数
- *   3. 解析响应中的未读消息
- *
- * 修复：163 的 API 鉴权以登录 Cookie 为核心（非 URL sid 参数）。
- *   无需强制依赖缓存 sid 才能发起 API 探测——即使无 sid 缓存，
- *   只要浏览器登录了 163 邮箱，SW 带 credentials:'include' 的 fetch 即可携带 Cookie 完成鉴权。
- *   存在 sid 时拼入 URL 作为增强（部分场景需要），无 sid 时仅依赖 Cookie 重试。
+ * v0.8.0 改进：
+ *   1. 加入 API pattern 捕获回放支持
+ *   2. 多接口格式探测（listMessages / getFolderCount / getUnread）
+ *   3. 优化 POST body 构造与 header 处理
  */
 
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
 import { headersToObject } from '../shared/session.js';
+import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
 
 const logger = createLogger('provider-163');
 
 /**
  * 探测 163 邮箱未读接口
- *
- * @param {Object} options - 探测选项
- * @param {string[]} options.endpointNames - 要探测的接口名
- * @returns {Promise<Object>} - 探测结果
  */
 export async function probe163(options = {}) {
   const config = PROVIDER_CONFIG['netease_163'];
 
-  // 读取缓存的 sid（由内容脚本从页面 URL 提取；无则仅依赖 Cookie 探测）
   const cachedSid = await getSidFromStorage();
   const { sid, source: sidSource } = cachedSid;
 
@@ -36,31 +27,42 @@ export async function probe163(options = {}) {
     ? config.probeEndpoints.filter(ep => options.endpointNames.includes(ep.name))
     : config.probeEndpoints;
 
-  // 如果过滤后为空，回退到所有接口
   if (!endpoints.length) {
-    logger.warn('没有匹配的探测接口，回退到全部接口', { requested: options.endpointNames });
+    logger.warn('没有匹配的探测接口，回退到全部接口');
     endpoints = config.probeEndpoints;
   }
 
+  // 加入捕获的 API 模式（优先执行真实捕获的请求）
+  const capturedPatterns = await getApiPatterns('netease_163');
+  let capturedEndpoints = [];
+  if (capturedPatterns.length > 0) {
+    capturedEndpoints = patternsToProbeEndpoints(capturedPatterns);
+    logger.info(`发现 ${capturedPatterns.length} 条捕获的 163 API 模式`);
+  }
+
+  const allEndpoints = [...capturedEndpoints, ...endpoints];
+
   logger.info('开始探测163邮箱未读接口', {
-    endpoints: endpoints.map(e => e.name),
+    endpoints: allEndpoints.map(e => e.name),
     hasSid: !!sid,
     sidSource: sidSource || 'none',
+    capturedCount: capturedEndpoints.length,
   });
 
-  // 核心修复：不再因无 sid 直接返回失败。
-  // 163 的 js6/s API 会话载体是登录 Cookie，SW 带 credentials:'include' fetch
-  // 即可携带 Cookie 完成鉴权——与标签页是否开启无关。
   const results = [];
   let anySucceeded = false;
+  let lastError = null;
 
-  for (const endpoint of endpoints) {
+  for (const endpoint of allEndpoints) {
     const result = await probeSingleEndpoint(endpoint, sid, options);
     results.push(result);
 
     if (result.success) {
       anySucceeded = true;
+      // 成功即停止，不再继续探测其他接口
+      break;
     }
+    if (result.error) lastError = result.error;
   }
 
   const allFailed = results.length > 0 && results.every(r => !r.success);
@@ -99,7 +101,6 @@ async function getSidFromStorage() {
   try {
     const data = await chrome.storage.local.get(['sid_163', 'sid_163_expiry']);
     if (data.sid_163) {
-      // 检查过期（7 天 TTL，由 SW 统一管理）
       if (data.sid_163_expiry && Date.now() > data.sid_163_expiry) {
         logger.debug('缓存 sid 已过期');
         await chrome.storage.local.remove(['sid_163', 'sid_163_expiry']);
@@ -124,25 +125,20 @@ async function probeSingleEndpoint(endpoint, sid, options) {
 
   try {
     // 构造 URL
-    // 使用 URL 对象统一处理：有 sid 时设置参数，无 sid 时移除 sid 参数
     let url = endpoint.url;
     try {
       const urlObj = new URL(url);
-      // 移除 {sid} 占位符参数
       urlObj.searchParams.delete('sid');
       if (sid) {
         urlObj.searchParams.set('sid', sid);
       }
-      // 移除 URL 路径中的 {sid} 占位符
       let pathname = urlObj.pathname.replace(/\{sid\}/g, '');
       urlObj.pathname = pathname;
       url = urlObj.toString();
     } catch (e) {
-      // URL 解析失败，手动处理
       if (sid) {
         url = url.replace(/\{sid\}/g, sid);
       } else {
-        // 移除 {sid} 占位符和可能的 sid 参数
         url = url.replace(/[?&]sid=\{sid\}/g, '');
         url = url.replace(/\{sid\}/g, '');
       }
@@ -158,27 +154,32 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       redirect: 'follow',
     };
 
-    // 设置 headers
-    const headers = { ...(endpoint.headers || {}) };
+    // 构建 headers
+    let headers = {};
+    if (endpoint.captured && endpoint.headers && typeof endpoint.headers === 'object') {
+      // 捕获的真实模式：使用页面实际发送的 headers
+      headers = { ...endpoint.headers };
+    } else {
+      headers = { ...(endpoint.headers || {}) };
+    }
+
     // 替换 headers 中的 {sid} 占位符
     for (const [key, value] of Object.entries(headers)) {
       if (sid) {
         headers[key] = String(value).replace(/\{sid\}/g, sid);
       } else if (String(value).includes('{sid}')) {
-        // 无 sid：移除含 sid 的 header（Referer 等）
         delete headers[key];
       }
     }
     fetchOptions.headers = headers;
 
-    // 对 POST 请求，添加 body
+    // POST body
     if (fetchOptions.method === 'POST' || fetchOptions.method === 'post') {
       let body = endpoint.bodyTemplate;
       if (body) {
-        // 替换 body 中的 {sid} 占位符
         body = body.replace(/\{sid\}/g, sid || '');
         fetchOptions.body = body;
-        logger_ep.debug(`POST body: ${body}`);
+        logger_ep.debug(`POST body: ${body.substring(0, 300)}`);
       }
     }
 
@@ -187,24 +188,20 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     const elapsed = Math.round(performance.now() - startTime);
     logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms`);
 
-    // 读取响应文本
     const text = await response.text();
     const preview = text.length > DEBUG_FEATURE.maxResponsePreviewBytes
       ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
       : text;
 
-    // 判断认证状态
     const authInfo = analyzeAuth(text, response.status);
 
-    // 如果会话失效，清除缓存的 sid
     if (authInfo.authBlocked) {
       logger_ep.warn('163 会话已失效，清除缓存的 sid');
       try {
         await chrome.storage.local.remove(['sid_163', 'sid_163_expiry']);
-      } catch (e) { /* ignore */ }
+      } catch (e) {}
     }
 
-    // 解析响应
     const parseResult = parse163Response(text);
 
     const result = {
@@ -218,9 +215,8 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       hasResult: parseResult.hasResult,
       unreadCount: parseResult.unreadCount,
       responseContentType: response.headers?.get?.('content-type') || '',
-      preview,
+      preview: preview.substring(0, 500),
       responseHeaders: headersToObject(response.headers),
-      // 记录是否有 sid（供上层判断是否需要自动恢复 sid）
       sidUsed: !!sid,
     };
 
@@ -231,18 +227,14 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     } else {
       logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`, {
         status: response.status,
-        hasResult: parseResult.hasResult,
-        preview: preview.substring(0, 300),
+        preview: preview.substring(0, 200),
       });
     }
 
     return result;
   } catch (err) {
     const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.error(`接口 ${endpoint.name} 请求异常: ${err.message}`, {
-      url: endpoint.url,
-      errorName: err.name,
-    });
+    logger_ep.error(`接口 ${endpoint.name} 请求异常: ${err.message}`);
 
     return {
       endpointName: endpoint.name,
@@ -293,13 +285,10 @@ function analyzeAuth(text, httpStatus) {
 
 /**
  * 解析 163 接口响应的未读数
- * 支持 XML / JSON / 自定义格式
  */
 function parse163Response(text) {
   // ===== 策略1: XML 格式 =====
-  // 163 的 /js6/s 接口可能返回 XML
   if (text.includes('<result>') || text.includes('<?xml')) {
-    // 尝试匹配各种 XML 模式中的未读计数
     const patterns = [
       /<unread[^>]*>\s*(\d+)\s*<\/unread>/i,
       /<count[^>]*>\s*(\d+)\s*<\/count>/i,
@@ -312,25 +301,19 @@ function parse163Response(text) {
     }
   }
 
-  // ===== 策略2: JSON 格式 =====
+  // ===== 策略2: JSON =====
   try {
-    // 尝试清理前导/尾随
     let jsonText = text.trim();
-    // JSONP 去包裹
     const jsonpMatch = jsonText.match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
-    if (jsonpMatch) {
-      jsonText = jsonpMatch[1];
-    }
+    if (jsonpMatch) jsonText = jsonpMatch[1];
     const data = JSON.parse(jsonText);
     const unread = findUnreadCount(data);
     if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
-  } catch (e) {
-    // JSON 解析失败，继续
-  }
+  } catch (e) {}
 
-  // ===== 策略3: 正则提取（通用） =====
+  // ===== 策略3: 正则提取 =====
   const regexes = [
     /["']?(?:unread|unreadCount|unread_count|messageCount)["']?\s*[:=]\s*["']?(\d+)["']?/i,
     /["']?(?:unreadnum|unreadnumList|unReadCount)["']?\s*[:=]\s*["']?(\d+)["']?/i,
@@ -343,11 +326,18 @@ function parse163Response(text) {
     }
   }
 
-  // ===== 策略4: 查找字符串中的 count 模式 =====
-  // 163 可能使用类似 {"count":8} 或 count:8 的格式
+  // ===== 策略4: count 模式 =====
   const countMatch = text.match(/[\[,\{]\s*["']?(?:count|total)["']?\s*[:=]\s*(\d+)/i);
   if (countMatch) {
     return { hasResult: true, unreadCount: parseInt(countMatch[1], 10) };
+  }
+
+  // ===== 策略5: 163 特有 var 编码格式 =====
+  // 163 可能用 var=@ 或类似编码，尝试搜索
+  const varUnread = text.match(/["']?unreadCount["']?\s*:\s*(\d+)/i) || 
+                    text.match(/["']?unreadnum["']?\s*:\s*(\d+)/i);
+  if (varUnread) {
+    return { hasResult: true, unreadCount: parseInt(varUnread[1], 10) };
   }
 
   return { hasResult: false, unreadCount: null };
@@ -359,7 +349,6 @@ function parse163Response(text) {
 function findUnreadCount(data, depth = 0) {
   if (!data || typeof data !== 'object' || depth > 8) return null;
 
-  // 直接查找已知键名
   const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'newCount', 'newMessageCount', 'messageCount'];
   for (const key of unreadKeys) {
     if (typeof data[key] === 'number') {
@@ -370,13 +359,11 @@ function findUnreadCount(data, depth = 0) {
     }
   }
 
-  // 查找 var 值中可能包含的未读信息
   if (data.var && typeof data.var === 'string') {
     const varMatch = data.var.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
     if (varMatch) return parseInt(varMatch[1], 10);
   }
 
-  // 递归查找数组
   if (Array.isArray(data)) {
     for (const item of data) {
       const found = findUnreadCount(item, depth + 1);
@@ -385,7 +372,6 @@ function findUnreadCount(data, depth = 0) {
     return null;
   }
 
-  // 递归查找对象属性
   for (const key of Object.keys(data)) {
     const val = data[key];
     if (val && typeof val === 'object') {

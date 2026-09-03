@@ -21,13 +21,13 @@ const logger = createLogger('session-diagnose');
  */
 const COOKIE_DOMAINS = {
   netease_163: ['.163.com', '.mail.163.com'],
-  qq: ['.qq.com', '.mail.qq.com'],
+  qq: ['.qq.com', '.mail.qq.com', '.wx.mail.qq.com'],
 };
 
 // 通过邮箱首页 URL 直接读取 Cookie（能拿到 host-only 于 mail.qq.com 等子域的会话 Cookie）
 const COOKIE_URLS = {
   netease_163: ['https://mail.163.com/', 'https://www.163.com/'],
-  qq: ['https://mail.qq.com/', 'https://mail.qq.com/cgi-bin/login'],
+  qq: ['https://mail.qq.com/', 'https://mail.qq.com/cgi-bin/login', 'https://wx.mail.qq.com/'],
 };
 
 /**
@@ -46,17 +46,19 @@ const AUTH_COOKIE_PATTERNS = {
     { name: 'NTES_P_UTID', domains: ['.163.com'] },
   ],
   qq: [
-    // QQ 邮箱真实会话 Cookie（host-only 于 mail.qq.com）
-    { name: 'qm_sk', domains: ['mail.qq.com'] },
-    { name: 'qm_ssum', domains: ['mail.qq.com'] },
-    { name: 'skey', domains: ['mail.qq.com', '.qq.com'] },
-    // QQ 通行证登录 Cookie（可佐证已登录 QQ 账号体系）
+    // QQ 邮箱真实会话 Cookie
+    { name: 'qm_sk', domains: ['mail.qq.com', 'wx.mail.qq.com'] },
+    { name: 'qm_ssum', domains: ['mail.qq.com', 'wx.mail.qq.com'] },
+    { name: 'skey', domains: ['mail.qq.com', 'wx.mail.qq.com', '.qq.com'] },
+    { name: 'wx_mail_sk', domains: ['wx.mail.qq.com'] },
+    { name: 'wx_mail_sid', domains: ['wx.mail.qq.com'] },
+    // QQ 通行证登录 Cookie
     { name: 'p_skey', domains: ['.qq.com'] },
     { name: 'p_uin', domains: ['.qq.com'] },
     { name: 'pt2gguin', domains: ['.qq.com'] },
     { name: 'uin', domains: ['.qq.com'] },
     // QQ 邮箱早期/备用会话 Cookie
-    { name: 'qqmail', domains: ['.qq.com', 'mail.qq.com'] },
+    { name: 'qqmail', domains: ['.qq.com', 'mail.qq.com', 'wx.mail.qq.com'] },
   ],
 };
 
