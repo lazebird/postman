@@ -215,7 +215,13 @@ async function handleMessage(message, sender) {
           } catch(e) {}
         }
         const saved = await saveApiPatterns(provider, patterns);
-        logger.info(`批量保存 ${provider} API 模式 ${patterns.length} 条`, { saved });
+        logger.info(`批量保存 ${provider} API 模式 ${patterns.length} 条`, { saved, fromFrame: message.fromFrame, totalCaptured: message.totalCaptured });
+        // 反馈本批捕获到的真实请求端点，便于日志确认捕获链路是否真正工作
+        try {
+          const seen = new Set();
+          const distinct = patterns.map(p => `${p.method} ${p.url}`).filter(u => seen.has(u) ? false : (seen.add(u), true));
+          logger.debug(`[capture:${provider}] 本批捕获端点:\n${distinct.join('\n')}`);
+        } catch (e) {}
       }
       return { success: true };
     }
@@ -251,6 +257,15 @@ async function handleMessage(message, sender) {
         }
         const saved = await saveApiPatterns(provider, [pattern]);
         logger.info(`已捕获并保存 ${provider} API 请求: ${pattern.method} ${pattern.url}`, { saved });
+      }
+      return { success: true };
+    }
+
+    case 'apiCaptureCount': {
+      // 内容脚本上报其在页面捕获到的请求总数（用于确认捕获链路工作）
+      const provider = message.provider;
+      if (provider) {
+        logger.info(`[capture:${provider}] 页面累计捕获请求 ${message.count || 0} 条 @ ${message.host || 'unknown'}`);
       }
       return { success: true };
     }

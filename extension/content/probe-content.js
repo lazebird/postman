@@ -27,22 +27,63 @@
   // ============================================================
   // API 请求拦截器（main world 注入）
   // ============================================================
-  // 在页面主世界注入脚本，拦截 fetch 与 XHR 请求，
-  // 记录 URL/method/body 等信息后回传给内容脚本。
+  // 在页面主世界注入脚本，拦截 fetch / XHR / sendBeacon / EventSource
+  // 等真实请求，记录 URL/method/headers/body 后回传给内容脚本。
+  // v0.9.1 大幅放宽捕获过滤 + 覆盖更多请求通道 + 所有 frame 独立上报，
+  // 修复「打开邮箱页却捕获不到真实 API」导致的捕获断链。
   const API_INTERCEPTOR_SCRIPT = `
     (function() {
       if (window.__mailApiInterceptorInstalled__) return;
       window.__mailApiInterceptorInstalled__ = true;
 
-      // 避免发送过多数据
-      const MAX_BODY_LEN = 2000;
-      const MAX_PATTERNS = 30;
+      // 为避免数据膨胀设上限；放宽到更多条以便捕捉到真实未读接口
+      const MAX_BODY_LEN = 4000;
+      const MAX_PATTERNS = 200;
       const recentUrls = new Set();
 
-      function reportCapture(capture) {
+      // 命中目标邮箱的任意子域/路径（163.com / qq.com）
+      // 排除纯静态资源与已知 CDN/资源域，其余 API 一律捕获
+      function isRelevant(u) {
         try {
-          window.postMessage({ source: '__mailApiCapture__', capture }, '*');
-        } catch(e) {}
+          const parsed = new URL(u);
+          const host = parsed.hostname;
+          if (!/(^|\.)(163\.com|qq\.com)$/i.test(host)) return false;
+        } catch (e) { return false; }
+        // 排除静态资源后缀
+        if (/\.(css|js|png|jpe?g|gif|svg|ico|woff2?|ttf|eot|map)([?#]|$)/i.test(u)) return false;
+        // 排除已知纯静态/CDN/资源类主机路径片段
+        if (/(rescdn|qpic|gtimg|alicdn|gslb|exmailcdn|static\.|\.css|\.js|\.png|\.gif|fonts|images?|comm|skin|style)/i.test(u)) return false;
+        return true;
+      }
+
+      function reportCapture(capture) {
+        try { window.postMessage({ source: '__mailApiCapture__', capture }, '*'); } catch (e) {}
+      }
+
+      function record(entry) {
+        try {
+          const full = new URL(entry.url, location.href).href;
+          if (!isRelevant(full)) return;
+          const key = entry.method + ' ' + full + ' ' + String(entry.body || '');
+          if (recentUrls.has(key)) return;
+          if (recentUrls.size >= MAX_PATTERNS) recentUrls.delete(recentUrls.values().next().value);
+          recentUrls.add(key);
+          const headers = {};
+          if (entry.headers) {
+            for (const [k, v] of Object.entries(entry.headers)) {
+              if (/^cookie$/i.test(k)) continue; // Cookie 头由 credentials/网络层处理，不落盘
+              headers[k] = v;
+            }
+          }
+          reportCapture({
+            type: entry.type || 'fetch',
+            url: full,
+            method: entry.method || 'GET',
+            body: entry.body ? String(entry.body).substring(0, MAX_BODY_LEN) : null,
+            headers,
+            timestamp: Date.now(),
+          });
+        } catch (e) {}
       }
 
       // ---- 拦截 fetch ----
@@ -50,55 +91,20 @@
       if (origFetch) {
         window.fetch = function(...args) {
           try {
-            let url = '';
-            let method = 'GET';
-            let body = null;
-            let headers = {};
-
-            if (typeof args[0] === 'string') {
-              url = new URL(args[0], window.location.href).href;
-            } else if (args[0] && args[0].url) {
-              url = new URL(args[0].url, window.location.href).href;
-            }
-
+            const arg0 = args[0];
+            let url = typeof arg0 === 'string' ? arg0 : (arg0 && arg0.url) || '';
             const opts = args[1] || {};
-            if (opts.method) method = opts.method;
-            if (opts.body) {
-              body = typeof opts.body === 'string' ? opts.body.substring(0, MAX_BODY_LEN) : null;
-            }
+            let method = opts.method || (typeof arg0 === 'object' && arg0.method) || 'GET';
+            let body = opts.body != null ? opts.body : null;
+            let headers = {};
             if (opts.headers) {
               try {
-                if (opts.headers instanceof Headers) {
-                  opts.headers.forEach((v, k) => { headers[k] = v; });
-                } else if (typeof opts.headers === 'object') {
-                  headers = { ...opts.headers };
-                }
-              } catch(e) {}
+                if (opts.headers instanceof Headers) opts.headers.forEach((v, k) => { headers[k] = v; });
+                else if (typeof opts.headers === 'object') headers = { ...opts.headers };
+              } catch (e) {}
             }
-
-            // 捕获邮箱域名的 API 请求（排除静态资源）
-            const isRelevant = (/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|html?)$/i.test(url) === false) &&
-                               !/(rescdn|static|style|comm|skin|fonts|images?)/i.test(url) &&
-                               /(mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com|js6|s\?func)/i.test(url);
-            if (isRelevant && !recentUrls.has(method + url + (body||''))) {
-              recentUrls.add(method + url + (body||''));
-              if (recentUrls.size > MAX_PATTERNS) {
-                const firstKey = recentUrls.values().next().value;
-                recentUrls.delete(firstKey);
-              }
-              // 移除 cookie header（由 fetch credentials 自动处理）
-              delete headers['cookie'];
-              delete headers['Cookie'];
-              reportCapture({
-                type: 'fetch',
-                url,
-                method,
-                body: body ? body.substring(0, MAX_BODY_LEN) : null,
-                headers,
-                timestamp: Date.now()
-              });
-            }
-          } catch(e) {}
+            record({ type: 'fetch', url, method, body, headers });
+          } catch (e) {}
           return origFetch.apply(this, args);
         };
       }
@@ -106,59 +112,58 @@
       // ---- 拦截 XHR ----
       const origOpen = XMLHttpRequest.prototype.open;
       const origSend = XMLHttpRequest.prototype.send;
-
-      XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-        try {
-          this.__mailApiUrl = new URL(url, window.location.href).href;
-        } catch(e) {
-          this.__mailApiUrl = url;
-        }
+      XMLHttpRequest.prototype.open = function(method, url) {
+        try { this.__mailApiUrl = new URL(url, location.href).href; }
+        catch (e) { this.__mailApiUrl = url; }
         this.__mailApiMethod = method || 'GET';
-        return origOpen.call(this, method, url, ...rest);
+        return origOpen.apply(this, arguments);
+      };
+      XMLHttpRequest.prototype.send = function(body) {
+        try { record({ type: 'xhr', url: this.__mailApiUrl || '', method: this.__mailApiMethod || 'GET', body }); }
+        catch (e) {}
+        return origSend.apply(this, arguments);
       };
 
-      XMLHttpRequest.prototype.send = function(body, ...rest) {
-        try {
-          const url = String(this.__mailApiUrl || '');
-          const method = String(this.__mailApiMethod || 'GET');
-          const isRelevant = (/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|html?)$/i.test(url) === false) &&
-                             !/\/rescdn\/|\/static\/|\/style\/|\/comm\/|\/fonts\/|\/images?\//i.test(url) &&
-                             /(mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com)/i.test(url);
-          if (isRelevant && !recentUrls.has(method + url)) {
-            recentUrls.add(method + url);
-            if (recentUrls.size > MAX_PATTERNS) {
-              const firstKey = recentUrls.values().next().value;
-              recentUrls.delete(firstKey);
-            }
-            const bodyStr = body ? String(body).substring(0, MAX_BODY_LEN) : null;
-            reportCapture({
-              type: 'xhr',
-              url,
-              method,
-              body: bodyStr,
-              timestamp: Date.now()
-            });
-          }
-        } catch(e) {}
-        return origSend.call(this, body, ...rest);
-      };
+      // ---- 拦截 sendBeacon ----
+      const origBeacon = navigator.sendBeacon && navigator.sendBeacon.bind(navigator);
+      if (origBeacon) {
+        navigator.sendBeacon = function(url, data) {
+          try { record({ type: 'beacon', url, method: 'POST', body: data && String(data) }); }
+          catch (e) {}
+          return origBeacon(url, data);
+        };
+      }
+
+      // ---- 拦截 EventSource ----
+      try {
+        const OrigES = window.EventSource;
+        if (OrigES) {
+          window.EventSource = function(url, cfg) {
+            try { record({ type: 'eventsource', url, method: 'GET', body: null }); } catch (e) {}
+            return new OrigES(url, cfg);
+          };
+        }
+      } catch (e) {}
     })();
   `;
 
-  // 在所有 frame 中注入拦截器（收集不同 iframe 的 API 调用）
+  // 在所有 frame 中注入拦截器（各 frame 各自捕获其内发出的 API 调用）
   try {
     const s = document.createElement('script');
     s.textContent = API_INTERCEPTOR_SCRIPT;
     (document.head || document.documentElement).appendChild(s);
     s.remove();
-  } catch(e) {
+  } catch (e) {
     // 注入失败不阻塞主功能
   }
 
-  // API 捕获批量发送队列（避免频繁消息轰炸 SW）
+  // 捕获计数（供日志/上报确认捕获是否真正工作）
+  let apiCaptureCount = 0;
+
+  // API 捕获批量发送队列（每 frame 独立上报，含 iframe）
   let captureQueue = [];
   let captureFlushTimer = null;
-  const FLUSH_INTERVAL = 2000; // 每 2 秒批量发送一次
+  const FLUSH_INTERVAL = 1500;
 
   // 接收页面 main world 发送的 API 捕获数据
   window.addEventListener('message', (event) => {
@@ -166,34 +171,54 @@
     const capture = event.data.capture;
     if (!capture || !capture.url) return;
 
-    // 从页面 URL 提取当前 sid，供 SW 正确替换捕获模式中的 sid
+    apiCaptureCount++;
+    // 从本 frame URL 提取 sid 用于占位符替换；若本 frame 没有，保留 undefined 由 SW 用已知 sid 替换
     const urlSid = (location.href.match(/[?&]sid=([a-zA-Z0-9_\-]{8,})/) || [])[1] || null;
     const enriched = { ...capture, currentSid: urlSid || undefined };
 
-    // 入队批量发送（顶层 frame 统一上报）
-    if (isTopFrame) {
-      captureQueue.push(enriched);
-      if (!captureFlushTimer) {
-        captureFlushTimer = setTimeout(() => {
-          captureFlushTimer = null;
-          if (captureQueue.length > 0) {
-            const batch = captureQueue.splice(0, captureQueue.length);
+    // 入队批量发送（不再局限于顶层 frame，所有 frame 都独立上报）
+    captureQueue.push(enriched);
+    if (!captureFlushTimer) {
+      captureFlushTimer = setTimeout(() => {
+        captureFlushTimer = null;
+        if (captureQueue.length > 0) {
+          const batch = captureQueue.splice(0, captureQueue.length);
+          const provider = isQQ ? 'qq' : is163 ? 'netease_163' : null;
+          if (provider) {
             try {
               chrome.runtime.sendMessage({
                 type: 'apiCaptureBatch',
-                provider: isQQ ? 'qq' : is163 ? 'netease_163' : null,
+                provider,
                 captures: batch,
+                fromFrame: isTopFrame ? 'top' : 'sub',
+                frameUrl: location.href,
+                totalCaptured: apiCaptureCount,
               }).catch(() => {});
-            } catch(e) {}
+            } catch (e) {}
           }
-        }, FLUSH_INTERVAL);
-      }
-      // 限制队列长度
-      if (captureQueue.length > 20) {
-        captureQueue = captureQueue.slice(-20);
-      }
+        }
+      }, FLUSH_INTERVAL);
     }
+    // 限制队列长度
+    if (captureQueue.length > 60) captureQueue = captureQueue.slice(-60);
   });
+
+  // 顶层 frame 定期上报本页捕获总数，供 SW 以日志确认捕获链路工作
+  let lastReportedCount = 0;
+  const countTimer = setInterval(() => {
+    if (apiCaptureCount > lastReportedCount && isTopFrame) {
+      lastReportedCount = apiCaptureCount;
+      try {
+        chrome.runtime.sendMessage({
+          type: 'apiCaptureCount',
+          provider: isQQ ? 'qq' : is163 ? 'netease_163' : null,
+          count: apiCaptureCount,
+          host: HOST,
+        }).catch(() => {});
+      } catch (e) {}
+    }
+  }, 5000);
+  // 不阻止页面卸载清理
 
   /**
    * 提取页面 DOM 中的未读数
