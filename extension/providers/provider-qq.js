@@ -4,6 +4,11 @@
  * 混合方案下：
  *   1. 优先从 chrome.storage.session 读取缓存 sid（内容脚本提取）
  *   2. 带 sid 调 API 获取未读数
+ *
+ * 修复：不再因无缓存 sid 就直接中止探测。
+ *   - 有 sid：拼入 URL 调 API
+ *   - 无 sid：尝试不带 sid 直接调 API（部分 QQ 端点可仅靠 Cookie 工作），
+ *     若被拦截则标记 needsSid=true，交由上层自动恢复 sid。
  */
 
 import { createLogger } from '../shared/debug.js';
@@ -40,24 +45,9 @@ export async function probeQQ(options = {}) {
     sidSource: sidSource || 'none',
   });
 
-  if (!sid) {
-    const result = {
-      provider: 'qq',
-      providerName: config.name,
-      timestamp: new Date().toISOString(),
-      authVerified: false,
-      needsAuth: true,
-      allFailed: true,
-      session: {
-        sidObtained: false,
-        loggedIn: false,
-      },
-      results: [],
-    };
-    logger.warn('QQ 探测中止：无缓存 sid');
-    return result;
-  }
-
+  // 核心修复：不再因无 sid 直接返回失败。
+  // QQ 部分接口（如 fr_show）可能在无 sid 时也能通过 Cookie 工作，
+  // 至少应尝试发起请求；若响应明确要求 sid，则由上层触发自动恢复。
   const results = [];
   let anySucceeded = false;
 
@@ -71,19 +61,22 @@ export async function probeQQ(options = {}) {
   }
 
   const allFailed = results.length > 0 && results.every(r => !r.success);
+  const authBlocked = results.some(r => r.authBlocked);
+  const needsSid = !sid && (allFailed || authBlocked);
 
   const summary = {
     provider: 'qq',
     providerName: config.name,
     timestamp: new Date().toISOString(),
     authVerified: anySucceeded,
-    needsAuth: allFailed && !anySucceeded,
+    needsAuth: allFailed && !anySucceeded && !needsSid,
     allFailed,
+    needsSid, // 新增：无 sid 且 API 失败 → 上层需要自动恢复 sid
     session: {
-      sidObtained: true,
-      sid: sid.substring(0, 8) + '...',
-      loggedIn: true,
-      source: sidSource,
+      sidObtained: !!sid,
+      sid: sid ? sid.substring(0, 8) + '...' : null,
+      loggedIn: anySucceeded || (sid !== null),
+      source: sidSource || 'none',
     },
     results,
   };
@@ -92,6 +85,8 @@ export async function probeQQ(options = {}) {
     authVerified: summary.authVerified,
     needsAuth: summary.needsAuth,
     allFailed,
+    authBlocked,
+    needsSid,
   });
 
   return summary;
@@ -122,19 +117,33 @@ async function getSidFromStorage() {
  */
 async function probeSingleEndpoint(endpoint, sid, options) {
   const logger_ep = createLogger(`qq:${endpoint.name}`);
-  logger_ep.info(`探测接口 ${endpoint.name}`);
+  logger_ep.info(`探测接口 ${endpoint.name}${sid ? '' : '（无 sid，仅依赖 Cookie）'}`);
 
   const startTime = performance.now();
 
   try {
-    // 替换 {sid} 占位符 + 确保 sid 参数存在
-    let url = endpoint.url.replace(/\{sid\}/g, sid);
-    if (!url.includes('sid=')) {
-      try {
-        const urlObj = new URL(url);
+    // 构造 URL：有 sid 时替换 {sid} 占位符；无 sid 时移除占位符
+    let url = endpoint.url;
+    try {
+      const urlObj = new URL(url);
+      // 移除 {sid} 占位符参数
+      urlObj.searchParams.delete('sid');
+      if (sid) {
         urlObj.searchParams.set('sid', sid);
-        url = urlObj.toString();
-      } catch (e) {
+      }
+      // 移除 URL 路径中的 {sid} 占位符
+      let pathname = urlObj.pathname.replace(/\{sid\}/g, '');
+      urlObj.pathname = pathname;
+      url = urlObj.toString();
+    } catch (e) {
+      // URL 解析失败，手动处理
+      if (sid) {
+        url = url.replace(/\{sid\}/g, sid);
+      } else {
+        url = url.replace(/[?&]sid=\{sid\}/g, '');
+        url = url.replace(/\{sid\}/g, '');
+      }
+      if (sid && !url.includes('sid=')) {
         const sep = url.includes('?') ? '&' : '?';
         url = `${url}${sep}sid=${sid}`;
       }
@@ -153,7 +162,12 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     };
     // 替换 headers 中的 {sid} 占位符
     for (const [key, value] of Object.entries(headers)) {
-      headers[key] = String(value).replace(/\{sid\}/g, sid);
+      if (sid) {
+        headers[key] = String(value).replace(/\{sid\}/g, sid);
+      } else if (String(value).includes('{sid}')) {
+        // 无 sid：移除含 sid 的 header
+        delete headers[key];
+      }
     }
     fetchOptions.headers = headers;
 
@@ -195,6 +209,8 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       responseContentType: response.headers?.get?.('content-type') || '',
       preview,
       responseHeaders: headersToObject(response.headers),
+      sidUsed: !!sid,
+      needsSid: !sid && authInfo.authBlocked,
     };
 
     if (result.success) {
@@ -226,6 +242,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       elapsedMs: elapsed,
       error: err.message,
       errorName: err.name,
+      sidUsed: !!sid,
     };
   }
 }

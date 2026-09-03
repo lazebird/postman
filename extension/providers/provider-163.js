@@ -5,6 +5,11 @@
  *   1. 优先从 chrome.storage.session 读取缓存 sid（内容脚本提取）
  *   2. 带 sid 调 API 获取未读数
  *   3. 解析响应中的未读消息
+ *
+ * 修复：163 的 API 鉴权以登录 Cookie 为核心（非 URL sid 参数）。
+ *   无需强制依赖缓存 sid 才能发起 API 探测——即使无 sid 缓存，
+ *   只要浏览器登录了 163 邮箱，SW 带 credentials:'include' 的 fetch 即可携带 Cookie 完成鉴权。
+ *   存在 sid 时拼入 URL 作为增强（部分场景需要），无 sid 时仅依赖 Cookie 重试。
  */
 
 import { createLogger } from '../shared/debug.js';
@@ -23,7 +28,7 @@ const logger = createLogger('provider-163');
 export async function probe163(options = {}) {
   const config = PROVIDER_CONFIG['netease_163'];
 
-  // 读取缓存的 sid（由内容脚本从页面 URL 提取）
+  // 读取缓存的 sid（由内容脚本从页面 URL 提取；无则仅依赖 Cookie 探测）
   const cachedSid = await getSidFromStorage();
   const { sid, source: sidSource } = cachedSid;
 
@@ -43,25 +48,9 @@ export async function probe163(options = {}) {
     sidSource: sidSource || 'none',
   });
 
-  if (!sid) {
-    // 没有 sid = 无会话信息
-    const result = {
-      provider: 'netease_163',
-      providerName: config.name,
-      timestamp: new Date().toISOString(),
-      authVerified: false,
-      needsAuth: true,
-      allFailed: true,
-      session: {
-        sidObtained: false,
-        loggedIn: false,
-      },
-      results: [],
-    };
-    logger.warn('163 探测中止：无缓存 sid，需先通过内容脚本获取');
-    return result;
-  }
-
+  // 核心修复：不再因无 sid 直接返回失败。
+  // 163 的 js6/s API 会话载体是登录 Cookie，SW 带 credentials:'include' fetch
+  // 即可携带 Cookie 完成鉴权——与标签页是否开启无关。
   const results = [];
   let anySucceeded = false;
 
@@ -75,19 +64,20 @@ export async function probe163(options = {}) {
   }
 
   const allFailed = results.length > 0 && results.every(r => !r.success);
+  const authBlocked = results.some(r => r.authBlocked);
 
   const summary = {
     provider: 'netease_163',
     providerName: config.name,
     timestamp: new Date().toISOString(),
     authVerified: anySucceeded,
-    needsAuth: allFailed && !anySucceeded,
+    needsAuth: allFailed && !anySucceeded && !authBlocked && !sid,
     allFailed,
     session: {
-      sidObtained: true,
-      sid: sid.substring(0, 8) + '...', // 只显示前几位避免泄露
-      loggedIn: true,
-      source: sidSource,
+      sidObtained: !!sid,
+      sid: sid ? sid.substring(0, 8) + '...' : null,
+      loggedIn: anySucceeded || (sid !== null),
+      source: sidSource || 'none',
     },
     results,
   };
@@ -96,6 +86,7 @@ export async function probe163(options = {}) {
     authVerified: summary.authVerified,
     needsAuth: summary.needsAuth,
     allFailed,
+    authBlocked,
   });
 
   return summary;
@@ -108,7 +99,7 @@ async function getSidFromStorage() {
   try {
     const data = await chrome.storage.session.get(['sid_163', 'sid_163_expiry']);
     if (data.sid_163) {
-      // 检查过期（30 分钟 TTL）
+      // 检查过期（12 小时 TTL，由 SW 统一管理）
       if (data.sid_163_expiry && Date.now() > data.sid_163_expiry) {
         logger.debug('缓存 sid 已过期');
         await chrome.storage.session.remove(['sid_163', 'sid_163_expiry']);
@@ -127,22 +118,35 @@ async function getSidFromStorage() {
  */
 async function probeSingleEndpoint(endpoint, sid, options) {
   const logger_ep = createLogger(`163:${endpoint.name}`);
-  logger_ep.info(`探测接口 ${endpoint.name}`);
+  logger_ep.info(`探测接口 ${endpoint.name}${sid ? '' : '（无 sid，仅依赖 Cookie）'}`);
 
   const startTime = performance.now();
 
   try {
-    // 构造 URL：替换 {sid} 占位符 + 追加 sid 参数
-    let url = endpoint.url.replace(/\{sid\}/g, sid);
+    // 构造 URL
+    // 使用 URL 对象统一处理：有 sid 时设置参数，无 sid 时移除 sid 参数
+    let url = endpoint.url;
     try {
       const urlObj = new URL(url);
-      if (!urlObj.searchParams.has('sid')) {
+      // 移除 {sid} 占位符参数
+      urlObj.searchParams.delete('sid');
+      if (sid) {
         urlObj.searchParams.set('sid', sid);
       }
+      // 移除 URL 路径中的 {sid} 占位符
+      let pathname = urlObj.pathname.replace(/\{sid\}/g, '');
+      urlObj.pathname = pathname;
       url = urlObj.toString();
     } catch (e) {
-      // URL 解析失败，手动追加
-      if (!url.includes('sid=')) {
+      // URL 解析失败，手动处理
+      if (sid) {
+        url = url.replace(/\{sid\}/g, sid);
+      } else {
+        // 移除 {sid} 占位符和可能的 sid 参数
+        url = url.replace(/[?&]sid=\{sid\}/g, '');
+        url = url.replace(/\{sid\}/g, '');
+      }
+      if (sid && !url.includes('sid=')) {
         const sep = url.includes('?') ? '&' : '?';
         url = `${url}${sep}sid=${sid}`;
       }
@@ -158,7 +162,12 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     const headers = { ...(endpoint.headers || {}) };
     // 替换 headers 中的 {sid} 占位符
     for (const [key, value] of Object.entries(headers)) {
-      headers[key] = String(value).replace(/\{sid\}/g, sid);
+      if (sid) {
+        headers[key] = String(value).replace(/\{sid\}/g, sid);
+      } else if (String(value).includes('{sid}')) {
+        // 无 sid：移除含 sid 的 header（Referer 等）
+        delete headers[key];
+      }
     }
     fetchOptions.headers = headers;
 
@@ -167,7 +176,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       let body = endpoint.bodyTemplate;
       if (body) {
         // 替换 body 中的 {sid} 占位符
-        body = body.replace(/\{sid\}/g, sid);
+        body = body.replace(/\{sid\}/g, sid || '');
         fetchOptions.body = body;
         logger_ep.debug(`POST body: ${body}`);
       }
@@ -211,6 +220,8 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       responseContentType: response.headers?.get?.('content-type') || '',
       preview,
       responseHeaders: headersToObject(response.headers),
+      // 记录是否有 sid（供上层判断是否需要自动恢复 sid）
+      sidUsed: !!sid,
     };
 
     if (result.success) {
@@ -242,6 +253,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       elapsedMs: elapsed,
       error: err.message,
       errorName: err.name,
+      sidUsed: !!sid,
     };
   }
 }
