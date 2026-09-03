@@ -84,6 +84,53 @@ document.getElementById('btn-probe-qq').addEventListener('click', async () => {
   }
 });
 
+// 方案C：内容脚本探测 163
+const btnContent163 = document.getElementById('btn-content-163');
+if (btnContent163) {
+  btnContent163.addEventListener('click', async () => {
+    const btn = btnContent163;
+    btn.disabled = true; btn.textContent = '探测中...';
+    try {
+      const result = await sendMessage({ type: 'probeContent163', openTab: true });
+      showProbeResult('方案C · 内容脚本探测 163', result);
+      await refreshStatus();
+    } catch (err) {
+      showProbeResult('探测失败', { success: false, error: err.message });
+    } finally { btn.disabled = false; btn.textContent = '📄 内容脚本探测 163'; }
+  });
+}
+
+// 方案C：内容脚本探测 QQ
+const btnContentQQ = document.getElementById('btn-content-qq');
+if (btnContentQQ) {
+  btnContentQQ.addEventListener('click', async () => {
+    const btn = btnContentQQ;
+    btn.disabled = true; btn.textContent = '探测中...';
+    try {
+      const result = await sendMessage({ type: 'probeContentQQ', openTab: true });
+      showProbeResult('方案C · 内容脚本探测 QQ', result);
+      await refreshStatus();
+    } catch (err) {
+      showProbeResult('探测失败', { success: false, error: err.message });
+    } finally { btn.disabled = false; btn.textContent = '📄 内容脚本探测 QQ'; }
+  });
+}
+
+// Cookie 会话诊断
+const btnDiagCookies = document.getElementById('btn-diagnose-cookies');
+if (btnDiagCookies) {
+  btnDiagCookies.addEventListener('click', async () => {
+    const btn = btnDiagCookies;
+    btn.disabled = true; btn.textContent = '诊断中...';
+    try {
+      const result = await sendMessage({ type: 'diagnoseCookies' });
+      showProbeResult('🍪 会话 Cookie 诊断', result);
+    } catch (err) {
+      showProbeResult('诊断失败', { success: false, error: err.message });
+    } finally { btn.disabled = false; btn.textContent = '🍪 诊断会话 Cookie'; }
+  });
+}
+
 // 检查认证状态
 document.getElementById('btn-check-bridge').addEventListener('click', async () => {
   const btn = document.getElementById('btn-check-bridge');
