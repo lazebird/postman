@@ -18,6 +18,26 @@
   window.__mailProbeContentLoaded__ = true;
 
   const HOST = location.host;
+
+  // ---- document_start 就绪辅助 ----
+  // run_at 改为 document_start 后，内容脚本注入时 document.body 尚不存在，
+  // 所有依赖 DOM 的探测/上报需等 body 就绪后再执行。
+  const bodyReady = new Promise((resolve) => {
+    if (document.body) return resolve();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function onReady() {
+        document.removeEventListener('DOMContentLoaded', onReady);
+        resolve();
+      });
+    } else {
+      // 兜底轮询
+      let tries = 0;
+      const t = setInterval(() => {
+        if (document.body || ++tries > 100) { clearInterval(t); resolve(); }
+      }, 50);
+    }
+  });
+  function waitForBody() { return bodyReady; }
   const isQQ = HOST.includes('qq.com');
   const is163 = HOST.includes('163.com');
   // 判断当前 frame 是否为主（顶层）frame。
@@ -479,6 +499,7 @@
 
     (async () => {
       try {
+        await waitForBody(); // document_start 下等待 body 就绪后再读 DOM
         const diag = extractUnreadFromDom();
         const best = computeBest(diag);
         const sid = diag.sidFromUrl || diag.sidFromDom;
@@ -536,30 +557,33 @@
     return true; // 异步
   });
 
-  // 主动上报一次
+  // 主动上报一次（document_start 下等 body 就绪后再读 DOM；拦截器已在注入早期就位）
   if (isTopFrame) {
-    try {
-      const diag = extractUnreadFromDom();
-      const best = computeBest(diag);
-      const cls = classifyPage(diag, best);
-      const nav = getNavContext(diag, best);
-      chrome.runtime.sendMessage({
-        type: 'contentPageReady',
-        detail: {
-          host: HOST,
-          url: location.href,
-          referrer: document.referrer || '',
-          title: document.title,
-          navStage: nav.stage,
-          readyState: document.readyState,
-          contentReached: nav.contentReached,
-          frameRole: nav.frameRole,
-          pageType: cls.pageType,
-          unreadCount: best.unread,
-          sid: diag.sidFromUrl || diag.sidFromDom,
-          hasBody: !!(document.body && document.body.innerText),
-        }
-      }).catch(() => {});
-    } catch (e) {}
+    (async () => {
+      await waitForBody();
+      try {
+        const diag = extractUnreadFromDom();
+        const best = computeBest(diag);
+        const cls = classifyPage(diag, best);
+        const nav = getNavContext(diag, best);
+        chrome.runtime.sendMessage({
+          type: 'contentPageReady',
+          detail: {
+            host: HOST,
+            url: location.href,
+            referrer: document.referrer || '',
+            title: document.title,
+            navStage: nav.stage,
+            readyState: document.readyState,
+            contentReached: nav.contentReached,
+            frameRole: nav.frameRole,
+            pageType: cls.pageType,
+            unreadCount: best.unread,
+            sid: diag.sidFromUrl || diag.sidFromDom,
+            hasBody: !!(document.body && document.body.innerText),
+          }
+        }).catch(() => {});
+      } catch (e) {}
+    })();
   }
 })();
