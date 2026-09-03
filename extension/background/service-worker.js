@@ -195,6 +195,17 @@ const PROVIDER_HOME = {
   qq: 'https://mail.qq.com/',
 };
 
+// 自动打开标签时使用的「登录后直达」URL：
+// 首页（https://mail.163.com/）可能只是落地/跳转页，需额外导航到主应用。
+// 用更具体的入口可减少一步跳转，更快加载内容脚本可读的主界面。
+const PROVIDER_OPEN_URL = {
+  netease_163: 'https://mail.163.com/js6/main.jsp',
+  qq: 'https://mail.qq.com/cgi-bin/login?fun=passport',
+};
+
+// 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
+const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ]);
+
 /**
  * QQ 邮箱的主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com（登录后常落于
  * https://wx.mail.qq.com/home/index?sid=...#/list/1），而 mail.qq.com 是其旧入口/入口域。
@@ -214,7 +225,7 @@ function isQQLoginUrl(url) {
  * 打开目标邮箱首页（用于注入内容脚本并获取真实登录态 + sid）
  */
 async function openMailboxTab(provider, opts = {}) {
-  const url = PROVIDER_HOME[provider];
+  const url = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
   if (!url) return { success: false, error: `Unknown provider: ${provider}` };
   // 默认后台打开（active:false）：避免当从 Popup 触发"获取未读数"时，因新建前台标签抢焦点
   // 而把 Popup 自动关闭，导致只打开了邮箱页面却看不到任何输出。
@@ -306,6 +317,8 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
  *   b) 有邮箱标签但落在辅助页面（如 /contacts/call.do）读不到未读 → 导航到主收件箱入口刷新
  */
 async function runContentProbe(provider, opts = {}) {
+  // 记录本次是否新开了后台标签——调用方需要时可在探测后自行关闭
+  let openedTabId = null;
   logger.info(`运行内容脚本探测: provider=${provider}, openTab=${opts.openTab !== false}`);
   const allowOpen = opts.openTab !== false;
 
@@ -335,22 +348,44 @@ async function runContentProbe(provider, opts = {}) {
     let tabId = probe.tabId;
 
     if (needsTabOpen && !probe.tabId) {
+      // 该提供商不支持内容脚本 → 直接返回失败
+      if (!CONTENT_PROBE_PROVIDERS.has(provider)) {
+        logger.warn(`提供商 ${provider} 不支持内容脚本探测，跳过开标签`);
+        return {
+          success: false,
+          provider,
+          error: `提供商 ${provider} 不支持内容脚本探测`,
+          probe: { success: false, error: `提供商 ${provider} 不支持内容脚本探测`, unsupportedProvider: true },
+        };
+      }
+
       // 无现成标签 → 新建后台标签
       const opened = await openMailboxTab(provider);
+      if (!opened.success || !opened.tabId) {
+        logger.warn(`打开 ${provider} 邮箱标签失败: ${opened.error || '未知错误'}`);
+        return {
+          success: false,
+          provider,
+          error: opened.error || `打开 ${provider} 邮箱标签失败`,
+          probe: { success: false, error: opened.error || '打开邮箱标签失败', needsTab: true },
+        };
+      }
       tabId = opened.tabId;
+      openedTabId = tabId;
       logger.info(`无现成邮箱标签，已打开 ${provider} 邮箱首页 tabId=${tabId}`);
     } else if (tabId && (needsNav || probe.reason === 'connection')) {
-      // 已有标签但连接失败或落在辅助页 → 导航到首页刷新
+      // 已有标签但连接失败或落在辅助页 → 导航到邮箱主应用刷新
       try {
-        await chrome.tabs.update(tabId, { url: PROVIDER_HOME[provider], active: false });
-        logger.info(`导航 ${provider} 标签(tabId=${tabId})到首页刷新`);
+        const openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+        await chrome.tabs.update(tabId, { url: openUrl, active: false });
+        logger.info(`导航 ${provider} 标签(tabId=${tabId})到主应用刷新`);
       } catch (e) {
         logger.warn(`导航邮箱标签失败: ${e.message}`);
       }
     }
 
-    // 轮询等待内容脚本就绪：最多 20 秒，每 1.5 秒探测一次
-    probe = await probeWithRetry(provider, tabId, 5, 1500, 20000);
+    // 轮询等待内容脚本就绪：延长超时给后台标签页面更多加载时间
+    probe = await probeWithRetry(provider, tabId, 10, 2000, 30000);
   }
 
   // 5) 如果内容脚本返回了 sid，缓存供 SW 独立使用
@@ -358,21 +393,36 @@ async function runContentProbe(provider, opts = {}) {
     await cacheProviderSid(provider, probe.sid);
   }
 
+  // 若本次新开了标签且调用方要求探测后关闭，则关闭（避免后台标签堆积）
+  if (opts.closeAfterProbe && openedTabId) {
+    try {
+      await chrome.tabs.remove(openedTabId);
+      logger.info(`已关闭自动打开的 ${provider} 标签 tabId=${openedTabId}`);
+    } catch (e) {
+      logger.warn(`关闭自动打开的 ${provider} 标签失败: ${e.message}`);
+    }
+  }
+
   return {
     success: true,
     provider,
     method: 'content-script',
     probe,
+    openedTabId,
   };
 }
 
 /**
  * 轮询探测：最多 maxAttempts 次、间隔 intervalMs，总超时 timeoutMs。
  * 用于等待新打开的标签内容脚本注入完成后再探测。
+ * 
+ * 对刚打开的后台标签，Chrome 可能延迟加载/节流，首次连接失败或 URL 未稳定
+ * 不能立即放弃——需多轮重试，直到页面加载完成。
  */
-async function probeWithRetry(provider, tabId, maxAttempts = 5, intervalMs = 1500, timeoutMs = 20000) {
+async function probeWithRetry(provider, tabId, maxAttempts = 10, intervalMs = 2000, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   let lastProbe = null;
+  let consecutiveHostMismatch = 0;
 
   for (let i = 0; i < maxAttempts; i++) {
     if (Date.now() > deadline) break;
@@ -381,8 +431,18 @@ async function probeWithRetry(provider, tabId, maxAttempts = 5, intervalMs = 150
     if (lastProbe.success && (typeof lastProbe.unreadCount === 'number' || lastProbe.authVerified)) {
       break;
     }
-    // 明确失败且无需重试（登录页/host不匹配）→ 退出
-    if (lastProbe.loginRequired || lastProbe.hostMismatch) break;
+    // 明确登录页 → 退出（用户未登录，重试无意义）
+    if (lastProbe.loginRequired) break;
+
+    // hostMismatch：允许最多 3 次连续 hostMismatch 才退出——
+    // 新开标签可能经历 URL 重定向/加载中的短暂状态，不应立即判定失败
+    if (lastProbe.hostMismatch) {
+      consecutiveHostMismatch++;
+      if (consecutiveHostMismatch >= 3) break;
+    } else {
+      consecutiveHostMismatch = 0;
+    }
+
     // 等待后重试
     if (i < maxAttempts - 1) {
       await new Promise(r => setTimeout(r, intervalMs));
@@ -395,7 +455,7 @@ async function probeWithRetry(provider, tabId, maxAttempts = 5, intervalMs = 150
  * 缓存某提供商的 sid
  */
 async function cacheProviderSid(provider, sid) {
-  const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+  const key = provider === PROVIDERS.QQ ? 'sid_qq' : provider === PROVIDERS.NETEASE_163 ? 'sid_163' : `sid_${provider}`;
   try {
     await chrome.storage.session.set({
       [key]: sid,
@@ -413,7 +473,7 @@ async function cacheProviderSid(provider, sid) {
  * 读取某提供商缓存的 sid
  */
 async function getCachedSid(provider) {
-  const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+  const key = provider === PROVIDERS.QQ ? 'sid_qq' : provider === PROVIDERS.NETEASE_163 ? 'sid_163' : `sid_${provider}`;
   try {
     const data = await chrome.storage.session.get([key, `${key}_expiry`]);
     if (data[key]) {
@@ -576,80 +636,82 @@ async function checkSingleAccount(account, settings, context) {
         return accountResult;
       }
 
-      // v0.6.0 修复：标签页关闭后也能自动检查。
-      // 根因：原 hybrid 模式自动恢复后，内容脚本在自动打开的后台邮箱标签里其实已经
-      //       读到了未读数，却被丢弃——改为去重试不可靠的 SW API（该通道多轮实测
-      //       从未成功返回未读数），最终落入"所有方法都失败"，于是标签一关全量检查就挂。
-      // 修复：自动恢复时优先直接采用内容脚本在邮箱后台标签读到的未读数（可靠路径）；
-      //       仅在内容脚本确实读不到时，hybrid 模式下才用缓存 sid 重试 SW API 作兜底。
+      // 标签页关闭后自动检查。
+      // 对支持内容脚本的提供商（163/QQ）：自动打开邮箱后台标签，内容脚本读未读。
+      // 对不支持的提供商（USTC/Gmail）：直接跳过，不尝试开标签（会徒增视觉干扰）。
       if ((mode === 'hybrid' || mode === 'content-script') && context.source !== 'content-probe' && context.source !== 'unknown') {
-        logger_acc.info('API 与现有标签探测均失败，尝试自动打开邮箱后台标签读取未读...');
-        // 自动打开/复用邮箱后台标签，由内容脚本 in-origin 读取未读（最可靠路径）
-        const auto = await runContentProbe(account.provider, { openTab: true });
-        const ap = (auto && auto.probe) || {};
+        // 跳过不支持内容脚本探测的提供商
+        if (!CONTENT_PROBE_PROVIDERS.has(account.provider)) {
+          logger_acc.warn(`提供商 ${account.provider} 不支持内容脚本探测，跳过自动恢复`);
+        } else {
+          logger_acc.info('API 与现有标签探测均失败，尝试自动打开邮箱后台标签读取未读...');
+          // 自动打开/复用邮箱后台标签，由内容脚本 in-origin 读取未读（最可靠路径）
+          const auto = await runContentProbe(account.provider, { openTab: true, closeAfterProbe: true });
+          const ap = (auto && auto.probe) || {};
 
-        // 1) 内容脚本读到未读数 → 直接作为成功结果返回
-        if (ap.success && typeof ap.unreadCount === 'number') {
-          const accountResult = {
-            email: account.email,
-            provider: account.provider,
-            authVerified: true,
-            needsAuth: false,
-            allFailed: false,
-            needsInboxPage: false,
-            source: context.source,
-            method: 'content-script',
-            unreadCount: ap.unreadCount,
-            unreadSource: ap.unreadSource || null,
-            detail: ap.detail || {},
-            timestamp: new Date().toISOString(),
-          };
-          await saveCheckResult(accountResult);
-          logger_acc.info(`自动打开后台标签后内容脚本探测成功: unread=${ap.unreadCount}`);
-          return accountResult;
-        }
-
-        // 2) 已授权（拿到 sid）但未能读到未读数 → 需打开收件箱主页面才能读数
-        if (ap.sid || ap.authVerified || ap.success) {
-          const accountResult = {
-            email: account.email,
-            provider: account.provider,
-            authVerified: true,
-            needsAuth: false,
-            allFailed: false,
-            needsInboxPage: true,
-            source: context.source,
-            method: 'content-script',
-            unreadCount: typeof ap.unreadCount === 'number' ? ap.unreadCount : null,
-            unreadSource: ap.unreadSource || null,
-            detail: ap.detail || {},
-            timestamp: new Date().toISOString(),
-          };
-          await saveCheckResult(accountResult);
-          logger_acc.info('已授权（sid 已提取），但需打开收件箱主页面才能读到未读数');
-          return accountResult;
-        }
-
-        // 3) 内容脚本仍失败：hybrid 模式下再用缓存的 sid 重试 SW API 作为兜底
-        if (mode === 'hybrid') {
-          const apiRetry = await runSWApiProbe(account.provider, settings);
-          if (apiRetry.success) {
+          // 1) 内容脚本读到未读数 → 直接作为成功结果返回
+          if (ap.success && typeof ap.unreadCount === 'number') {
             const accountResult = {
               email: account.email,
               provider: account.provider,
               authVerified: true,
               needsAuth: false,
               allFailed: false,
+              needsInboxPage: false,
               source: context.source,
-              method: 'sw-api',
-              unreadCount: apiRetry.unreadCount,
-              unreadSource: apiRetry.unreadSource,
-              detail: apiRetry.detail,
+              method: 'content-script',
+              unreadCount: ap.unreadCount,
+              unreadSource: ap.unreadSource || null,
+              detail: ap.detail || {},
               timestamp: new Date().toISOString(),
             };
             await saveCheckResult(accountResult);
-            logger_acc.info(`自动恢复后 SW API 探测成功: unread=${apiRetry.unreadCount}`);
+            logger_acc.info(`自动打开后台标签后内容脚本探测成功: unread=${ap.unreadCount}`);
             return accountResult;
+          }
+
+          // 2) 已授权（拿到 sid）但未能读到未读数 → 需打开收件箱主页面才能读数
+          if (ap.sid || ap.authVerified || ap.success) {
+            const accountResult = {
+              email: account.email,
+              provider: account.provider,
+              authVerified: true,
+              needsAuth: false,
+              allFailed: false,
+              needsInboxPage: true,
+              source: context.source,
+              method: 'content-script',
+              unreadCount: typeof ap.unreadCount === 'number' ? ap.unreadCount : null,
+              unreadSource: ap.unreadSource || null,
+              detail: ap.detail || {},
+              timestamp: new Date().toISOString(),
+            };
+            await saveCheckResult(accountResult);
+            logger_acc.info('已授权（sid 已提取），但需打开收件箱主页面才能读到未读数');
+            return accountResult;
+          }
+
+          // 3) 内容脚本仍失败：hybrid 模式下再用缓存的 sid 重试 SW API 作为兜底
+          if (mode === 'hybrid') {
+            const apiRetry = await runSWApiProbe(account.provider, settings);
+            if (apiRetry.success) {
+              const accountResult = {
+                email: account.email,
+                provider: account.provider,
+                authVerified: true,
+                needsAuth: false,
+                allFailed: false,
+                source: context.source,
+                method: 'sw-api',
+                unreadCount: apiRetry.unreadCount,
+                unreadSource: apiRetry.unreadSource,
+                detail: apiRetry.detail,
+                timestamp: new Date().toISOString(),
+              };
+              await saveCheckResult(accountResult);
+              logger_acc.info(`自动恢复后 SW API 探测成功: unread=${apiRetry.unreadCount}`);
+              return accountResult;
+            }
           }
         }
       }
@@ -657,20 +719,26 @@ async function checkSingleAccount(account, settings, context) {
     }
 
     // ===== 所有方法都失败 =====
+    // 区分「不支持提供商」与「未授权/无法读取」两种情况
+    const unsupported = !CONTENT_PROBE_PROVIDERS.has(account.provider);
     const accountResult = {
       email: account.email,
       provider: account.provider,
       authVerified: false,
-      needsAuth: true,
+      needsAuth: !unsupported,
       allFailed: true,
       source: context.source,
       method: 'none',
-      needsTab: true,
-      error: '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
+      needsTab: unsupported ? false : true,
+      error: unsupported
+        ? `提供商 ${account.provider} 暂不支持自动读取`
+        : '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
       detail: {
         mode,
-        hint: '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
-        action: 'openMailboxAndSync',
+        hint: unsupported
+          ? `提供商 ${account.provider} 尚未接入内容脚本或 API 探测，暂时无法自动读取未读数。`
+          : '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
+        action: unsupported ? 'providerNotSupported' : 'openMailboxAndSync',
       },
       timestamp: new Date().toISOString(),
     };
@@ -777,8 +845,9 @@ async function autoRecoverSid(provider, { keepTabOpen = false } = {}) {
       }
       // 已有标签但未提取到 sid，尝试导航刷新
       try {
+        const openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
         await chrome.tabs.update(existingTab.id, {
-          url: PROVIDER_HOME[provider],
+          url: openUrl,
           active: false
         });
       } catch (e) {
@@ -844,7 +913,7 @@ async function autoRecoverSid(provider, { keepTabOpen = false } = {}) {
  * 清除某提供商的 sid 缓存
  */
 async function clearCachedSid(provider) {
-  const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+  const key = provider === PROVIDERS.QQ ? 'sid_qq' : provider === PROVIDERS.NETEASE_163 ? 'sid_163' : `sid_${provider}`;
   try {
     await chrome.storage.session.remove([key, `${key}_expiry`]);
     logger.info(`已清除 ${provider} 的 sid 缓存`);
