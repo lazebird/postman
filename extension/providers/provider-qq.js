@@ -1,146 +1,201 @@
 /**
  * provider-qq.js - QQ邮箱未读接口探测实现
  *
- * 方案 B 核心：通过 Service Worker 直接 fetch QQ mail 的内部接口。
- *
- * 探测结果（前期HTTP探测）：
- * - 网关: /cgi-bin/mail_list?t=inbox&sid=...
- * - 需要 URL sid 参数 + qm_sk Cookie 双轨鉴权
- * - 未认证返回登录引导页（GB18030编码）
+ * 修复要点：
+ * 1. 先通过会话初始化获取 sid，再使用 sid 调用业务接口
+ * 2. 修复 response headers 序列化
+ * 3. 正确处理 QQ 的 GB18030 编码
+ * 4. 更准确的登录/会话状态判断
  */
 
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
+import { getSidQQ, replaceSidInUrl, headersToObject, clearSid } from '../shared/session.js';
 
 const logger = createLogger('provider-qq');
 
 /**
  * 探测 QQ 邮箱未读接口
- * 
+ *
+ * 流程：
+ * 1. 获取会话 sid（先查缓存，无则访问入口页）
+ * 2. 使用 sid 构造 URL 并调用
+ * 3. 解析响应
+ *
  * @param {Object} options
  * @param {string[]} options.endpointNames
  * @returns {Promise<Object>}
  */
 export async function probeQQ(options = {}) {
   const config = PROVIDER_CONFIG['qq'];
-  const endpoints = options.endpointNames?.length
+
+  // 第一步：获取会话 sid
+  const sessionResult = await getSidQQ({ forceRefresh: options.forceRefreshSid });
+  const { sid, loggedIn: sessionLoggedIn, source: sidSource } = sessionResult;
+
+  let endpoints = options.endpointNames?.length
     ? config.probeEndpoints.filter(ep => options.endpointNames.includes(ep.name))
     : config.probeEndpoints;
 
-  logger.info('开始探测QQ邮箱未读接口', { endpoints: endpoints.map(e => e.name) });
+  // 如果过滤后为空（可能是旧配置引用了不存在的接口名），回退到所有接口
+  if (!endpoints.length) {
+    logger.warn('没有匹配的探测接口，回退到全部接口', { requested: options.endpointNames });
+    endpoints = config.probeEndpoints;
+  }
+
+  logger.info('开始探测QQ邮箱未读接口', {
+    endpoints: endpoints.map(e => e.name),
+    hasSid: !!sid,
+    sidSource: sidSource || 'none',
+  });
+
+  if (!sid) {
+    const result = {
+      provider: 'qq',
+      providerName: config.name,
+      timestamp: new Date().toISOString(),
+      authVerified: false,
+      needsAuth: true,
+      allFailed: true,
+      session: {
+        sidObtained: false,
+        loggedIn: false,
+        detail: sessionResult.detail,
+      },
+      results: [],
+    };
+    logger.warn('QQ 探测中止：未能获得会话 sid');
+    return result;
+  }
 
   const results = [];
-  let authVerified = false;
+  let anySucceeded = false;
 
   for (const endpoint of endpoints) {
-    const result = await probeSingleEndpoint(endpoint, options);
+    const result = await probeSingleEndpoint(endpoint, sid, options);
     results.push(result);
 
     if (result.success) {
-      authVerified = true;
+      anySucceeded = true;
     }
   }
 
-  const needsAuth = results.some(r => r.authBlocked);
-  const allFailed = results.every(r => !r.success);
+  const allFailed = results.length > 0 && results.every(r => !r.success);
 
   const summary = {
     provider: 'qq',
     providerName: config.name,
     timestamp: new Date().toISOString(),
-    authVerified,
-    needsAuth,
+    authVerified: anySucceeded || sessionLoggedIn,
+    needsAuth: allFailed && !anySucceeded,
     allFailed,
+    session: {
+      sidObtained: true,
+      sid: sid.substring(0, 8) + '...', // 只显示前几位避免泄露
+      loggedIn: true,
+      source: sidSource,
+    },
     results,
   };
 
-  logger.info('QQ 探测完成', { authVerified, needsAuth, allFailed });
+  logger.info('QQ 探测完成', {
+    authVerified: summary.authVerified,
+    needsAuth: summary.needsAuth,
+    allFailed,
+  });
+
   return summary;
 }
 
 /**
- * 探测单个QQ接口端点
+ * 探测单个 QQ 接口端点
  */
-async function probeSingleEndpoint(endpoint, options) {
+async function probeSingleEndpoint(endpoint, sid, options) {
   const logger_ep = createLogger(`qq:${endpoint.name}`);
-  logger_ep.info(`探测接口 ${endpoint.name} @ ${endpoint.url}`);
+  logger_ep.info(`探测接口 ${endpoint.name}`);
 
   const startTime = performance.now();
 
   try {
+    // 使用 sid 替换 URL 中的 {sid} 占位符
+    let url = replaceSidInUrl(endpoint.url, sid);
+
+    // 如果 URL 中没有 sid 参数，且接口需要 sid，则添加
+    if (!url.includes('sid=')) {
+      try {
+        const urlObj = new URL(url);
+        urlObj.searchParams.set('sid', sid);
+        url = urlObj.toString();
+      } catch (e) {
+        // URL 解析失败，尝试手动拼接
+        const sep = url.includes('?') ? '&' : '?';
+        url = `${url}${sep}sid=${sid}`;
+      }
+    }
+
     const fetchOptions = {
       method: endpoint.method || 'GET',
       credentials: 'include',
       mode: 'cors',
       redirect: 'follow',
-      headers: { ...(endpoint.headers || {}) },
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        ...(endpoint.headers || {}),
+      },
     };
 
-    // QQ 邮箱接口可能返回 GB18030 编码，需要特别注意
-    if (endpoint.name === 'cgi_mail_list') {
-      fetchOptions.headers['Accept'] = 'text/html,application/xhtml+xml,*/*';
-    }
-
-    logger_ep.debug(`发起请求 ${endpoint.method} ${endpoint.url}`);
-
-    const response = await fetch(endpoint.url, fetchOptions);
+    logger_ep.debug(`发起请求 ${fetchOptions.method} ${url}`);
+    const response = await fetch(url, fetchOptions);
     const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms`);
+    logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms, finalUrl=${response.url}`);
 
-    // 读取响应内容 - QQ 使用 GB18030 编码，浏览器会自动处理
-    const arrayBuffer = await response.arrayBuffer();
-    let text;
-    try {
-      // 尝试作为 UTF-8 读取
-      text = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
-    } catch (e) {
-      // 尝试 GB18030（需要 TextDecoder 支持）
-      try {
-        text = new TextDecoder('gb18030').decode(arrayBuffer);
-      } catch (e2) {
-        text = new TextDecoder('utf-8').decode(arrayBuffer);
-      }
-    }
+    // QQ 使用 GB18030 编码，需要正确解码
+    const text = await decodeResponse(response);
 
     const preview = text.length > DEBUG_FEATURE.maxResponsePreviewBytes
       ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
       : text;
 
-    logger_ep.debug(`响应内容(前${DEBUG_FEATURE.maxResponsePreviewBytes}字节): ${preview}`);
+    // 判断认证状态
+    const authInfo = analyzeQQAuth(text, response.status, response.url);
 
-    // QQ 特征：登录页有 loginForm 等标识
-    // 保守判断：只有当明确出现登录特征时才标记为 authBlocked
-    const authBlocked =
-      text.includes('loginForm') ||
-      text.includes('qm_login') ||
-      text.includes('login_frame') ||
-      text.includes('需要登录') ||
-      text.includes('您还未登录') ||
-      response.status === 401 ||
-      response.status === 403;
+    // 如果登录页, 清除 sid 缓存
+    if (authInfo.authBlocked) {
+      logger_ep.warn('QQ 会话已失效或未登录，清除缓存的 sid');
+      try {
+        await clearSid('qq');
+      } catch (e) { /* ignore */ }
+    }
 
-    // 解析未读数
-    const parseResult = parseQQResponse(text, endpoint.name);
+    // 解析响应
+    const parseResult = parseQQResponse(text, endpoint.name, sid);
 
     const result = {
       endpointName: endpoint.name,
-      url: endpoint.url,
-      success: response.ok && !authBlocked && parseResult.hasResult,
+      url,
+      success: response.ok && !authInfo.authBlocked && parseResult.hasResult,
       httpStatus: response.status,
       elapsedMs: elapsed,
-      authBlocked,
+      authBlocked: authInfo.authBlocked,
+      authReason: authInfo.reason,
       hasResult: parseResult.hasResult,
       unreadCount: parseResult.unreadCount,
-      sidExtracted: parseResult.sidExtracted,
-      preview,
+      sidUsed: sid ? sid.substring(0, 8) + '...' : null,
+      responseContentType: response.headers?.get?.('content-type') || '',
+      preview: preview,
+      responseHeaders: headersToObject(response.headers),
     };
 
     if (result.success) {
       logger_ep.info(`接口 ${endpoint.name} 探测成功: unreadCount=${parseResult.unreadCount}`);
-    } else if (authBlocked) {
-      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截（需登录）`);
+    } else if (result.authBlocked) {
+      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`);
     } else {
-      logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`);
+      logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`, {
+        status: response.status,
+        hasResult: parseResult.hasResult,
+      });
     }
 
     return result;
@@ -166,10 +221,69 @@ async function probeSingleEndpoint(endpoint, options) {
 }
 
 /**
+ * 解码响应内容（处理 GB18030 等非 UTF-8 编码）
+ */
+async function decodeResponse(response) {
+  const contentType = response.headers?.get?.('content-type') || '';
+  const isGB18030 = contentType.includes('gb18030') || contentType.includes('gbk') || contentType.includes('gb2312');
+
+  try {
+    const arrayBuffer = await response.arrayBuffer();
+
+    if (isGB18030) {
+      try {
+        return new TextDecoder('gb18030').decode(arrayBuffer);
+      } catch (e) {
+        // TextDecoder 可能不支持 gb18030，使用 UTF-8 兜底
+        return new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+      }
+    }
+
+    return new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+  } catch (e) {
+    // 兜底使用 response.text()
+    return await response.text();
+  }
+}
+
+/**
+ * 判断 QQ 响应是否处于登录/认证拦截状态
+ */
+function analyzeQQAuth(text, httpStatus, finalUrl) {
+  if (httpStatus === 401 || httpStatus === 403) {
+    return { authBlocked: true, reason: `HTTP ${httpStatus}` };
+  }
+
+  // QQ 登录页特征
+  const loginMarkers = [
+    'gbIsNoCheck',        // QQ 邮箱登录页脚本标记
+    'loginFrame',         // QQ 登录 iframe
+    'qm_login',           // QQ 登录 JS
+    '需要登录',
+    '您还未登录',
+    'session expired',
+    'cgierrorcode:-2',    // QQ CGI 异常代码（未登录时出现）
+  ];
+
+  for (const marker of loginMarkers) {
+    if (text.includes(marker)) {
+      return { authBlocked: true, reason: marker };
+    }
+  }
+
+  // 检查最终 URL 是否被重定向到登录页
+  if (finalUrl && finalUrl.includes('/cgi-bin/login')) {
+    return { authBlocked: true, reason: 'Redirected to login page' };
+  }
+
+  return { authBlocked: false, reason: null };
+}
+
+/**
  * 解析 QQ 邮箱响应的未读数
  */
-function parseQQResponse(text, endpointName) {
-  // 策略1：JSON
+function parseQQResponse(text, endpointName, sid) {
+  // 策略1: JSON
   try {
     const data = JSON.parse(text.trim());
     const unread = findUnreadCount(data);
@@ -178,38 +292,44 @@ function parseQQResponse(text, endpointName) {
     }
   } catch (e) {}
 
-  // 策略2：正则查找 QQ 特有的未读字段
-  // QQ 的 mail_list 接口可能有 unreadnum 等字段
-  const unreadRegex = /["']?(?:unreadnum|unread|unreadCount|total|count)["']?\s*[:=]\s*["']?(\d+)["']?/i;
+  // 策略2: 正则查找 QQ 特有的未读字段
+  const unreadRegex = /["']?(?:unreadnum|unread|unreadCount|total|count|unreadcount)["']?\s*[:=]\s*["']?(\d+)["']?/i;
   const match = text.match(unreadRegex);
   if (match) {
     return { hasResult: true, unreadCount: parseInt(match[1], 10) };
   }
 
-  // 策略3：尝试在 HTML 页面中查找未读图标计数
-  // QQ 网页版的未读数可能以 badge 形式出现在 HTML 中
-  const htmlUnreadRegex = /class=["'][^"']*unread[^"']*["'][^>]*>\s*(\d+)\s*</i;
-  const htmlMatch = text.match(htmlUnreadRegex);
-  if (htmlMatch) {
-    return { hasResult: true, unreadCount: parseInt(htmlMatch[1], 10) };
+  // 策略3: QQ HTML 页面中的未读计数标记
+  // QQ 的收件箱页面使用特定 class/attr 来显示未读数
+  // 例如: class="MuiFolderName__unread" 或 data-unread="5"
+  const htmlUnreadPatterns = [
+    /data-unread=["'](\d+)["']/i,
+    /class=["'][^"']*unread[^"']*["'][^>]*>\s*(\d+)\s*</i,
+    /class=["'][^"']*count[^"']*["'][^>]*>\s*(\d+)\s*</i,
+    />(\d+)\s*<\/[^>]+>\s*<[^>]+>\s*收件箱/i,
+  ];
+
+  for (const pattern of htmlUnreadPatterns) {
+    const htmlMatch = text.match(pattern);
+    if (htmlMatch) {
+      return { hasResult: true, unreadCount: parseInt(htmlMatch[1], 10) };
+    }
   }
 
-  // 提取 sid 参数（QQ 特有的会话标识）
-  const sidMatch = text.match(/sid=([a-zA-Z0-9_-]+)/);
-  const sidExtracted = sidMatch ? sidMatch[1] : null;
+  // 策略4: 查找 QQ 特有的 "收件箱(5)" 格式
+  const folderMatch = text.match(/收件箱[^>]{0,50}?[\(（]\s*(\d+)\s*[\)）]/);
+  if (folderMatch) {
+    return { hasResult: true, unreadCount: parseInt(folderMatch[1], 10) };
+  }
 
-  return {
-    hasResult: false,
-    unreadCount: null,
-    sidExtracted,
-  };
+  return { hasResult: false, unreadCount: null };
 }
 
 /**
  * 递归查找未读计数字段
  */
 function findUnreadCount(data, depth = 0) {
-  if (!data || typeof data !== 'object' || depth > 6) return null;
+  if (!data || typeof data !== 'object' || depth > 8) return null;
 
   const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'messageCount', 'count', 'total'];
   for (const key of unreadKeys) {
@@ -221,14 +341,17 @@ function findUnreadCount(data, depth = 0) {
     }
   }
 
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const found = findUnreadCount(item, depth + 1);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+
   for (const key of Object.keys(data)) {
     const val = data[key];
-    if (Array.isArray(val)) {
-      for (const item of val) {
-        const found = findUnreadCount(item, depth + 1);
-        if (found !== null) return found;
-      }
-    } else if (val && typeof val === 'object') {
+    if (val && typeof val === 'object') {
       const found = findUnreadCount(val, depth + 1);
       if (found !== null) return found;
     }

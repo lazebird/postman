@@ -129,6 +129,19 @@
       border-radius: 0 4px 4px 0;
       line-height: 1.5;
     }
+    .provider-status {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+    .status-ok { background: #d4edda; color: #155724; }
+    .status-fail { background: #f8d7da; color: #721c24; }
+    .status-auth { background: #fff3cd; color: #856404; }
+    .hint {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -149,6 +162,14 @@
       </select>
       <input type="text" id="email-input" placeholder="邮箱地址，如 user@163.com">
       <button id="btn-add-account">添加</button>
+    </div>
+  </div>
+
+  <!-- 会话状态 -->
+  <div class="card">
+    <h2>会话状态</h2>
+    <div id="session-status">
+      <div class="help-text">检查各邮箱提供商在浏览器中的登录状态...</div>
     </div>
   </div>
 

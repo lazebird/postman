@@ -10,24 +10,78 @@ export const PROVIDERS = {
   GMAIL: 'gmail',
 };
 
-// 提供商配置
+// 会话密钥（存储于 chrome.storage.session，浏览器重启即清空）
+export const SESSION_KEYS = {
+  SID_163: 'sid_163',
+  SID_QQ: 'sid_qq',
+  SESSION_EXPIRY: 'session_expiry',
+};
+
+/**
+ * 提供商配置
+ *
+ * 每个提供商配置包含：
+ * - name / domain / homepage：基本信息
+ * - entryPoint：会话初始化入口（登录态下访问会返回 sid 或跳转到含 sid 的 URL）
+ * - sessionEndpoints：用于获取会话令牌的候选接口
+ * - probeEndpoints：未读检查候选接口（URL 中可用 {sid} 占位符）
+ * - loginPagePattern：登录页 HTML 特征，用于识别未认证
+ */
 export const PROVIDER_CONFIG = {
   [PROVIDERS.NETEASE_163]: {
     name: '163邮箱',
     domain: 'mail.163.com',
     homepage: 'https://mail.163.com/',
-    // 163 的未读检查候选接口（基于前期探测）
+    // 163 登录后首页入口，通常包含或重定向到含 sid 的 URL
+    entryPoints: [
+      'https://mail.163.com/js6/main.jsp',
+      'https://mail.163.com/',
+    ],
+    // 候选会话获取接口（通过访问得到 sid 或确认已登录）
+    sessionEndpoints: [
+      {
+        name: 'js6_main',
+        url: 'https://mail.163.com/js6/main.jsp',
+        method: 'GET',
+        description: '登录后的主邮箱页面，URL或内容中包含 sid',
+      },
+      {
+        name: 'root_entry',
+        url: 'https://mail.163.com/',
+        method: 'GET',
+        description: '163 邮箱根入口（登录后自动跳转到含 sid 的页面）',
+      },
+      {
+        name: 'js6_entry',
+        url: 'https://mail.163.com/js6/',
+        method: 'GET',
+        description: '163 JS6 入口',
+      },
+    ],
+    // 163 的未读检查候选接口（URL 支持 {sid} 占位符）
     probeEndpoints: [
       {
         name: 'js6_rpc',
         url: 'https://mail.163.com/js6/s?func=mbox:listMessages',
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        requiresSid: true,
+        bodyTemplate: 'var=@{type:"getunreadmsgs",ver:0}',
+        description: '邮箱 RPC 网关 - 获取未读消息',
       },
       {
         name: 'js6_rpc2',
         url: 'https://mail.163.com/js6/s?func=mbox:getUnread',
         method: 'GET',
+        requiresSid: true,
+        description: '邮箱 RPC 网关 - 获取未读数',
+      },
+      {
+        name: 'unread_count',
+        url: 'https://mail.163.com/js6/s?func=mbox:getUnreadCount',
+        method: 'GET',
+        requiresSid: true,
+        description: '轻量级未读计数接口',
       },
     ],
   },
@@ -35,17 +89,47 @@ export const PROVIDER_CONFIG = {
     name: 'QQ邮箱',
     domain: 'mail.qq.com',
     homepage: 'https://mail.qq.com/',
-    // QQ 邮箱未读接口候选（基于前期探测）
+    // QQ 邮箱登录后入口
+    entryPoints: [
+      'https://mail.qq.com/cgi-bin/login?fun=passport',
+      'https://mail.qq.com/cgi-bin/login',
+      'https://mail.qq.com/',
+    ],
+    sessionEndpoints: [
+      {
+        name: 'passport_entry',
+        url: 'https://mail.qq.com/cgi-bin/login?fun=passport',
+        method: 'GET',
+        description: '登录后的跳转入口，URL 中包含 sid',
+      },
+      {
+        name: 'homepage_entry',
+        url: 'https://mail.qq.com/cgi-bin/login',
+        method: 'GET',
+        description: 'QQ 邮箱首页入口（已登录时自动跳转）',
+      },
+      {
+        name: 'root_entry',
+        url: 'https://mail.qq.com/',
+        method: 'GET',
+        description: 'QQ 邮箱根入口',
+      },
+    ],
+    // QQ 邮箱未读接口候选（URL 支持 {sid} 占位符）
     probeEndpoints: [
       {
         name: 'cgi_mail_list',
-        url: 'https://mail.qq.com/cgi-bin/mail_list?t=inbox',
+        url: 'https://mail.qq.com/cgi-bin/mail_list?t=inbox&sid={sid}',
         method: 'GET',
+        requiresSid: true,
+        description: '收件箱列表页面',
       },
       {
-        name: 'cgi_readdata',
-        url: 'https://mail.qq.com/cgi-bin/readdata',
+        name: 'cgi_fr_show',
+        url: 'https://mail.qq.com/cgi-bin/fr_show?sid={sid}&t=inbox',
         method: 'GET',
+        requiresSid: true,
+        description: '轻量级收件箱未读数',
       },
     ],
   },
@@ -53,12 +137,16 @@ export const PROVIDER_CONFIG = {
     name: '中科大邮箱',
     domain: 'mail.ustc.edu.cn',
     homepage: 'https://mail.ustc.edu.cn/',
+    entryPoints: [],
+    sessionEndpoints: [],
     probeEndpoints: [],
   },
   [PROVIDERS.GMAIL]: {
     name: 'Gmail',
     domain: 'mail.google.com',
     homepage: 'https://mail.google.com/',
+    entryPoints: [],
+    sessionEndpoints: [],
     probeEndpoints: [],
   },
 };
@@ -92,7 +180,7 @@ export const STORAGE_KEYS = {
   CHECK_RESULTS: 'checkResults',
 };
 
-// 调试字段选项（保留以供扩展使用）
+// 调试字段选项
 export const DEBUG_FEATURE = {
   captureResponseHeaders: true,
   captureRequestHeaders: false, // 默认不记录请求头（可能包含敏感信息）

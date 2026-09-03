@@ -7,6 +7,11 @@
  * 3. 对每个启用的邮箱提供商执行未读接口探测
  * 4. 收集并记录探测结果
  * 5. 完整调试信息记录
+ *
+ * 修复优化：
+ * - 更健壮的闹钟注册/错误处理
+ * - 会话 sid 管理（通过 shared/session.js）
+ * - badge 更新逻辑改进
  */
 
 import { createLogger } from '../shared/debug.js';
@@ -23,17 +28,10 @@ const logger = createLogger('service-worker');
 chrome.runtime.onInstalled.addListener((details) => {
   logger.info(`扩展安装/更新: reason=${details.reason}, previousVersion=${details.previousVersion || 'none'}`);
 
-  if (details.reason === 'install') {
-    // 首次安装：注册定时检查
-    setupAlarms();
-    logger.info('首次安装完成，已注册定时检查闹钟');
-  }
-
-  if (details.reason === 'update') {
-    // 更新后重新设置闹钟
-    chrome.alarms.clearAll().then(() => {
-      setupAlarms();
-      logger.info('扩展更新完成，已重新注册定时检查闹钟');
+  if (details.reason === 'install' || details.reason === 'update') {
+    // 首次安装或更新：注册定时检查
+    setupAlarms().catch(err => {
+      logger.error(`注册定时检查闹钟失败: ${err.message}`);
     });
   }
 });
@@ -41,30 +39,39 @@ chrome.runtime.onInstalled.addListener((details) => {
 // SW 启动事件
 chrome.runtime.onStartup.addListener(() => {
   logger.info('浏览器启动，Service Worker 被唤醒');
-  setupAlarms();
+  setupAlarms().catch(err => {
+    logger.error(`注册定时检查闹钟失败: ${err.message}`);
+  });
 });
 
 // 闹钟触发事件
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  logger.info(`闹钟触发: name=${alarm.name}, scheduledTime=${new Date(alarm.scheduledTime).toISOString()}`);
-
   if (alarm.name === 'check-email') {
-    await runAllChecks({ source: 'alarm' });
+    logger.info(`定时检查触发: scheduledTime=${new Date(alarm.scheduledTime).toISOString()}`);
+    try {
+      await runAllChecks({ source: 'alarm' });
+    } catch (err) {
+      logger.error(`定时检查失败: ${err.message}`, { stack: err.stack });
+    }
   }
 });
 
 // 收到来自 Popup / Options 的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || !message.type) {
+    sendResponse({ success: false, error: 'Invalid message' });
+    return;
+  }
+
   logger.debug('收到消息', { type: message.type, sender: sender.tab ? `tab:${sender.tab.id}` : 'extension' });
 
   // 异步处理消息
   handleMessage(message)
     .then(result => {
-      logger.debug('消息处理完成', { type: message.type, success: !!result });
       sendResponse(result);
     })
     .catch(err => {
-      logger.error(`消息处理失败: ${err.message}`, { type: message.type, error: err.stack });
+      logger.error(`消息处理失败: ${err.message}`, { type: message.type, stack: err.stack });
       sendResponse({ success: false, error: err.message });
     });
 
@@ -83,25 +90,24 @@ async function handleMessage(message) {
       return await getStatus();
 
     case 'testProvider':
-      // 手动测试指定提供商
       return await runSingleProvider(message.provider, { source: 'manual-test' });
 
     case 'testEndpoint':
-      // 手动测试指定接口
       return await runEndpointTest(message.provider, message.endpointName, { source: 'manual-test' });
 
     case 'checkBridge':
-      // 检查是否已登录目标站（探测认证状态）
       return await checkAuthStatus(message.provider);
 
+    case 'refreshSession':
+      // 强制刷新会话 sid（如登录态变化后调用）
+      return await refreshSession(message.provider);
+
     case 'settingsChanged':
-      // 设置变更后重新注册闹钟
       logger.info('检测到设置变更，重新注册闹钟');
       await setupAlarms();
       return { success: true, message: 'Alarms re-registered' };
 
     case 'accountsChanged': {
-      // 账户变更通知
       const accountCount = (await getAccounts()).length;
       logger.info(`账户配置变更，当前共 ${accountCount} 个账户`);
       await setupAlarms();
@@ -154,16 +160,15 @@ async function runAllChecks(context = {}) {
     source,
     timestamp: new Date().toISOString(),
     accountCount: accounts.length,
-    successfulChecks: allResults.filter(r => r.success).length,
-    failedChecks: allResults.filter(r => !r.success).length,
-    authBlocked: allResults.filter(r => r.authBlocked).length,
+    successfulChecks: allResults.filter(r => r.authVerified).length,
+    failedChecks: allResults.filter(r => !r.authVerified).length,
+    authBlocked: allResults.filter(r => r.needsAuth).length,
     results: allResults,
   };
 
   logger.info('全量检查完成', {
-    success: summary.successfulChecks,
-    failed: summary.failedChecks,
-    authBlocked: summary.authBlocked,
+    authVerified: summary.successfulChecks,
+    needsAuth: summary.authBlocked,
   });
 
   // 保存结果
@@ -185,28 +190,28 @@ async function checkSingleAccount(account, settings, context) {
   try {
     let providerResult;
 
+    const commonOpts = {
+      endpointNames: settings.enabledEndpoints?.[account.provider] || [],
+      captureRequestHeaders: false,
+    };
+
     switch (account.provider) {
       case PROVIDERS.NETEASE_163:
-        providerResult = await probe163({
-          endpointNames: settings.enabledEndpoints?.[PROVIDERS.NETEASE_163] || [],
-          captureRequestHeaders: false,
-        });
+        providerResult = await probe163(commonOpts);
         break;
 
       case PROVIDERS.QQ:
-        providerResult = await probeQQ({
-          endpointNames: settings.enabledEndpoints?.[PROVIDERS.QQ] || [],
-          captureRequestHeaders: false,
-        });
+        providerResult = await probeQQ(commonOpts);
         break;
 
       case PROVIDERS.USTC:
-        // USTC 暂未实现，需要后续研究
         logger_acc.warn('USTC 提供商暂未实现未读接口探测');
         providerResult = {
           provider: 'ustc',
           success: false,
           needsAuth: true,
+          authVerified: false,
+          allFailed: true,
           message: 'USTC provider not implemented yet',
         };
         break;
@@ -216,6 +221,8 @@ async function checkSingleAccount(account, settings, context) {
         providerResult = {
           provider: account.provider,
           success: false,
+          authVerified: false,
+          allFailed: true,
           message: `Unsupported provider: ${account.provider}`,
         };
     }
@@ -239,8 +246,10 @@ async function checkSingleAccount(account, settings, context) {
       email: account.email,
       provider: account.provider,
       success: false,
+      authVerified: false,
+      needsAuth: false,
+      allFailed: true,
       error: err.message,
-      authBlocked: false,
       source: context.source,
     };
 
@@ -287,10 +296,12 @@ async function runEndpointTest(provider, endpointName, context = {}) {
   logger.info(`手动测试接口: provider=${provider}, endpoint=${endpointName}`);
 
   let providerResult;
+  const opts = { endpointNames: endpointName ? [endpointName] : [] };
+
   if (provider === PROVIDERS.NETEASE_163) {
-    providerResult = await probe163({ endpointNames: [endpointName] });
+    providerResult = await probe163(opts);
   } else if (provider === PROVIDERS.QQ) {
-    providerResult = await probeQQ({ endpointNames: [endpointName] });
+    providerResult = await probeQQ(opts);
   } else {
     return { success: false, error: `Unsupported provider: ${provider}` };
   }
@@ -305,36 +316,45 @@ async function runEndpointTest(provider, endpointName, context = {}) {
 
 /**
  * 检查认证状态（是否已登录目标站）
+ * 通过尝试获取会话 sid 来判断
  */
 async function checkAuthStatus(provider) {
   logger.info(`检查 ${provider} 的认证状态`);
 
-  const settings = await getSettings();
-  const endpointNames = settings.enabledEndpoints?.[provider] || [];
+  const { getProviderSid } = await import('../shared/session.js');
 
-  if (provider === PROVIDERS.NETEASE_163) {
-    const result = await probe163({ endpointNames: endpointNames.length ? endpointNames.slice(0, 1) : [] });
-    return {
-      success: true,
-      provider,
-      loggedIn: result.authVerified,
-      needsAuth: result.needsAuth,
-      detail: result,
-    };
-  }
+  const sessionResult = await getProviderSid(provider, { forceRefresh: false });
 
-  if (provider === PROVIDERS.QQ) {
-    const result = await probeQQ({ endpointNames: endpointNames.length ? endpointNames.slice(0, 1) : [] });
-    return {
-      success: true,
-      provider,
-      loggedIn: result.authVerified,
-      needsAuth: result.needsAuth,
-      detail: result,
-    };
-  }
+  return {
+    success: true,
+    provider,
+    loggedIn: sessionResult.loggedIn,
+    needsAuth: !sessionResult.loggedIn,
+    detail: sessionResult,
+  };
+}
 
-  return { success: false, provider, message: 'Unsupported provider' };
+/**
+ * 强制刷新指定提供商的会话 sid
+ */
+async function refreshSession(provider) {
+  logger.info(`强制刷新 ${provider} 的会话 sid`);
+
+  const { getProviderSid, clearSid } = await import('../shared/session.js');
+
+  // 先清除旧缓存
+  await clearSid(provider);
+
+  // 重新获取
+  const sessionResult = await getProviderSid(provider, { forceRefresh: true });
+
+  return {
+    success: true,
+    provider,
+    loggedIn: sessionResult.loggedIn,
+    needsAuth: !sessionResult.loggedIn,
+    session: sessionResult,
+  };
 }
 
 /**
@@ -347,22 +367,6 @@ async function getStatus() {
 
   // 检查闹钟状态
   const alarm = await chrome.alarms.get('check-email');
-
-  // 检查 Native Messaging 可用性（如果安装了本地程序）
-  let nativeAvailable = false;
-  try {
-    nativeAvailable = await new Promise((resolve) => {
-      try {
-        chrome.runtime.sendNativeMessage('com.mail.notifier.bridge', { action: 'ping' }, (response) => {
-          resolve(!!response);
-        });
-      } catch (e) {
-        resolve(false);
-      }
-    });
-  } catch (e) {
-    nativeAvailable = false;
-  }
 
   return {
     success: true,
@@ -377,7 +381,6 @@ async function getStatus() {
       periodInMinutes: alarm.periodInMinutes,
       scheduledTime: new Date(alarm.scheduledTime).toISOString(),
     } : null,
-    nativeMessagingAvailable: nativeAvailable,
     recentResults: checkResults,
     timestamp: new Date().toISOString(),
   };
@@ -390,14 +393,23 @@ async function getStatus() {
  */
 async function setupAlarms() {
   const settings = await getSettings();
-  const intervalMinutes = settings.checkIntervalMinutes || 5;
+  const intervalMinutes = Math.max(1, settings.checkIntervalMinutes || 5);
 
   logger.info(`注册定时检查闹钟: interval=${intervalMinutes}分钟`);
 
-  await chrome.alarms.create('check-email', {
-    delayInMinutes: 1, // 首次延迟1分钟后执行
-    periodInMinutes: intervalMinutes,
-  });
+  try {
+    // 先清除旧闹钟，避免重复
+    await chrome.alarms.clear('check-email');
+
+    await chrome.alarms.create('check-email', {
+      delayInMinutes: 1, // 首次延迟1分钟后执行
+      periodInMinutes: intervalMinutes,
+    });
+    logger.debug('闹钟注册成功');
+  } catch (err) {
+    logger.error(`闹钟注册失败: ${err.message}`);
+    throw err;
+  }
 }
 
 /**
@@ -406,24 +418,43 @@ async function setupAlarms() {
 async function updateBadge(summary) {
   if (!summary || !summary.results) return;
 
-  // 统计总未读数（如果有的话）
-  let totalUnread = 0;
-  for (const result of summary.results) {
-    // 从 provider result 中提取 unreadCount
-    if (result.results && Array.isArray(result.results)) {
-      for (const endpointResult of result.results) {
-        if (typeof endpointResult.unreadCount === 'number') {
-          totalUnread += endpointResult.unreadCount;
+  try {
+    // 统计总未读数（如果有的话）
+    let totalUnread = 0;
+    let hasUnreadData = false;
+
+    for (const result of summary.results) {
+      // 从 provider result 中提取 unreadCount
+      if (result.results && Array.isArray(result.results)) {
+        for (const endpointResult of result.results) {
+          if (typeof endpointResult.unreadCount === 'number') {
+            totalUnread += endpointResult.unreadCount;
+            hasUnreadData = true;
+          }
         }
       }
+      // 兼容直接返回未读数的情况
+      if (typeof result.unreadCount === 'number') {
+        totalUnread += result.unreadCount;
+        hasUnreadData = true;
+      }
     }
+
+    const badgeText = hasUnreadData && totalUnread > 0 ? String(totalUnread) : '';
+    await chrome.action.setBadgeText({ text: badgeText });
+
+    // Badge 颜色：未读数=绿色，需登录=橙色，有错误=红色
+    let badgeColor = '#4CAF50';
+    if (summary.authBlocked > 0) {
+      badgeColor = '#FF9800'; // 橙色 - 需登录
+    }
+    if (summary.successfulChecks === 0 && summary.failedChecks > 0) {
+      badgeColor = '#F44336'; // 红色 - 全部失败
+    }
+    await chrome.action.setBadgeBackgroundColor({ color: badgeColor });
+  } catch (err) {
+    logger.debug(`Badge 更新失败（可能不影响主功能）: ${err.message}`);
   }
-
-  const badgeText = totalUnread > 0 ? String(totalUnread) : '';
-  await chrome.action.setBadgeText({ text: badgeText });
-
-  const badgeColor = summary.authBlocked ? '#FF9800' : '#4CAF50';
-  await chrome.action.setBadgeBackgroundColor({ color: badgeColor });
 }
 
 // SW 启动时立即尝试注册闹钟（应对 SW 被终止后重新唤醒的情况）
