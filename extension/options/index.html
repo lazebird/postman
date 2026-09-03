@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mail Notifier PoC - 设置</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f8f9fa;
+      color: #212529;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 22px;
+      margin-bottom: 20px;
+      color: #1976d2;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .card h2 {
+      font-size: 16px;
+      margin-bottom: 16px;
+      color: #495057;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #495057;
+      margin-bottom: 6px;
+    }
+    .form-group input[type="text"],
+    .form-group select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .form-group input[type="text"]:focus,
+    .form-group select:focus {
+      border-color: #1976d2;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(25,118,210,0.25);
+    }
+    .form-group .hint {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 4px;
+    }
+    .btn-group { display: flex; gap: 8px; margin-top: 16px; }
+    button {
+      background: #1976d2;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #1565c0; }
+    button.secondary { background: #6c757d; }
+    button.secondary:hover { background: #5a6268; }
+    button.danger { background: #dc3545; }
+    button.danger:hover { background: #c82333; }
+    .accounts-list {
+      margin-top: 12px;
+    }
+    .account-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .account-item:last-child { border-bottom: none; }
+    .account-info { font-size: 14px; }
+    .account-actions button {
+      font-size: 12px;
+      padding: 4px 8px;
+      margin-left: 4px;
+    }
+    .endpoint-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 14px;
+    }
+    .save-status {
+      margin-top: 8px;
+      font-size: 13px;
+      padding: 6px 12px;
+      border-radius: 4px;
+      display: none;
+    }
+    .save-status.success { background: #d4edda; color: #155724; display: block; }
+    .save-status.error { background: #f8d7da; color: #721c24; display: block; }
+    .inline-form {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .inline-form input {
+      flex: 1;
+      min-width: 200px;
+    }
+    .inline-form select { width: auto; }
+    .help-text {
+      background: #e7f3ff;
+      border-left: 4px solid #1976d2;
+      padding: 10px 12px;
+      margin-top: 12px;
+      font-size: 12px;
+      border-radius: 0 4px 4px 0;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <h1>📧 Mail Notifier PoC — 设置</h1>
+
+  <!-- 账户管理 -->
+  <div class="card">
+    <h2>邮箱账户</h2>
+    <div id="accounts-list">
+      <div class="help-text">暂无账户，请先在下方添加。添加邮箱账户后，需确保在浏览器中已登录对应邮箱网页。</div>
+    </div>
+
+    <div class="inline-form">
+      <select id="provider-select">
+        <option value="netease_163">163邮箱</option>
+        <option value="qq">QQ邮箱</option>
+        <option value="ustc">USTC邮箱</option>
+      </select>
+      <input type="text" id="email-input" placeholder="邮箱地址，如 user@163.com">
+      <button id="btn-add-account">添加</button>
+    </div>
+  </div>
+
+  <!-- 检查设置 -->
+  <div class="card">
+    <h2>检查设置</h2>
+    <div class="form-group">
+      <label for="interval-select">检查间隔</label>
+      <select id="interval-select">
+        <option value="1">1分钟</option>
+        <option value="5" selected>5分钟</option>
+        <option value="10">10分钟</option>
+        <option value="15">15分钟</option>
+        <option value="30">30分钟</option>
+      </select>
+      <div class="hint">chrome.alarms 最小间隔为 1 分钟</div>
+    </div>
+
+    <div class="form-group">
+      <label for="loglevel-select">日志级别</label>
+      <select id="loglevel-select">
+        <option value="DEBUG" selected>DEBUG（最详细）</option>
+        <option value="INFO">INFO</option>
+        <option value="WARN">WARN</option>
+        <option value="ERROR">ERROR</option>
+      </select>
+      <div class="hint">DEBUG 级别会记录所有请求响应细节，用于调试</div>
+    </div>
+  </div>
+
+  <!-- 探测接口管理 -->
+  <div class="card">
+    <h2>探测接口（163 / QQ）</h2>
+    <div id="endpoint-config">
+      <div class="help-text">选择用于探测未读邮件的接口。</div>
+    </div>
+  </div>
+
+  <div class="btn-group">
+    <button id="btn-save">💾 保存设置</button>
+    <button id="btn-reset" class="secondary">🔄 重置</button>
+  </div>
+  <div id="save-status" class="save-status"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>

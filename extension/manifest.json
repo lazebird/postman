@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Edge Mail Notifier - PoC",
+  "version": "0.1.0",
+  "description": "方案B PoC：SW 直接探测 webmail 未读接口的可行性验证",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "alarms",
+    "storage",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://mail.163.com/*",
+    "https://*.163.com/*",
+    "https://mail.qq.com/*",
+    "https://*.qq.com/*",
+    "https://mail.ustc.edu.cn/*",
+    "https://*.ustc.edu.cn/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "Mail Notifier PoC"
+  },
+  "options_page": "options/index.html"
+}
