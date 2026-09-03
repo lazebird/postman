@@ -1,15 +1,40 @@
 /**
- * storage.js - chrome.storage 封装
+ * storage.js - chrome.storage 封装（存储分层）
  *
- * 修复/优化：
+ * 存储分层约定（关系到"扩展更新时数据是否丢失"）：
+ *
+ *  ┌──────────────────────────────┬─────────────────────────────────────────┬──────────────────────┐
+ *  │ 数据                          │ 存储区                                  │ 扩展更新 / 浏览器重启 │
+ *  ├──────────────────────────────┼─────────────────────────────────────────┼──────────────────────┤
+ *  │ 账号配置 accounts            │ chrome.storage.local（持久化）          │ ✅ 保留              │
+ *  │ 用户设置 settings            │ chrome.storage.local（持久化）          │ ✅ 保留              │
+ *  │ 检查历史 checkResults        │ chrome.storage.local（持久化）          │ ✅ 保留              │
+ *  │ sid 会话令牌                 │ chrome.storage.session（会话级）        │ ⚠️ 清空，可自动重建  │
+ *  │ 调试日志 debugLogs           │ chrome.storage.session（会话级）        │ ⚠️ 清空              │
+ *  └──────────────────────────────┴─────────────────────────────────────────┴──────────────────────┘
+ *
+ * 关键结论：
+ *  - 账号配置、用户设置、检查历史等【用户数据】一律写入 chrome.storage.local，
+ *    该存储区在扩展更新（update）时不丢失，卸载前始终保留 —— 避免"每次插件更新后
+ *    账号配置丢失、需重新添加"的体验问题。
+ *  - sid 会话令牌属【短期会话数据】（30 分钟 TTL），即便 chrome.storage.session
+ *    在扩展更新/浏览器重启后被清空，探测流程也会自动重新获取 sid，无需用户干预。
+ *  - MV3 Service Worker 上下文【没有】页面级 localStorage，跨上下文共享用户数据
+ *    只能使用 chrome.storage.local（等价于持久化的 localStorage 语义）。
+ *
+ * 优化历史：
  * 1. 添加 chrome.storage.session 权限检查的降级处理
  * 2. 添加 getDebugLogs 导出
  * 3. 更健壮的错误处理
+ * 4. 明确持久化/会话两级存储分层，账号配置等用户数据统一落 chrome.storage.local
  */
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants.js';
 
-// 从 constants.js 移除了 STORAGE_KEYS.DEBUG_LOGS 引用（在 debug.js 中直接使用字符串键）
+/* ============================================================
+ * 持久级用户数据（chrome.storage.local）
+ * —— 扩展更新/浏览器重启均保留，卸载扩展前不丢失
+ * ============================================================ */
 
 /**
  * 读取全部账户配置
@@ -26,7 +51,7 @@ export async function getAccounts() {
 }
 
 /**
- * 保存账户配置
+ * 保存账户配置（持久化，扩展更新不丢失）
  * @param {Array} accounts
  */
 export async function setAccounts(accounts) {
@@ -34,7 +59,7 @@ export async function setAccounts(accounts) {
 }
 
 /**
- * 读取设置
+ * 读取设置（持久化）
  * @returns {Promise<Object>}
  */
 export async function getSettings() {
@@ -48,7 +73,7 @@ export async function getSettings() {
 }
 
 /**
- * 保存设置
+ * 保存设置（持久化，扩展更新不丢失）
  * @param {Object} settings
  */
 export async function setSettings(settings) {
@@ -56,7 +81,7 @@ export async function setSettings(settings) {
 }
 
 /**
- * 保存一次检查结果
+ * 保存一次检查结果（持久化，保留最近 100 条）
  * @param {Object} result - { provider, timestamp, success, unreadCount, detail, endpoints }
  */
 export async function saveCheckResult(result) {
@@ -85,8 +110,14 @@ export async function getCheckResults(limit = 20) {
   }
 }
 
+/* ============================================================
+ * 会话级数据（chrome.storage.session）
+ * —— 浏览器重启/扩展更新会清空；属临时数据，丢失不影响功能
+ * ============================================================ */
+
+
 /**
- * 读取调试日志
+ * 读取调试日志（会话级）
  * @param {number} limit
  */
 export async function getDebugLogs(limit = 100) {

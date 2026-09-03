@@ -5,6 +5,8 @@
  * 1. 添加 chrome.storage.session 不可用时的降级处理（内存环形缓冲区）
  * 2. 提高日志持久化的健壮性
  * 3. 同步 Console 输出与异步持久化分离，避免 await 阻塞主流程
+ * 4. 修复 logLevel 读取键：设置项持久化在 chrome.storage.local 的
+ *    settings.logLevel，而非顶层 logLevel 键。
  */
 
 const LOG_LEVELS = {
@@ -25,11 +27,13 @@ class DebugLogger {
 
   /**
    * 获取当前调试级别设置
+   * 读取路径：chrome.storage.local 的 settings.logLevel（用户持久化设置）
    */
   async _getLogLevel() {
     try {
-      const { logLevel } = await chrome.storage.local.get({ logLevel: 'INFO' });
-      return LOG_LEVELS[logLevel] ?? LOG_LEVELS.INFO;
+      const { settings = {} } = await chrome.storage.local.get('settings');
+      const level = settings.logLevel || 'INFO';
+      return LOG_LEVELS[level] ?? LOG_LEVELS.INFO;
     } catch (e) {
       return LOG_LEVELS.INFO;
     }
