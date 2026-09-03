@@ -1,28 +1,27 @@
 /**
  * service-worker.js - MV3 Service Worker 入口
  *
- * 混合方案（v0.8.0）：
+ * 混合方案（v0.7.0）：
  *   1. 内容脚本在邮箱页面（同源）提取 sid → 缓存到 chrome.storage.local
  *   2. SW 使用缓存 sid + 登录 Cookie 调用 webmail 内部 API → 后台独立检查
- *   3. 无缓存 sid 或 API 失败 → 自动打开后台邮箱标签恢复会话（10分钟冷却控制）
+ *   3. 无缓存 sid 或 API 失败 → 回退到内容脚本 DOM 探测（需页面打开）
  *
- * v0.8.0 修复（本版核心）：alarm 自动检查不再因无标签/无 sid 而必然失败
- *   - 手动全量检查成功后关闭标签，后续 alarm 检查失败时自动恢复会话
- *   - alarm 检查允许自动打开后台邮箱标签（active:false 不抢焦点），读取后立即关闭
- *   - 10 分钟冷却期控制避免反复弹标签打扰用户
- *   - 自动打开的标签页获取信息后确保关闭
+ * v0.7.0 修复（本版核心）：自动检查绝不自动打开可见标签
+ *   - 后台定时检查（alarm）失败时仅标记「需手动同步会话」，不自动开标签
+ *   - 仅用户主动触发（手动检查/同步）才打开邮箱标签获取 sid
+ *   - sid 持久化至 chrome.storage.local（7天 TTL），浏览器重启不丢失
  *
- * v0.7.0：alarm 检查不自动打开可见标签，sid 持久化至 chrome.storage.local（7天 TTL）
  * v0.6.0：标签页关闭时全量/自动检查均能执行
  * v0.5.0：不再依赖标签页开启即可独立运行，延长 sid 缓存有效期
  */
 
 import { createLogger } from '../shared/debug.js';
 import { getAccounts, getSettings, saveCheckResult, getCheckResults } from '../shared/storage.js';
-import { PROVIDERS } from '../shared/constants.js';
+import { PROVIDERS, API_PATTERN_KEYS } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
+import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 
 const logger = createLogger('service-worker');
 
@@ -36,35 +35,6 @@ const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 function isUserInitiated(context) {
   const src = (context && context.source) || 'unknown';
   return src === 'manual' || src === 'manual-test';
-}
-
-// 自动恢复冷却期：同一提供商两次"自动打开邮箱标签"的最小间隔（毫秒）。
-// alarm 自动检查失败时允许短暂自动打开后台邮箱标签恢复会话。
-// 冷却期避免反复弹标签打扰用户。
-const AUTO_RECOVER_COOLDOWN_MS = 10 * 60 * 1000; // 10 分钟
-
-// 检查某提供商是否可自动打开标签恢复会话（冷却控制）
-// 用户主动触发不受限；alarm 自动触发受冷却期限制
-async function canAutoRecover(provider, context) {
-  // 用户主动触发不设冷却
-  if (isUserInitiated(context)) {
-    return { allowed: true, remainingMs: 0, source: 'user' };
-  }
-  try {
-    const key = `autoRecoverCooldown_${provider}`;
-    const data = await chrome.storage.local.get(key);
-    const lastTry = data[key] || 0;
-    const now = Date.now();
-    const elapsed = now - lastTry;
-    if (elapsed < AUTO_RECOVER_COOLDOWN_MS) {
-      return { allowed: false, remainingMs: AUTO_RECOVER_COOLDOWN_MS - elapsed, source: 'cooldown' };
-    }
-    // 记录本次尝试时间
-    await chrome.storage.local.set({ [key]: now });
-    return { allowed: true, remainingMs: 0, source: 'alarm' };
-  } catch (e) {
-    return { allowed: true, remainingMs: 0, source: 'alarm' };
-  }
 }
 
 // ===== 事件监听 =====
@@ -209,6 +179,89 @@ async function handleMessage(message, sender) {
       return { success: true };
     }
 
+    case 'apiCaptureBatch': {
+      // 批量接收 API 捕获
+      const provider = message.provider;
+      const captures = message.captures || [];
+      if (provider && captures.length > 0) {
+        const patterns = captures.map(c => ({
+          url: c.url || '',
+          method: c.method || 'GET',
+          body: c.body || null,
+          headers: c.headers || {},
+          timestamp: c.timestamp || Date.now(),
+          description: `页面捕获: ${c.type || 'unknown'} ${c.method || 'GET'} ${c.url || ''}`,
+        }));
+        // 缓存 sid（从第一条捕获中获取）
+        const firstCapture = captures[0];
+        const sidToUse = firstCapture?.currentSid;
+        if (sidToUse) {
+          try {
+            const sidKey = provider === 'qq' ? 'sid_qq' : 'sid_163';
+            const sidData = await chrome.storage.local.get(sidKey);
+            if (!sidData[sidKey]) {
+              await chrome.storage.local.set({
+                [sidKey]: sidToUse,
+                [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
+              });
+            }
+          } catch(e) {}
+        }
+        const saved = await saveApiPatterns(provider, patterns);
+        logger.info(`批量保存 ${provider} API 模式 ${patterns.length} 条`, { saved });
+      }
+      return { success: true };
+    }
+
+    case 'apiCapture': {
+      // 内容脚本捕获到页面的真实 API 请求，保存供 SW 后续精确复现
+      const capture = message.capture;
+      const provider = message.provider;
+      if (capture && provider) {
+        const pattern = {
+          url: capture.url || '',
+          method: capture.method || 'GET',
+          body: capture.body || null,
+          headers: capture.headers || {},
+          timestamp: capture.timestamp || Date.now(),
+          description: `页面捕获: ${capture.type || 'unknown'} ${capture.method || 'GET'} ${capture.url || ''}`,
+        };
+        // 如果消息中带了 currentSid 且 SW 还没有缓存，先临时缓存
+        const sidToUse = capture.currentSid || message.sid;
+        if (sidToUse) {
+          try {
+            const sidKey = provider === 'qq' ? 'sid_qq' : 'sid_163';
+            await chrome.storage.local.get([sidKey, `${sidKey}_expiry`]).then(async (data) => {
+              if (!data[sidKey]) {
+                await chrome.storage.local.set({
+                  [sidKey]: sidToUse,
+                  [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
+                });
+                logger.info(`通过 API 捕获缓存 ${provider} sid`);
+              }
+            });
+          } catch(e) {}
+        }
+        const saved = await saveApiPatterns(provider, [pattern]);
+        logger.info(`已捕获并保存 ${provider} API 请求: ${pattern.method} ${pattern.url}`, { saved });
+      }
+      return { success: true };
+    }
+
+    case 'getApiPatterns': {
+      const provider = message.provider;
+      if (!provider) return { success: false, error: 'Provider required' };
+      const patterns = await getApiPatterns(provider);
+      return { success: true, patterns };
+    }
+
+    case 'clearApiPatterns': {
+      const provider = message.provider;
+      if (!provider) return { success: false, error: 'Provider required' };
+      await clearApiPatterns(provider);
+      return { success: true, message: 'API patterns cleared' };
+    }
+
     case 'settingsChanged':
       await setupAlarms();
       return { success: true, message: 'Alarms re-registered' };
@@ -234,21 +287,21 @@ const PROVIDER_HOME = {
 };
 
 // 自动打开标签时使用的「登录后直达」URL：
-// 首页（https://mail.163.com/）可能只是落地/跳转页，需额外导航到主应用。
-// 用更具体的入口可减少一步跳转，更快加载内容脚本可读的主界面。
+// QQ 新版 webmail 在 wx.mail.qq.com；mail.qq.com 仅作登录入口。
 const PROVIDER_OPEN_URL = {
   netease_163: 'https://mail.163.com/js6/main.jsp',
-  qq: 'https://mail.qq.com/cgi-bin/login?fun=passport',
+  // QQ 新版 webmail 在 wx.mail.qq.com；若未登录 mail.qq.com 会跳登录
+  qq: 'https://wx.mail.qq.com/',
 };
+
+// QQ 页面中可识别的域名
+const QQ_MAIL_DOMAINS = ['mail.qq.com', 'wx.mail.qq.com', 'exmail.qq.com'];
 
 // 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
 const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ]);
 
 /**
- * QQ 邮箱的主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com（登录后常落于
- * https://wx.mail.qq.com/home/index?sid=...#/list/1），而 mail.qq.com 是其旧入口/入口域。
- * 因此识别 QQ 邮箱页面须同时匹配 mail.qq.com 与 wx.mail.qq.com，否则会漏检已打开的标签
- * 导致每次探测都重复打开新标签。
+ * QQ 邮箱主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com 或 mail.qq.com
  */
 function isQQMailUrl(url) {
   return /^https?:\/\/(?:wx\.)?mail\.qq\.com\//i.test(url || '');
@@ -287,6 +340,19 @@ async function findMailboxTab(provider) {
 }
 
 /**
+ * 返回提供商的中文名，用于错误消息展示
+ */
+function providerNameForError(provider) {
+  switch (provider) {
+    case 'qq': return 'QQ';
+    case 'netease_163': return '163';
+    case 'ustc': return '中科大';
+    case 'gmail': return 'Gmail';
+    default: return provider || '目标';
+  }
+}
+
+/**
  * 向已打开的邮箱标签内容脚本发送探测指令
  */
 async function probeTabContent(provider, tabId, timeoutMs = 15000) {
@@ -302,7 +368,7 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
   if (!targetTabId) {
     return {
       success: false,
-      error: `未找到已打开的${provider === 'qq' ? 'QQ' : '163'}邮箱标签。请先打开邮箱页面登录，或使用 openTab 自动打开。`,
+      error: `未找到已打开的${providerNameForError(provider)}邮箱标签。请先打开邮箱页面登录，或使用 openTab 自动打开。`,
       needsTab: true,
     };
   }
@@ -549,6 +615,8 @@ async function checkSingleAccount(account, settings, context) {
   logger_acc.info(`开始检查账户 ${account.email} (provider=${account.provider})`);
 
   const mode = settings.checkMode || 'hybrid';
+  // 记录 API 探测的详细信息（含端点和错误），供最终诊断
+  let apiProbeDiagnostics = null;
 
   try {
     // ===== 模式 1：SW API 优先（hybrid / sw-api） =====
@@ -578,42 +646,45 @@ async function checkSingleAccount(account, settings, context) {
         return accountResult;
       }
 
+      // API 失败，记录诊断信息
+      apiProbeDiagnostics = {
+        error: apiResult.error,
+        sidExpired: apiResult.sidExpired,
+        authBlocked: apiResult.authBlocked,
+        needsSid: apiResult.needsSid,
+        detail: apiResult.detail,
+      };
       // API 失败，sid 可能失效
       if (apiResult.sidExpired) {
         logger_acc.warn('缓存的 sid 已失效，尝试刷新');
         await clearCachedSid(account.provider);
       }
 
-      // sw-api 模式且 API 失败时自动恢复 sid
-      // 所有触发源（含 alarm）均允许，alarm 受 10 分钟冷却期限制
-      if (mode === 'sw-api') {
-        const swCooldown = await canAutoRecover(account.provider, context);
-        if (swCooldown.allowed) {
-          // 尝试自动打开后台标签恢复 sid，然后重试 API
-          const rec = await autoRecoverSid(account.provider);
-          if (rec.success) {
-            const apiResult2 = await runSWApiProbe(account.provider, settings);
-            if (apiResult2.success) {
-              const accountResult = {
-                email: account.email,
-                provider: account.provider,
-                authVerified: true,
-                needsAuth: false,
-                allFailed: false,
-                source: context.source,
-                method: 'sw-api',
-                unreadCount: apiResult2.unreadCount,
-                unreadSource: apiResult2.unreadSource,
-                detail: apiResult2.detail,
-                timestamp: new Date().toISOString(),
-              };
-              await saveCheckResult(accountResult);
-              logger_acc.info(`自动恢复 sid 后 SW API 探测成功: unread=${apiResult2.unreadCount}`);
-              return accountResult;
-            }
+      // 如果 sw-api 模式且 API 失败 → 仅用户主动触发时尝试自动恢复 sid
+      // （自动检查不自动开标签，避免影响用户体验）
+      if (mode === 'sw-api' && isUserInitiated(context)) {
+        // 尝试自动打开后台标签恢复 sid，然后重试 API
+        const rec = await autoRecoverSid(account.provider);
+        if (rec.success) {
+          const apiResult2 = await runSWApiProbe(account.provider, settings);
+          if (apiResult2.success) {
+            const accountResult = {
+              email: account.email,
+              provider: account.provider,
+              authVerified: true,
+              needsAuth: false,
+              allFailed: false,
+              source: context.source,
+              method: 'sw-api',
+              unreadCount: apiResult2.unreadCount,
+              unreadSource: apiResult2.unreadSource,
+              detail: apiResult2.detail,
+              timestamp: new Date().toISOString(),
+            };
+            await saveCheckResult(accountResult);
+            logger_acc.info(`自动恢复 sid 后 SW API 探测成功: unread=${apiResult2.unreadCount}`);
+            return accountResult;
           }
-        } else {
-          logger_acc.debug(`sw-api 自动恢复受冷却期限制，跳过（剩余 ${Math.round(swCooldown.remainingMs / 60000)} 分钟）`);
         }
       }
     }
@@ -681,16 +752,14 @@ async function checkSingleAccount(account, settings, context) {
       }
 
       // 标签页关闭后自动检查。
-      // 自动恢复会话：当 API 失败且无已打开邮箱标签时，自动打开后台邮箱标签读取未读数。
-      // - 用户主动触发 → 直接允许自动恢复（读取后立即关闭标签）
-      // - alarm 自动触发 → 也允许自动恢复（此前版本不允许导致自动检查总失败），
-      //   但受 10 分钟冷却期限制，避免反复弹标签打扰用户。
-      // 标签打开为后台方式（active:false 不抢焦点），读取完成后立即关闭。
-      {
-        // 检查冷却控制（用户触发直接放行，alarm 受 10 分钟冷却期限制）
-        const cooldown = await canAutoRecover(account.provider, context);
-        if (cooldown.allowed) {
-          logger_acc.info('API 与现有标签探测均失败，自动打开邮箱后台标签读取未读...');
+      // 仅用户主动触发（手动全量检查等）时自动打开邮箱后台标签读未读；
+      // 后台定时检查（alarm）绝不自动开可见标签，改为标记「需手动同步会话」。
+      if ((mode === 'hybrid' || mode === 'content-script') && isUserInitiated(context)) {
+        // 跳过不支持内容脚本探测的提供商
+        if (!CONTENT_PROBE_PROVIDERS.has(account.provider)) {
+          logger_acc.warn(`提供商 ${account.provider} 不支持内容脚本探测，跳过自动恢复`);
+        } else {
+          logger_acc.info('API 与现有标签探测均失败，尝试自动打开邮箱后台标签读取未读...');
           // 自动打开/复用邮箱后台标签，由内容脚本 in-origin 读取未读（最可靠路径）
           const auto = await runContentProbe(account.provider, { openTab: true, closeAfterProbe: true });
           const ap = (auto && auto.probe) || {};
@@ -759,14 +828,9 @@ async function checkSingleAccount(account, settings, context) {
               return accountResult;
             }
           }
-
-          // 自动恢复也失败了（可能邮箱确实未登录或网络不可达）
-          logger_acc.warn('自动恢复失败：无法从邮箱页面读取未读数或提取 sid');
-        } else {
-          // 冷却期限制，暂不自动打开标签
-          logger_acc.debug(`自动恢复处于冷却期，剩余 ${Math.round(cooldown.remainingMs / 60000)} 分钟（source=${context.source || 'unknown'}）`);
         }
       }
+
     }
 
     // ===== 所有方法都失败 =====
@@ -786,14 +850,15 @@ async function checkSingleAccount(account, settings, context) {
       error: unsupported
         ? `提供商 ${account.provider} 暂不支持自动读取`
         : (autoCheck && !userTriggered)
-          ? '自动检查失败：无法读取邮箱未读数（已尝试自动恢复会话但未成功）'
+          ? '会话已过期：自动检查无法获取邮箱未读数（无有效会话，后台检查不会自动打开标签）'
           : '未授权：无法获取邮箱会话（未检测到 sid / 未打开邮箱登录页）',
       detail: {
         mode,
+        apiDiagnostics: apiProbeDiagnostics,
         hint: unsupported
           ? `提供商 ${account.provider} 尚未接入内容脚本或 API 探测，暂时无法自动读取未读数。`
           : (autoCheck && !userTriggered)
-            ? '扩展已尝试自动恢复邮箱会话但未成功。请打开并登录对应邮箱网页一次，之后扩展将恢复正常自动检查。'
+            ? '请在浏览器中打开并登录对应邮箱网页，扩展会自动同步会话并恢复后台自动检查。'
             : '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
         action: unsupported ? 'providerNotSupported' : 'openMailboxAndSync',
       },
@@ -858,13 +923,21 @@ async function runSWApiProbe(provider, settings) {
     }
 
     // 检查是否 sid 过期 / 认证被拦截
-    const authBlocked = endpointResults.some(r => r.authBlocked);
+    // 对于 QQ：mail.qq.com 旧域接口的 authBlocked 不代表 sid 过期——
+    // 用户会话实际在 wx.mail.qq.com，旧域接口因 cookie 域不匹配必然失败。
+    // 仅当 wx.mail.qq.com 域接口也报告 authBlocked 时才判定 sid 过期。
+    const isQQ = provider === PROVIDERS.QQ;
+    const authBlockedAny = endpointResults.some(r => r.authBlocked);
+    const authBlockedOnSessionDomain = isQQ
+      ? endpointResults.some(r => r.authBlocked && /wx\.mail\.qq\.com/i.test(r.url || ''))
+      : authBlockedAny;
+    const authBlocked = authBlockedAny;
     const needsSid = providerResult.needsSid === true ||
                      endpointResults.some(r => r.needsSid === true) ||
-                     (provider === PROVIDERS.QQ && !providerResult.session?.sidObtained && authBlocked);
+                     (isQQ && !providerResult.session?.sidObtained && authBlocked);
     return {
       success: false,
-      sidExpired: authBlocked,
+      sidExpired: authBlockedOnSessionDomain,
       authBlocked,
       needsSid,
       error: 'API 探测未返回未读数',
@@ -1144,6 +1217,10 @@ async function getStatus() {
   // 检查是否有缓存 sid
   const sid163 = await getCachedSid('netease_163');
   const sidQQ = await getCachedSid('qq');
+  
+  // 检查 API pattern 数量
+  const apiP163 = await getApiPatterns('netease_163');
+  const apiPQQ = await getApiPatterns('qq');
 
   // ===== 聚合每个账户的最新状态 =====
   // recentResults 中保存了各账户单独的检查结果（含 email/provider/unreadCount 字段），
@@ -1182,6 +1259,10 @@ async function getStatus() {
     cachedSids: {
       netease_163: !!sid163,
       qq: !!sidQQ,
+    },
+    apiPatternCounts: {
+      netease_163: apiP163.length,
+      qq: apiPQQ.length,
     },
     alarmConfigured: !!alarm,
     alarmInfo: alarm ? { periodInMinutes: alarm.periodInMinutes, scheduledTime: new Date(alarm.scheduledTime).toISOString() } : null,

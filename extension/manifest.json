@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Edge Mail Notifier",
   "version": "0.8.0",
-  "description": "自动恢复会话：定时检查失败时自动打开后台标签恢复会话并读取未读数，读后即关；含冷却控制避免频繁打扰",
+  "description": "纯后台检查：Cookie+API 独立探测，API 模式自动捕获学习，绝不自动打开标签",
   "minimum_chrome_version": "116",
   "permissions": [
     "alarms",
@@ -30,7 +30,8 @@
         "https://mail.163.com/*",
         "https://*.mail.163.com/*",
         "https://mail.qq.com/*",
-        "https://*.mail.qq.com/*"
+        "https://*.mail.qq.com/*",
+        "https://wx.mail.qq.com/*"
       ],
       "js": [
         "content/probe-content.js"

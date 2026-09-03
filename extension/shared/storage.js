@@ -65,7 +65,28 @@ export async function setAccounts(accounts) {
 export async function getSettings() {
   try {
     const { [STORAGE_KEYS.SETTINGS]: settings = {} } = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-    return { ...DEFAULT_SETTINGS, ...(settings || {}) };
+    const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+    // 关键：始终合并所有默认启用的端点，确保升级后新端点可用。
+    // 注意：必须逐端点合并（union），不能直接 {...defaults, ...user} 整体覆盖，
+    // 因为如果用户设置里 qq 只有 ['cgi_mail_list']，直接覆盖会把 wx.* 新端点丢掉。
+    // 修复：将每个 provider 的用户选择与默认列表做并集。
+    const defaultEndpoints = DEFAULT_SETTINGS.enabledEndpoints || {};
+    const userEndpoints = settings?.enabledEndpoints || {};
+    const allProviders = new Set([
+      ...Object.keys(defaultEndpoints),
+      ...Object.keys(userEndpoints),
+    ]);
+    const mergedEndpoints = {};
+    for (const provider of allProviders) {
+      const defaults = defaultEndpoints[provider] || [];
+      const userList = userEndpoints[provider] || [];
+      // 并集去重：如果用户完全没配置（空数组/未定义），用默认；否则默认 ∪ 用户
+      mergedEndpoints[provider] = [...new Set([...defaults, ...userList])];
+    }
+    if (Object.keys(userEndpoints).length > 0 || Object.keys(defaultEndpoints).length > 0) {
+      merged.enabledEndpoints = mergedEndpoints;
+    }
+    return merged;
   } catch (e) {
     console.error('[storage] getSettings failed:', e.message);
     return { ...DEFAULT_SETTINGS };

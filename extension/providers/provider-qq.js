@@ -1,32 +1,26 @@
 /**
  * provider-qq.js - QQ邮箱未读接口探测实现
  *
- * 混合方案下：
- *   1. 优先从 chrome.storage.local 读取缓存 sid（内容脚本提取）
- *   2. 带 sid 调 API 获取未读数
- *
- * 修复：不再因无缓存 sid 就直接中止探测。
- *   - 有 sid：拼入 URL 调 API
- *   - 无 sid：尝试不带 sid 直接调 API（部分 QQ 端点可仅靠 Cookie 工作），
- *     若被拦截则标记 needsSid=true，交由上层自动恢复 sid。
+ * v0.8.0 全面重写：
+ *   1. 同时探测 mail.qq.com（旧接口）和 wx.mail.qq.com（新网页版）
+ *   2. 从 chrome.storage.local 读取缓存 sid
+ *   3. 支持 API pattern 捕获回放（captured patterns 优先）
+ *   4. 改进响应解析（QQ 新旧版响应格式差异大）
  */
 
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
-import { headersToObject } from '../shared/session.js';
+import { headersToObject, fetchWithTimeout } from '../shared/session.js';
+import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
 
 const logger = createLogger('provider-qq');
 
 /**
  * 探测 QQ 邮箱未读接口
- *
- * @param {Object} options
- * @returns {Promise<Object>}
  */
 export async function probeQQ(options = {}) {
   const config = PROVIDER_CONFIG['qq'];
 
-  // 读取缓存 sid
   const cachedSid = await getSidFromStorage();
   const { sid, source: sidSource } = cachedSid;
 
@@ -35,29 +29,42 @@ export async function probeQQ(options = {}) {
     : config.probeEndpoints;
 
   if (!endpoints.length) {
-    logger.warn('没有匹配的探测接口，回退到全部接口', { requested: options.endpointNames });
+    logger.warn('没有匹配的探测接口，回退到全部接口');
     endpoints = config.probeEndpoints;
   }
 
+  // 加入捕获的 API 模式（如果有），优先执行
+  const capturedPatterns = await getApiPatterns('qq');
+  let capturedEndpoints = [];
+  if (capturedPatterns.length > 0) {
+    capturedEndpoints = patternsToProbeEndpoints(capturedPatterns);
+    logger.info(`发现 ${capturedPatterns.length} 条捕获的 QQ API 模式`);
+  }
+
+  // 组合：先试捕获的真实模式，再试内置候选接口
+  const allEndpoints = [...capturedEndpoints, ...endpoints];
+
   logger.info('开始探测QQ邮箱未读接口', {
-    endpoints: endpoints.map(e => e.name),
+    endpoints: allEndpoints.map(e => e.name),
     hasSid: !!sid,
     sidSource: sidSource || 'none',
+    capturedCount: capturedEndpoints.length,
   });
 
-  // 核心修复：不再因无 sid 直接返回失败。
-  // QQ 部分接口（如 fr_show）可能在无 sid 时也能通过 Cookie 工作，
-  // 至少应尝试发起请求；若响应明确要求 sid，则由上层触发自动恢复。
   const results = [];
   let anySucceeded = false;
+  let lastError = null;
 
-  for (const endpoint of endpoints) {
+  for (const endpoint of allEndpoints) {
     const result = await probeSingleEndpoint(endpoint, sid, options);
     results.push(result);
 
     if (result.success) {
       anySucceeded = true;
+      // 成功即停止（不需要继续探测其他接口）
+      break;
     }
+    if (result.error) lastError = result.error;
   }
 
   const allFailed = results.length > 0 && results.every(r => !r.success);
@@ -71,7 +78,7 @@ export async function probeQQ(options = {}) {
     authVerified: anySucceeded,
     needsAuth: allFailed && !anySucceeded && !needsSid,
     allFailed,
-    needsSid, // 新增：无 sid 且 API 失败 → 上层需要自动恢复 sid
+    needsSid,
     session: {
       sidObtained: !!sid,
       sid: sid ? sid.substring(0, 8) + '...' : null,
@@ -122,30 +129,27 @@ async function probeSingleEndpoint(endpoint, sid, options) {
   const startTime = performance.now();
 
   try {
-    // 构造 URL：有 sid 时替换 {sid} 占位符；无 sid 时移除占位符
+    // 构造 URL：优先使用字符串替换 sid（避免 URL.searchParams 编码问题）
     let url = endpoint.url;
     try {
-      const urlObj = new URL(url);
-      // 移除 {sid} 占位符参数
-      urlObj.searchParams.delete('sid');
-      if (sid) {
-        urlObj.searchParams.set('sid', sid);
+      if (sid && url.includes('{sid}')) {
+        url = url.replace(/\{sid\}/g, sid);
       }
-      // 移除 URL 路径中的 {sid} 占位符
-      let pathname = urlObj.pathname.replace(/\{sid\}/g, '');
-      urlObj.pathname = pathname;
-      url = urlObj.toString();
+      if (!sid) {
+        url = url.replace(/[?&]sid=\{sid\}/g, '');
+        url = url.replace(/\{sid\}/g, '');
+        url = url.replace(/[?&]sid=$/g, '');
+        url = url.replace(/&sid=$/g, '');
+      }
+      if (sid && !url.match(/[?&]sid=[a-zA-Z0-9]/)) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
+      }
     } catch (e) {
-      // URL 解析失败，手动处理
       if (sid) {
         url = url.replace(/\{sid\}/g, sid);
       } else {
         url = url.replace(/[?&]sid=\{sid\}/g, '');
-        url = url.replace(/\{sid\}/g, '');
-      }
-      if (sid && !url.includes('sid=')) {
-        const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}sid=${sid}`;
       }
     }
 
@@ -155,24 +159,40 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       redirect: 'follow',
     };
 
-    const headers = {
-      'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9',
-      ...(endpoint.headers || {}),
-    };
+    // 构建 headers：如果端点是捕获的真实模式，使用捕获的 headers
+    let headers = {};
+    if (endpoint.captured && endpoint.headers && typeof endpoint.headers === 'object') {
+      headers = { ...endpoint.headers };
+    } else {
+      headers = {
+        'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        ...(endpoint.headers || {}),
+      };
+    }
+
     // 替换 headers 中的 {sid} 占位符
     for (const [key, value] of Object.entries(headers)) {
       if (sid) {
         headers[key] = String(value).replace(/\{sid\}/g, sid);
       } else if (String(value).includes('{sid}')) {
-        // 无 sid：移除含 sid 的 header
         delete headers[key];
       }
     }
     fetchOptions.headers = headers;
 
+    // POST body
+    if ((fetchOptions.method === 'POST' || fetchOptions.method === 'post')) {
+      let body = endpoint.bodyTemplate;
+      if (body) {
+        body = body.replace(/\{sid\}/g, sid || '');
+        fetchOptions.body = body;
+        logger_ep.debug(`POST body: ${body.substring(0, 200)}`);
+      }
+    }
+
     logger_ep.debug(`发起请求 ${fetchOptions.method} ${url}`);
-    const response = await fetch(url, fetchOptions);
+    const response = await fetchWithTimeout(url, fetchOptions);
     const elapsed = Math.round(performance.now() - startTime);
     logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms, finalUrl=${response.url}`);
 
@@ -182,18 +202,23 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
       : text;
 
-    // 判断认证状态
     const authInfo = analyzeQQAuth(text, response.status, response.url);
 
-    // 如果登录页, 清除 sid 缓存
     if (authInfo.authBlocked) {
-      logger_ep.warn('QQ 会话已失效或未登录，清除缓存 sid');
-      try {
-        await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
-      } catch (e) { /* ignore */ }
+      // 仅当请求目标为 wx.mail.qq.com（当前实际会话域）时才清除 sid。
+      // mail.qq.com 旧接口因 cookie 域不匹配总会报未登录，sid 在 wx.mail.qq.com 上仍有效，
+      // 不应因旧域接口失败而误删有效 sid。
+      const isWxDomain = /wx\.mail\.qq\.com/i.test(url);
+      if (isWxDomain) {
+        logger_ep.warn('QQ 会话已失效或未登录，清除缓存 sid');
+        try {
+          await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
+        } catch (e) {}
+      } else {
+        logger_ep.debug('mail.qq.com 域接口认证失败（sid 可能仍适用于 wx.mail.qq.com），不清除 sid');
+      }
     }
 
-    // 解析响应
     const parseResult = parseQQResponse(text);
 
     const result = {
@@ -207,7 +232,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       hasResult: parseResult.hasResult,
       unreadCount: parseResult.unreadCount,
       responseContentType: response.headers?.get?.('content-type') || '',
-      preview,
+      preview: preview.substring(0, 500),
       responseHeaders: headersToObject(response.headers),
       sidUsed: !!sid,
       needsSid: !sid && authInfo.authBlocked,
@@ -216,22 +241,25 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     if (result.success) {
       logger_ep.info(`接口 ${endpoint.name} 探测成功: unreadCount=${parseResult.unreadCount}`);
     } else if (result.authBlocked) {
-      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`);
+      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`, {
+        status: response.status,
+        finalUrl: response.url,
+        preview: preview.substring(0, 500),
+      });
     } else {
       logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`, {
         status: response.status,
-        hasResult: parseResult.hasResult,
-        preview: preview.substring(0, 300),
+        contentType: result.responseContentType,
+        finalUrl: response.url,
+        preview: preview.substring(0, 500),
+        sidUsed: !!sid,
       });
     }
 
     return result;
   } catch (err) {
     const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.error(`接口 ${endpoint.name} 请求异常: ${err.message}`, {
-      url: endpoint.url,
-      errorName: err.name,
-    });
+    logger_ep.error(`接口 ${endpoint.name} 请求异常: ${err.message}`);
 
     return {
       endpointName: endpoint.name,
@@ -294,7 +322,7 @@ function analyzeQQAuth(text, httpStatus, finalUrl) {
     }
   }
 
-  if (finalUrl && finalUrl.includes('/cgi-bin/login')) {
+  if (finalUrl && (finalUrl.includes('/cgi-bin/login') || finalUrl.includes('ptlogin'))) {
     return { authBlocked: true, reason: 'Redirected to login page' };
   }
 
@@ -303,6 +331,7 @@ function analyzeQQAuth(text, httpStatus, finalUrl) {
 
 /**
  * 解析 QQ 邮箱响应的未读数
+ * 支持 QQ 新旧版接口的不同响应格式
  */
 function parseQQResponse(text) {
   // 策略1: JSON
@@ -314,14 +343,34 @@ function parseQQResponse(text) {
     }
   } catch (e) {}
 
-  // 策略2: 正则查找 QQ 特有的未读字段
-  const unreadRegex = /["']?(?:unreadnum|unread|unreadCount|total|count)["']?\s*[:=]\s*["']?(\d+)["']?/i;
-  const match = text.match(unreadRegex);
-  if (match) {
-    return { hasResult: true, unreadCount: parseInt(match[1], 10) };
+  // 策略2: JSONP 去包裹
+  try {
+    const jsonpMatch = text.trim().match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
+    if (jsonpMatch) {
+      const data = JSON.parse(jsonpMatch[1]);
+      const unread = findUnreadCount(data);
+      if (unread !== null) {
+        return { hasResult: true, unreadCount: unread };
+      }
+    }
+  } catch (e) {}
+
+  // 策略3: QQ 特有格式 - "var xx = {...}" 等 JS 变量赋值格式
+  const varPatterns = [
+    /(?:var\s+)?(?:unread|unreadnum|unreadCount|folderCount|total)\s*[:=]\s*["']?(\d+)["']?/i,
+    /["']?(?:unreadnum|unread|unreadCount|total|count)["']?\s*[:=]\s*["']?(\d+)["']?/i,
+    /["'](?:unread|count)["']\s*:\s*(\d+)/i,
+  ];
+  for (const pattern of varPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const val = parseInt(match[1], 10);
+      // QQ 中可能有多处 count，取与文件夹相关的值
+      return { hasResult: true, unreadCount: val };
+    }
   }
 
-  // 策略3: HTML 页面中的未读计数标记
+  // 策略4: HTML 页面中的未读计数
   const htmlPatterns = [
     /data-unread=["'](\d+)["']/i,
     /class=["'][^"']*unread[^"']*["'][^>]*>\s*(\d+)\s*</i,
@@ -335,7 +384,7 @@ function parseQQResponse(text) {
     }
   }
 
-  // 策略4: QQ 收件箱页面的特定格式
+  // 策略5: QQ 收件箱页面特定格式
   const folderMatch = text.match(/收件箱[^>]{0,50}?[\(（]\s*(\d+)\s*[\)）]/);
   if (folderMatch) {
     return { hasResult: true, unreadCount: parseInt(folderMatch[1], 10) };
@@ -350,7 +399,7 @@ function parseQQResponse(text) {
 function findUnreadCount(data, depth = 0) {
   if (!data || typeof data !== 'object' || depth > 8) return null;
 
-  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'messageCount', 'count', 'total'];
+  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'messageCount', 'count', 'total', 'newCount'];
   for (const key of unreadKeys) {
     if (typeof data[key] === 'number') {
       return data[key];
