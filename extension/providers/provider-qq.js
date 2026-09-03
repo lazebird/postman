@@ -10,7 +10,7 @@
 
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
-import { headersToObject } from '../shared/session.js';
+import { headersToObject, fetchWithTimeout } from '../shared/session.js';
 import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
 
 const logger = createLogger('provider-qq');
@@ -192,7 +192,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     }
 
     logger_ep.debug(`发起请求 ${fetchOptions.method} ${url}`);
-    const response = await fetch(url, fetchOptions);
+    const response = await fetchWithTimeout(url, fetchOptions);
     const elapsed = Math.round(performance.now() - startTime);
     logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms, finalUrl=${response.url}`);
 
