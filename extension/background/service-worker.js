@@ -22,6 +22,7 @@ import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
+import { runPossibilityTests } from './possibility-tests.js';
 
 const logger = createLogger('service-worker');
 
@@ -102,6 +103,12 @@ async function handleMessage(message, sender) {
 
     case 'testEndpoint':
       return await runEndpointTest(message.provider, message.endpointName, { source: 'manual-test' });
+
+    case 'possibilityTest': {
+      // 「所有可能性」后台无标签测试：穷举 Cookie 附加策略 + 各端点，
+      // 判定关闭邮箱标签后 SW 是否仍能读到未读数。纯 SW 直调、不开标签，符合 AGENTS 规则 1。
+      return await runPossibilityTests(message.provider || 'all');
+    }
 
     case 'checkBridge':
       return await checkAuthStatus(message.provider);
