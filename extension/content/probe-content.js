@@ -200,7 +200,7 @@
     // 判断页面 URL / title 是否指向主收件箱
     const path = (location.pathname || '');
     const is163InboxPath = /js6\/main|main\.jsp|s\?func=mbox/i.test(path + ' ' + location.href);
-    const isQQInboxPath = /cgi-bin\/(mail_list|frame_html|frame|mail|login|readdata)/i.test(location.href);
+    const isQQInboxPath = /cgi-bin\/(mail_list|frame_html|frame|mail|login|readdata)|home\/index/i.test(location.href);
     const hasMailTitle = /邮箱|mail|收件箱|未读/i.test(diag.title || '');
     const hasUnread = typeof best.unread === 'number';
 
@@ -218,6 +218,22 @@
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || (message.type !== 'probeContent163' && message.type !== 'probeContentQQ')) {
       return false;
+    }
+
+    // === 关键修复：子 frame 无未读数据时不响应探测消息 ===
+    // 邮箱页面含多个 iframe（联系人、设置等），子 frame 的内容脚本也会收到消息。
+    // 若子 frame 先响应并返回空未读，SW 会误判为"手动探测失败"。
+    // 这里同步检查：子 frame 且读不到未读 → 返回 false，让顶层 frame 的内容脚本响应。
+    if (!isTopFrame) {
+      try {
+        const preDiag = extractUnreadFromDom();
+        const preBest = computeBest(preDiag);
+        if (typeof preBest.unread !== 'number') {
+          return false; // 子 frame 无未读，不响应
+        }
+      } catch (e) {
+        return false;
+      }
     }
 
     (async () => {
@@ -281,21 +297,24 @@
   });
 
   // 主动上报一次（页面加载完成后立即给 SW 一份基线数据）
-  try {
-    const diag = extractUnreadFromDom();
-    const best = computeBest(diag);
-    const cls = classifyPage(diag, best);
-    chrome.runtime.sendMessage({
-      type: 'contentPageReady',
-      detail: {
-        host: HOST,
-        url: location.href,
-        title: document.title,
-        pageType: cls.pageType,
-        unreadCount: best.unread,
-        sid: diag.sidFromUrl || diag.sidFromDom,
-        hasBody: !!(document.body && document.body.innerText),
-      }
-    }).catch(() => {});
-  } catch (e) { /* SW 未就绪时忽略 */ }
+  // 仅顶层 frame 上报，避免子 frame 内容脚本重复上报干扰
+  if (isTopFrame) {
+    try {
+      const diag = extractUnreadFromDom();
+      const best = computeBest(diag);
+      const cls = classifyPage(diag, best);
+      chrome.runtime.sendMessage({
+        type: 'contentPageReady',
+        detail: {
+          host: HOST,
+          url: location.href,
+          title: document.title,
+          pageType: cls.pageType,
+          unreadCount: best.unread,
+          sid: diag.sidFromUrl || diag.sidFromDom,
+          hasBody: !!(document.body && document.body.innerText),
+        }
+      }).catch(() => {});
+    } catch (e) { /* SW 未就绪时忽略 */ }
+  }
 })();

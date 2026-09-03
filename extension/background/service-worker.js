@@ -74,8 +74,14 @@ async function handleMessage(message, sender) {
     case 'getStatus':
       return await getStatus();
 
-    case 'testProvider':
-      return await runSingleProvider(message.provider, { source: 'manual-test' });
+    case 'testProvider': {
+      const result = await runSingleProvider(message.provider, { source: 'manual-test' });
+      // 单提供商检查后更新 badge
+      if (result.results?.length) {
+        await updateBadgeFromLatest();
+      }
+      return result;
+    }
 
     case 'testEndpoint':
       return await runEndpointTest(message.provider, message.endpointName, { source: 'manual-test' });
@@ -93,11 +99,41 @@ async function handleMessage(message, sender) {
     case 'probeContent163':
     case 'probeContentQQ': {
       const provider = message.type === 'probeContent163' ? 'netease_163' : 'qq';
-      return await runContentProbe(provider, { openTab: message.openTab !== false });
+      const result = await runContentProbe(provider, { openTab: message.openTab !== false });
+      // 内容脚本探测成功时，保存结果供 getStatus / badge 使用
+      const p = result.probe;
+      if (p && p.success) {
+        // 找到匹配该 provider 的账户并保存结果
+        const accounts = await getAccounts();
+        const matching = accounts.filter(a => a.provider === provider);
+        for (const acc of matching) {
+          await saveCheckResult({
+            email: acc.email,
+            provider: acc.provider,
+            authVerified: p.authVerified === true || typeof p.unreadCount === 'number',
+            needsAuth: p.loginRequired === true || p.needsTab === true,
+            allFailed: !p.success,
+            source: 'content-probe',
+            method: 'content-script',
+            unreadCount: typeof p.unreadCount === 'number' ? p.unreadCount : null,
+            unreadSource: p.unreadSource || null,
+            detail: p.detail || {},
+            needsInboxPage: p.needsInboxPage === true,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+      // 探测后更新 badge（含当前所有账户的未读总和）
+      await updateBadgeFromLatest();
+      return result;
     }
 
     case 'openMailboxTab':
       // 显式"打开邮箱"用前台打开，便于用户操作；探测自开的后台标签不抢焦点
+      return await openMailboxTab(message.provider, { active: true });
+
+    case 'openInbox':
+      // 从 Popup 状态页快速跳转到邮箱收件箱（前台打开）
       return await openMailboxTab(message.provider, { active: true });
 
     case 'contentPageReady': {
@@ -267,31 +303,48 @@ async function runContentProbe(provider, opts = {}) {
   // 1) 先看是否有现成标签并探测
   let probe = await probeTabContent(provider, null);
 
-  // 2) 有标签但落在辅助页（无未读且已授权），或没标签需要打开时
-  const needNavigate =
-    (probe.success && probe.pageType && probe.pageType !== 'inbox' && allowOpen) ||
-    (probe.success === false && probe.needsTab && allowOpen);
+  // 2) 如果已成功读到未读数 → 直接返回，不做多余导航
+  if (probe.success && typeof probe.unreadCount === 'number') {
+    if (probe.sid) await cacheProviderSid(provider, probe.sid);
+    return { success: true, provider, method: 'content-script', probe };
+  }
 
-  if (needNavigate) {
-    // 若有标签但页面不对，导航到该标签的主入口；否则新建标签打开首页
+  // 3) 若 allowOpen=false：直接返回当前探测结果（不管是否成功），交由上层判断
+  if (!allowOpen) {
+    if (probe.success && probe.sid) await cacheProviderSid(provider, probe.sid);
+    return { success: true, provider, method: 'content-script', probe };
+  }
+
+  // 4) 需要打开新标签 / 导航已有标签的情况：
+  //    无标签、连接失败、或标签在辅助页无未读数时，均尝试打开或导航。
+  //    扩展先打开/导航，再用「轮询」机制等待内容脚本注入后多次探测，
+  //    避免只等一次(如3.5s固定等待)就放弃导致探测失败。
+  const needsTabOpen = probe.success === false && (probe.needsTab || probe.reason === 'connection' || probe.reason === 'empty');
+  const needsNav = probe.success && probe.pageType && probe.pageType !== 'inbox';
+
+  if (needsTabOpen || needsNav) {
     let tabId = probe.tabId;
-    if (probe.needsTab) {
+
+    if (needsTabOpen && !probe.tabId) {
+      // 无现成标签 → 新建后台标签
       const opened = await openMailboxTab(provider);
       tabId = opened.tabId;
-      logger.info(`无现成邮箱标签，已打开 ${provider} 邮箱首页`);
-    } else {
+      logger.info(`无现成邮箱标签，已打开 ${provider} 邮箱首页 tabId=${tabId}`);
+    } else if (tabId && (needsNav || probe.reason === 'connection')) {
+      // 已有标签但连接失败或落在辅助页 → 导航到首页刷新
       try {
         await chrome.tabs.update(tabId, { url: PROVIDER_HOME[provider], active: false });
-        logger.info(`导航 ${provider} 标签到首页以刷新到收件箱主框架`);
+        logger.info(`导航 ${provider} 标签(tabId=${tabId})到首页刷新`);
       } catch (e) {
         logger.warn(`导航邮箱标签失败: ${e.message}`);
       }
     }
-    await new Promise(r => setTimeout(r, 3500));
-    probe = await probeTabContent(provider, tabId);
+
+    // 轮询等待内容脚本就绪：最多 20 秒，每 1.5 秒探测一次
+    probe = await probeWithRetry(provider, tabId, 5, 1500, 20000);
   }
 
-  // 如果内容脚本返回了 sid，缓存供 SW 独立使用
+  // 5) 如果内容脚本返回了 sid，缓存供 SW 独立使用
   if (probe.success && probe.sid) {
     await cacheProviderSid(provider, probe.sid);
   }
@@ -302,6 +355,31 @@ async function runContentProbe(provider, opts = {}) {
     method: 'content-script',
     probe,
   };
+}
+
+/**
+ * 轮询探测：最多 maxAttempts 次、间隔 intervalMs，总超时 timeoutMs。
+ * 用于等待新打开的标签内容脚本注入完成后再探测。
+ */
+async function probeWithRetry(provider, tabId, maxAttempts = 5, intervalMs = 1500, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastProbe = null;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    if (Date.now() > deadline) break;
+    lastProbe = await probeTabContent(provider, tabId, 8000);
+    // 成功读到未读数或已授权 → 退出轮询
+    if (lastProbe.success && (typeof lastProbe.unreadCount === 'number' || lastProbe.authVerified)) {
+      break;
+    }
+    // 明确失败且无需重试（登录页/host不匹配）→ 退出
+    if (lastProbe.loginRequired || lastProbe.hostMismatch) break;
+    // 等待后重试
+    if (i < maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
+  }
+  return lastProbe;
 }
 
 /**
@@ -742,16 +820,45 @@ async function refreshSession(provider) {
 async function getStatus() {
   const accounts = await getAccounts();
   const settings = await getSettings();
-  const checkResults = await getCheckResults(10);
+  const checkResults = await getCheckResults(50);
   const alarm = await chrome.alarms.get('check-email');
 
   // 检查是否有缓存 sid
   const sid163 = await getCachedSid('netease_163');
   const sidQQ = await getCachedSid('qq');
 
+  // ===== 聚合每个账户的最新状态 =====
+  // recentResults 中保存了各账户单独的检查结果（含 email/provider/unreadCount 字段），
+  // 以及 runAllChecks 的 summary 结果（含嵌套 results 数组）。这里提取每个账号最新状态。
+  const perAccount = accounts.map(acc => {
+    // 找到匹配该账号 email 的最新单账户结果
+    const result = checkResults.find(r =>
+      r.email === acc.email &&
+      (typeof r.unreadCount === 'number' || r.authVerified !== undefined || r.needsAuth !== undefined)
+    );
+    // 也可能是 summary.results 里嵌套的对应账号条目
+    const nested = checkResults.find(r => Array.isArray(r.results))
+      ?.results?.find(rr => rr.email === acc.email);
+
+    const matched = result || nested;
+    return {
+      email: acc.email,
+      provider: acc.provider,
+      authVerified: matched?.authVerified === true,
+      needsAuth: matched?.needsAuth === true,
+      needsInboxPage: matched?.needsInboxPage === true,
+      unreadCount: (matched && typeof matched.unreadCount === 'number') ? matched.unreadCount : null,
+      method: matched?.method || null,
+      error: matched?.error || null,
+      timestamp: matched?.timestamp || null,
+      hasSid: acc.provider === 'netease_163' ? !!sid163 : acc.provider === 'qq' ? !!sidQQ : false,
+    };
+  });
+
   return {
     success: true,
     accounts: accounts.map(a => ({ email: a.email, provider: a.provider })),
+    accountStatus: perAccount,
     accountCount: accounts.length,
     settings,
     cachedSids: {
@@ -781,31 +888,84 @@ async function setupAlarms() {
 async function updateBadge(summary) {
   if (!summary || !summary.results) return;
   try {
+    // 每个账户的未读数求和（badge 应显示所有账户未读总和）
     let totalUnread = 0;
     let hasUnreadData = false;
+    let anyAuthBlocked = false;
+    let anyNeedsAuth = false;
+    let hasAuth = false;
+
+    const allResults = [];
     for (const result of summary.results) {
+      allResults.push(result);
+      if (Array.isArray(result.results)) {
+        allResults.push(...result.results);
+      }
+    }
+
+    // 去重：同 email+provider 只取最后一个（最新的）
+    const seen = new Set();
+    for (const result of allResults) {
+      const key = result.email || result.provider || '';
+      if (result.email && seen.has(key)) continue;
+      if (result.email) seen.add(key);
+
       if (typeof result.unreadCount === 'number') {
         totalUnread += result.unreadCount;
         hasUnreadData = true;
       }
-      // 兼容嵌套的 results 数组
-      if (result.results && Array.isArray(result.results)) {
-        for (const er of result.results) {
-          if (typeof er.unreadCount === 'number') {
-            totalUnread += er.unreadCount;
-            hasUnreadData = true;
+      if (result.needsAuth === true) anyNeedsAuth = true;
+      if (result.authBlocked === true) anyAuthBlocked = true;
+      if (result.authVerified === true) hasAuth = true;
+    }
+
+    const badgeText = hasUnreadData && totalUnread > 0 ? String(totalUnread) : '';
+    await chrome.action.setBadgeText({ text: badgeText });
+
+    // badge 颜色逻辑：有账户需授权 → 橙色；全部失败 → 红色；正常 → 绿色
+    let color = '#4CAF50';
+    if (anyNeedsAuth || anyAuthBlocked) color = '#FF9800';
+    if (!hasAuth && allResults.length > 0) color = '#F44336';
+    await chrome.action.setBadgeBackgroundColor({ color });
+  } catch (err) {
+    logger.debug(`Badge 更新失败: ${err.message}`);
+  }
+}
+
+/**
+ * 从 storage 最近结果重建 badge（用于手动探测等非全量检查场景）
+ */
+async function updateBadgeFromLatest() {
+  try {
+    const results = await getCheckResults(20);
+    // 提取所有含 email 的账户级结果
+    const accountResults = [];
+    const seen = new Set();
+    for (const r of results) {
+      if (r.email && !seen.has(r.email)) {
+        seen.add(r.email);
+        accountResults.push(r);
+      }
+      // summary 里的嵌套 results 也要处理
+      if (Array.isArray(r.results)) {
+        for (const rr of r.results) {
+          if (rr.email && !seen.has(rr.email)) {
+            seen.add(rr.email);
+            accountResults.push(rr);
           }
         }
       }
     }
-    const badgeText = hasUnreadData && totalUnread > 0 ? String(totalUnread) : '';
-    await chrome.action.setBadgeText({ text: badgeText });
-    let color = '#4CAF50';
-    if (summary.authBlocked > 0) color = '#FF9800';
-    if (summary.successfulChecks === 0 && summary.failedChecks > 0) color = '#F44336';
-    await chrome.action.setBadgeBackgroundColor({ color });
+    if (accountResults.length === 0) return;
+    const summary = {
+      results: accountResults,
+      successfulChecks: accountResults.filter(r => r.authVerified).length,
+      failedChecks: accountResults.filter(r => !r.authVerified).length,
+      authBlocked: accountResults.filter(r => r.needsAuth).length,
+    };
+    await updateBadge(summary);
   } catch (err) {
-    logger.debug(`Badge 更新失败: ${err.message}`);
+    logger.debug(`Badge 从最近结果更新失败: ${err.message}`);
   }
 }
 
