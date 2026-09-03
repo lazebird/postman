@@ -179,6 +179,40 @@ async function handleMessage(message, sender) {
       return { success: true };
     }
 
+    case 'apiCaptureBatch': {
+      // 批量接收 API 捕获
+      const provider = message.provider;
+      const captures = message.captures || [];
+      if (provider && captures.length > 0) {
+        const patterns = captures.map(c => ({
+          url: c.url || '',
+          method: c.method || 'GET',
+          body: c.body || null,
+          headers: c.headers || {},
+          timestamp: c.timestamp || Date.now(),
+          description: `页面捕获: ${c.type || 'unknown'} ${c.method || 'GET'} ${c.url || ''}`,
+        }));
+        // 缓存 sid（从第一条捕获中获取）
+        const firstCapture = captures[0];
+        const sidToUse = firstCapture?.currentSid;
+        if (sidToUse) {
+          try {
+            const sidKey = provider === 'qq' ? 'sid_qq' : 'sid_163';
+            const sidData = await chrome.storage.local.get(sidKey);
+            if (!sidData[sidKey]) {
+              await chrome.storage.local.set({
+                [sidKey]: sidToUse,
+                [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
+              });
+            }
+          } catch(e) {}
+        }
+        const saved = await saveApiPatterns(provider, patterns);
+        logger.info(`批量保存 ${provider} API 模式 ${patterns.length} 条`, { saved });
+      }
+      return { success: true };
+    }
+
     case 'apiCapture': {
       // 内容脚本捕获到页面的真实 API 请求，保存供 SW 后续精确复现
       const capture = message.capture;

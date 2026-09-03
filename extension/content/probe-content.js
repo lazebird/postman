@@ -144,26 +144,43 @@
     // 注入失败不阻塞主功能
   }
 
+  // API 捕获批量发送队列（避免频繁消息轰炸 SW）
+  let captureQueue = [];
+  let captureFlushTimer = null;
+  const FLUSH_INTERVAL = 2000; // 每 2 秒批量发送一次
+
   // 接收页面 main world 发送的 API 捕获数据
   window.addEventListener('message', (event) => {
     if (!event.data || event.data.source !== '__mailApiCapture__') return;
     const capture = event.data.capture;
     if (!capture || !capture.url) return;
 
-    // 发送给 SW 存储（只从顶层 frame 上报）
+    // 从页面 URL 提取当前 sid，供 SW 正确替换捕获模式中的 sid
+    const urlSid = (location.href.match(/[?&]sid=([a-zA-Z0-9_\-]{8,})/) || [])[1] || null;
+    const enriched = { ...capture, currentSid: urlSid || undefined };
+
+    // 入队批量发送（顶层 frame 统一上报）
     if (isTopFrame) {
-      try {
-        // 从页面 URL 提取当前 sid，供 SW 正确替换捕获模式中的 sid
-        const urlSid = (location.href.match(/[?&]sid=([a-zA-Z0-9_\-]{8,})/) || [])[1] || null;
-        chrome.runtime.sendMessage({
-          type: 'apiCapture',
-          provider: isQQ ? 'qq' : is163 ? 'netease_163' : null,
-          capture: {
-            ...capture,
-            currentSid: urlSid || undefined,
+      captureQueue.push(enriched);
+      if (!captureFlushTimer) {
+        captureFlushTimer = setTimeout(() => {
+          captureFlushTimer = null;
+          if (captureQueue.length > 0) {
+            const batch = captureQueue.splice(0, captureQueue.length);
+            try {
+              chrome.runtime.sendMessage({
+                type: 'apiCaptureBatch',
+                provider: isQQ ? 'qq' : is163 ? 'netease_163' : null,
+                captures: batch,
+              }).catch(() => {});
+            } catch(e) {}
           }
-        }).catch(() => {});
-      } catch(e) {}
+        }, FLUSH_INTERVAL);
+      }
+      // 限制队列长度
+      if (captureQueue.length > 20) {
+        captureQueue = captureQueue.slice(-20);
+      }
     }
   });
 
