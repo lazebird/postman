@@ -309,17 +309,11 @@
       <div class="tab active" data-tab="overview">状态</div>
       <div class="tab" data-tab="probe">探测</div>
       <div class="tab" data-tab="logs">日志</div>
+      <div class="tab" data-tab="settings">设置</div>
     </div>
 
     <!-- Tab 1: 状态概览 -->
     <div class="tab-content active" id="tab-overview">
-      <div class="section">
-        <div class="section-title">扩展状态</div>
-        <div id="status-overview">
-          <div class="empty">加载中...</div>
-        </div>
-      </div>
-
       <div class="section">
         <div class="section-title">账户状态 <span style="font-weight:400;color:#adb5bd;font-size:11px;">点击「📥」跳转未读邮件页</span></div>
         <div id="accounts-list">
@@ -372,6 +366,16 @@
         <div class="section-title">调试日志</div>
         <button id="btn-refresh-logs" class="secondary" style="margin-bottom:8px;">🔄 刷新日志</button>
         <div id="logs-container" class="debug-log">
+          <div class="empty">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: 设置 -->
+    <div class="tab-content" id="tab-settings">
+      <div class="section">
+        <div class="section-title">扩展状态</div>
+        <div id="settings-overview">
           <div class="empty">加载中...</div>
         </div>
       </div>
