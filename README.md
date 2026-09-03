@@ -66,7 +66,21 @@
    - 日志系统健壮性提升
    - UI 增加会话状态展示与刷新功能
 
+## 数据持久化与存储分层
+
+为避免"每次插件更新后账号配置丢失、需重新添加"，本项目对存储做了明确分层：
+
+| 存储区 | 存放的数据 | 插件更新时 |
+|--------|-----------|-----------|
+| `chrome.storage.local`（持久化） | 账号配置 `accounts`、用户设置 `settings`、检查历史 | ✅ **保留** |
+| `chrome.storage.session`（会话级） | sid 会话令牌、调试日志 | ⚠️ 清空，自动重建 |
+
+- 账号等**用户数据统一存 `chrome.storage.local`**，扩展更新/重启均不丢失（见 `shared/storage.js`）。
+- sid 会话令牌为短期数据（30 分钟 TTL），即便扩展更新后被清空，探测流程也会自动重新获取，无需用户干预。
+- MV3 的 Service Worker 无页面级 `localStorage`，跨上下文共享用户数据使用 `chrome.storage.local` 即可（等价持久化语义）。
+
 ## 快速开始
+
 
 详见 `extension/debug/README.md` 加载扩展并验证方案 B 可行性。
 
