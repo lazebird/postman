@@ -239,6 +239,8 @@ async function refreshStatus() {
     ['检查模式', providerMode(status.settings?.checkMode || 'hybrid')],
     ['163 sid', status.cachedSids?.netease_163 ? '✅ 已缓存' : '❌ 未同步'],
     ['QQ sid', status.cachedSids?.qq ? '✅ 已缓存' : '❌ 未同步'],
+    ['163 API 模式', `${status.apiPatternCounts?.netease_163 || 0} 条已学习`],
+    ['QQ API 模式', `${status.apiPatternCounts?.qq || 0} 条已学习`],
     ['闹钟', status.alarmConfigured ? `✅ ${status.alarmInfo?.periodInMinutes || '?'}分钟/次` : '❌ 未配置'],
   ];
 

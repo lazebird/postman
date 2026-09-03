@@ -1151,6 +1151,10 @@ async function getStatus() {
   // 检查是否有缓存 sid
   const sid163 = await getCachedSid('netease_163');
   const sidQQ = await getCachedSid('qq');
+  
+  // 检查 API pattern 数量
+  const apiP163 = await getApiPatterns('netease_163');
+  const apiPQQ = await getApiPatterns('qq');
 
   // ===== 聚合每个账户的最新状态 =====
   // recentResults 中保存了各账户单独的检查结果（含 email/provider/unreadCount 字段），
@@ -1189,6 +1193,10 @@ async function getStatus() {
     cachedSids: {
       netease_163: !!sid163,
       qq: !!sidQQ,
+    },
+    apiPatternCounts: {
+      netease_163: apiP163.length,
+      qq: apiPQQ.length,
     },
     alarmConfigured: !!alarm,
     alarmInfo: alarm ? { periodInMinutes: alarm.periodInMinutes, scheduledTime: new Date(alarm.scheduledTime).toISOString() } : null,
