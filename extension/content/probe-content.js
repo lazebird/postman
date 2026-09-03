@@ -55,8 +55,11 @@
             let body = null;
             let headers = {};
 
-            if (typeof args[0] === 'string') url = args[0];
-            else if (args[0] && args[0].url) url = args[0].url;
+            if (typeof args[0] === 'string') {
+              url = new URL(args[0], window.location.href).href;
+            } else if (args[0] && args[0].url) {
+              url = new URL(args[0].url, window.location.href).href;
+            }
 
             const opts = args[1] || {};
             if (opts.method) method = opts.method;
@@ -105,7 +108,11 @@
       const origSend = XMLHttpRequest.prototype.send;
 
       XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-        this.__mailApiUrl = url;
+        try {
+          this.__mailApiUrl = new URL(url, window.location.href).href;
+        } catch(e) {
+          this.__mailApiUrl = url;
+        }
         this.__mailApiMethod = method || 'GET';
         return origOpen.call(this, method, url, ...rest);
       };
