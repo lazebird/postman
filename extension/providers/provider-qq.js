@@ -129,23 +129,27 @@ async function probeSingleEndpoint(endpoint, sid, options) {
   const startTime = performance.now();
 
   try {
-    // 构造 URL
+    // 构造 URL：优先使用字符串替换 sid（避免 URL.searchParams 编码问题）
     let url = endpoint.url;
     try {
-      const urlObj = new URL(url);
-      urlObj.searchParams.delete('sid');
-      if (sid) {
-        urlObj.searchParams.set('sid', sid);
+      if (sid && url.includes('{sid}')) {
+        url = url.replace(/\{sid\}/g, sid);
       }
-      let pathname = urlObj.pathname.replace(/\{sid\}/g, '');
-      urlObj.pathname = pathname;
-      url = urlObj.toString();
+      if (!sid) {
+        url = url.replace(/[?&]sid=\{sid\}/g, '');
+        url = url.replace(/\{sid\}/g, '');
+        url = url.replace(/[?&]sid=$/g, '');
+        url = url.replace(/&sid=$/g, '');
+      }
+      if (sid && !url.match(/[?&]sid=[a-zA-Z0-9]/)) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
+      }
     } catch (e) {
       if (sid) {
         url = url.replace(/\{sid\}/g, sid);
       } else {
         url = url.replace(/[?&]sid=\{sid\}/g, '');
-        url = url.replace(/\{sid\}/g, '');
       }
     }
 
@@ -229,11 +233,18 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     if (result.success) {
       logger_ep.info(`接口 ${endpoint.name} 探测成功: unreadCount=${parseResult.unreadCount}`);
     } else if (result.authBlocked) {
-      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`);
+      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`, {
+        status: response.status,
+        finalUrl: response.url,
+        preview: preview.substring(0, 500),
+      });
     } else {
       logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`, {
         status: response.status,
-        preview: preview.substring(0, 200),
+        contentType: result.responseContentType,
+        finalUrl: response.url,
+        preview: preview.substring(0, 500),
+        sidUsed: !!sid,
       });
     }
 
