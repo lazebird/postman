@@ -186,10 +186,11 @@ if (btnRefreshSession) {
   });
 }
 
-// 刷新日志
-document.getElementById('btn-refresh-logs').addEventListener('click', () => {
-  refreshLogs();
-});
+// 复制日志
+document.getElementById('btn-copy-logs').addEventListener('click', copyLogs);
+
+// 清除日志
+document.getElementById('btn-clear-logs').addEventListener('click', clearLogs);
 
 // ===== 辅助函数 =====
 
@@ -436,6 +437,71 @@ async function refreshLogs() {
     }).join('');
   } catch (err) {
     document.getElementById('logs-container').innerHTML = `<div class="error">读取日志失败: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function fetchLogsFromStorage() {
+  try {
+    const { debugLogs = [] } = await chrome.storage.session.get('debugLogs');
+    return Array.isArray(debugLogs) ? debugLogs : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function logsToPlainText(logs) {
+  return logs.map(log => {
+    const t = new Date(log.ts).toLocaleTimeString();
+    const detail = log.detail ? `\n${log.detail}` : '';
+    return `[${t}] [${log.level}] [${log.module}] ${log.message}${detail}`;
+  }).join('\n');
+}
+
+async function copyLogs() {
+  const copyBtn = document.getElementById('btn-copy-logs');
+  const logs = await fetchLogsFromStorage();
+  const text = logsToPlainText(logs);
+  if (!text) {
+    copyBtn.textContent = '❌ 无日志';
+    setTimeout(() => { copyBtn.textContent = '📋 复制'; }, 2000);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    copyBtn.textContent = '✅ 已复制';
+    copyBtn.classList.add('copied');
+  } catch (err) {
+    // clipboard API 不可用时回退到 execCommand
+    const container = document.getElementById('logs-container');
+    const original = container.textContent;
+    container.textContent = text;
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    const ok = document.execCommand('copy');
+    container.textContent = original;
+    sel.removeAllRanges();
+    copyBtn.textContent = ok ? '✅ 已复制' : '❌ 复制失败';
+    copyBtn.classList.toggle('copied', ok);
+  }
+  setTimeout(() => {
+    copyBtn.textContent = '📋 复制';
+    copyBtn.classList.remove('copied');
+  }, 2000);
+}
+
+async function clearLogs() {
+  const clearBtn = document.getElementById('btn-clear-logs');
+  try {
+    await chrome.storage.session.remove('debugLogs');
+    document.getElementById('logs-container').innerHTML = '<div class="empty">暂无日志</div>';
+    clearBtn.textContent = '✅ 已清除';
+    setTimeout(() => { clearBtn.textContent = '🗑 清除'; }, 2000);
+  } catch (err) {
+    clearBtn.textContent = '❌ 清除失败';
+    setTimeout(() => { clearBtn.textContent = '🗑 清除'; }, 2000);
   }
 }
 
