@@ -17,6 +17,9 @@ export const SESSION_KEYS = {
   SESSION_EXPIRY: 'session_expiry',
 };
 
+// sid 缓存有效期：12 小时（原 30 分钟过短，导致无标签时后台检查频繁失效）
+export const SID_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 /**
  * 提供商配置
  *
@@ -53,6 +56,8 @@ export const PROVIDER_CONFIG = {
       },
     ],
     // 163 的未读检查候选接口（URL 支持 {sid} 占位符）
+    // v0.5.0: 163 API 鉴权核心为 Cookie，sid 为可选增强。
+    //   无 sid 时可通过 Cookie 直接探测（URL 中移除 sid 参数）。
     probeEndpoints: [
       {
         name: 'js6_rpc',
@@ -64,9 +69,9 @@ export const PROVIDER_CONFIG = {
           'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
           'Origin': 'https://mail.163.com',
         },
-        requiresSid: true,
+        requiresSid: false, // v0.5.0: 不强制要求 sid
         bodyTemplate: 'var=@{type:"listMessages",ver:0,pageSize:1,start:0,folderId:"1",mailto:"",readFlag:"2"}',
-        description: '邮箱 RPC 网关 - 获取未读消息列表',
+        description: '邮箱 RPC 网关 - 获取未读消息列表（Cookie 鉴权为主）',
       },
     ],
   },
@@ -101,20 +106,22 @@ export const PROVIDER_CONFIG = {
       },
     ],
     // QQ 邮箱未读接口候选（URL 支持 {sid} 占位符）
+    // v0.5.0: 即使无 sid 缓存也尝试 API 探测。
+    //   部分 QQ 接口可能依赖 Cookie（qm_sk 等），sid 为双轨鉴权的一环。
     probeEndpoints: [
       {
         name: 'cgi_mail_list',
         url: 'https://mail.qq.com/cgi-bin/mail_list?t=inbox&sid={sid}',
         method: 'GET',
         requiresSid: true,
-        description: '收件箱列表页面',
+        description: '收件箱列表页面（QQ 旧版接口）',
       },
       {
         name: 'cgi_fr_show',
         url: 'https://mail.qq.com/cgi-bin/fr_show?sid={sid}&t=inbox',
         method: 'GET',
         requiresSid: true,
-        description: '轻量级收件箱未读数',
+        description: '轻量级收件箱未读数（QQ 旧版接口）',
       },
     ],
   },
