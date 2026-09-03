@@ -177,6 +177,42 @@ async function refreshAllSessions() {
   }
 }
 
+
+/**
+ * 方案C：内容脚本 in-origin 探测
+ */
+async function runPlanC(provider) {
+  const pre = document.getElementById('plan-c-result');
+  if (pre) { pre.style.display = 'block'; pre.textContent = '探测中...'; }
+
+  const msg = provider === 'qq' ? { type: 'probeContentQQ', openTab: true }
+                                : { type: 'probeContent163', openTab: true };
+  try {
+    const r = await sendSWMessage(msg);
+    if (pre) pre.textContent = JSON.stringify(r, null, 2);
+    showStatus(`内容脚本探测完成 (${provider === 'qq' ? 'QQ' : '163'})`, r?.probe?.success ? 'success' : 'error');
+  } catch (err) {
+    if (pre) pre.textContent = '错误: ' + err.message;
+    showStatus(`内容脚本探测失败: ${err.message}`, 'error');
+  }
+}
+
+/**
+ * Cookie 会话诊断（判定 SW 是否能复用浏览器登录 Cookie）
+ */
+async function runCookieDiag() {
+  const pre = document.getElementById('plan-c-result');
+  if (pre) { pre.style.display = 'block'; pre.textContent = '诊断中...'; }
+  try {
+    const r = await sendSWMessage({ type: 'diagnoseCookies' });
+    if (pre) pre.textContent = JSON.stringify(r, null, 2);
+    showStatus('会话 Cookie 诊断完成', 'success');
+  } catch (err) {
+    if (pre) pre.textContent = '错误: ' + err.message;
+    showStatus(`Cookie 诊断失败: ${err.message}`, 'error');
+  }
+}
+
 async function addAccount() {
   const provider = document.getElementById('provider-select').value;
   const email = document.getElementById('email-input').value.trim();
@@ -359,6 +395,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const emailInput = document.getElementById('email-input');
   const btnSave = document.getElementById('btn-save');
   const btnReset = document.getElementById('btn-reset');
+  const btnContent163 = document.getElementById('btn-content-163');
+  const btnContentQQ = document.getElementById('btn-content-qq');
+  const btnDiagCookies = document.getElementById('btn-diagnose-cookies');
+
+  if (btnContent163) btnContent163.addEventListener('click', () => runPlanC('netease_163'));
+  if (btnContentQQ) btnContentQQ.addEventListener('click', () => runPlanC('qq'));
+  if (btnDiagCookies) btnDiagCookies.addEventListener('click', runCookieDiag);
 
   if (btnAdd) btnAdd.addEventListener('click', addAccount);
   if (emailInput) {

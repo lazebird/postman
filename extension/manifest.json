@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Edge Mail Notifier - PoC",
-  "version": "0.2.0",
-  "description": "方案B：SW 会话初始化的 webmail 未读接口探测",
+  "version": "0.3.0",
+  "description": "方案C：内容脚本 in-origin 探测（绕开 SW 跨域 Cookie/sid 死结）",
   "minimum_chrome_version": "116",
   "permissions": [
     "alarms",
     "storage",
     "notifications",
-    "tabs"
+    "tabs",
+    "cookies",
+    "scripting"
   ],
   "host_permissions": [
     "https://mail.163.com/*",
@@ -22,6 +24,19 @@
     "service_worker": "background/service-worker.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mail.163.com/*",
+        "https://*.mail.163.com/*",
+        "https://mail.qq.com/*",
+        "https://*.mail.qq.com/*"
+      ],
+      "js": ["content/probe-content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
   "action": {
     "default_popup": "popup/index.html",
     "default_title": "Mail Notifier PoC"

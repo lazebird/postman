@@ -200,7 +200,7 @@
 <body>
   <div class="header">
     <h1>📧 Mail Notifier PoC</h1>
-    <div class="subtitle">方案B · 未读接口探测工具</div>
+    <div class="subtitle">方案C · 内容脚本 in-origin 探测</div>
   </div>
 
   <div class="content">
@@ -230,17 +230,31 @@
     <!-- Tab 2: 手动探测 -->
     <div class="tab-content" id="tab-probe">
       <div class="section">
-        <div class="section-title">手动探测</div>
+        <div class="section-title">方案C · 内容脚本 in-origin 探测（推荐）</div>
+        <div class="btn-group" style="margin-bottom:8px;">
+          <button id="btn-content-163" class="success">📄 内容脚本探测 163</button>
+          <button id="btn-content-qq" class="success">📄 内容脚本探测 QQ</button>
+          <button id="btn-diagnose-cookies" class="warning">🍪 诊断会话 Cookie</button>
+        </div>
+        <div style="font-size:11px;color:#6c757d;margin-bottom:6px;">
+          需先在浏览器中打开并登录对应邮箱页面（会自动打开/复用标签）。
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">手动探测 · SW 接口（旧方式，仅供对比）</div>
         <div class="btn-group" style="margin-bottom:8px;">
           <button id="btn-probe-163" class="warning">探测 163</button>
           <button id="btn-probe-qq" class="warning">探测 QQ</button>
           <button id="btn-check-bridge" class="secondary">检查认证</button>
           <button id="btn-refresh-session" class="secondary">🔄 刷新会话</button>
         </div>
-        <div style="margin-top:8px;">
-          <button id="btn-full-check" class="success" style="width:100%;">🚀 运行全量检查</button>
-        </div>
-        <div id="probe-result" class="action-result" style="display:none;">
+      </div>
+
+      <div class="section">
+        <div class="section-title">全量检查</div>
+        <button id="btn-full-check" class="success" style="width:100%;">🚀 运行全量检查</button>
+        <div id="probe-result" class="action-result" style="display:none;margin-top:8px;">
           <pre id="probe-result-text"></pre>
         </div>
       </div>

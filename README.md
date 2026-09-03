@@ -5,70 +5,58 @@
 - 支持邮件检查、未读计数、桌面通知、快速跳转邮件
 - 低消耗、及时通知、通用/适配/兼容
 - 部署简单：不需要额外部署服务器
-- 使用简单：不用保持网页打开等状态
 
 ## 目录结构
 
 ```
 ├── doc/
 │   └── 技术选型文档.md          # 技术选型与方案设计
-├── extension/                   # MV3 扩展（方案 B PoC）
+├── extension/                   # MV3 扩展（方案 C PoC）
 │   ├── manifest.json
 │   ├── background/
-│   │   └── service-worker.js    # 定时任务 + 未读接口探测
+│   │   └── service-worker.js    # 定时任务 + 内容脚本调度 + Cookie 诊断
+│   ├── content/
+│   │   └── probe-content.js     # 内容脚本：in-origin 未读探测（方案 C 核心）
 │   ├── providers/
-│   │   ├── provider-163.js      # 163 未读接口探测（含 sid 会话获取）
-│   │   └── provider-qq.js       # QQ 未读接口探测（含 sid 会话获取）
+│   │   ├── provider-163.js      # 163 SW 接口探测（保留，仅诊断对比）
+│   │   └── provider-qq.js       # QQ SW 接口探测（保留，仅诊断对比）
 │   ├── shared/
 │   │   ├── constants.js         # 提供商配置/接口端点
 │   │   ├── debug.js             # 调试日志工具
-│   │   ├── session.js           # 会话 sid 获取与缓存管理
+│   │   ├── session.js           # 会话 sid 获取与缓存（旧）
+│   │   ├── session-diagnose.js  # Cookie 会话诊断（判定 SW 可复用性）
 │   │   └── storage.js           # chrome.storage 封装
 │   ├── popup/                   # Popup UI
 │   ├── options/                 # 设置页面
 │   └── debug/                   # 调试与验证指南
 ```
 
-## 当前进度
+## 当前进度与结论
 
-- [x] 技术选型文档（v3.1）
-- [x] 方案 B PoC：163/QQ 未读接口探测骨架
-- [x] 修复：163/QQ 会话 sid 获取与使用（v0.2.0）
-- [ ] 方案 B 真实环境验证
+- [x] 技术选型文档
+- [x] 方案 B PoC：SW 跨源 fetch 未读接口探测
+- [x] 真实环境验证（多轮）：**结论 = SW 跨源无法复用 SameSite=Lax 登录 Cookie，方案 B 不可行**
+- [x] 转向 **方案 C：内容脚本 in-origin 探测**（在真实邮箱页面内读未读数）
+- [ ] 方案 C 真实环境验证
 - [ ] Gmail REST API 接入
 - [ ] 完整 UI 与生产功能
 
-## 核心修复（v0.2.0）
+## 核心结论（为什么换方案 C）
 
-### 问题定位
+前 4 轮在 SW 里始终拿不到 163 登录态（`No sid` / 未登录），根因不是代码缺陷，而是**架构边界**：
 
-163 探测失败返回 `No sid parameter!` 的根因：163 的 `js6/s` RPC 网关需要 `sid` 会话令牌，而原代码直接调用业务接口，未先获取 sid。
+> MV3 Service Worker 的跨源 fetch 属于第三方上下文，163/QQ 的登录 Cookie 多为
+> `SameSite=Lax`，浏览器不会把它们随 SW 的跨站后台请求发送。
 
-### 修复方案
+内容脚本注入邮箱页面后与页面**同源**，天然携带第一方 Cookie、无 CORS 限制，
+可直接读取页面已渲染的真实未读数。这是绕开上述死结的有效路径。
 
-1. **新增 `shared/session.js` 会话管理模块**
-   - 从 163/QQ 登录后的邮箱入口页提取 sid
-   - 会话 sid 缓存至 `chrome.storage.session`（30 分钟有效）
-   - 支持强制刷新、自动过期清理
-
-2. **163 provider 重构**
-   - 探测前先获取 sid，再带 sid 调用业务接口
-   - POST 请求正确携带 body
-   - 改进响应解析（XML / JSON / 自定义格式）
-
-3. **QQ provider 重构**
-   - 使用 sid 构造接口 URL
-   - 正确处理 GB18030 编码
-   - 登录状态准确识别
-
-4. **其他优化**
-   - 修复 response headers 序列化（Headers → Object）
-   - 日志系统健壮性提升
-   - UI 增加会话状态展示与刷新功能
+新增 **🍪 诊断会话 Cookie** 功能，用 `chrome.cookies` 输出目标站登录 Cookie 的
+SameSite/Secure 标志，用数据证明上述结论并指导后续走向。
 
 ## 快速开始
 
-详见 `extension/debug/README.md` 加载扩展并验证方案 B 可行性。
+详见 [`extension/debug/VALIDATION.md`](extension/debug/VALIDATION.md) 进行方案 C 真实环境验证。
 
 ## 技术文档
 

@@ -165,6 +165,20 @@
     </div>
   </div>
 
+  <!-- 方案C：内容脚本 in-origin 探测 & Cookie 诊断 -->
+  <div class="card">
+    <h2>方案C · 内容脚本探测（推荐）</h2>
+    <p class="hint" style="margin:0 0 8px 0;">
+      绕开 SW 跨域 Cookie 限制：在真实邮箱页面内读取未读数。需先打开并登录对应邮箱网页。
+    </p>
+    <div class="btn-group">
+      <button id="btn-content-163" class="primary">📄 内容脚本探测 163</button>
+      <button id="btn-content-qq" class="primary">📄 内容脚本探测 QQ</button>
+      <button id="btn-diagnose-cookies" class="secondary">🍪 诊断会话 Cookie</button>
+    </div>
+    <pre id="plan-c-result" style="background:#f1f3f5;border-radius:4px;padding:8px;font-size:11px;max-height:220px;overflow:auto;margin-top:8px;display:none;white-space:pre-wrap;word-break:break-all;"></pre>
+  </div>
+
   <!-- 会话状态 -->
   <div class="card">
     <h2>会话状态</h2>
