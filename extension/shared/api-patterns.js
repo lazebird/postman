@@ -24,14 +24,27 @@ const logger = createLogger('api-patterns');
 function normalizeSid(text, knownSids) {
   if (!text) return text;
   let result = String(text);
+  
+  // 1. 先替换已知的 sid（特定值）
   for (const sid of knownSids) {
     if (!sid) continue;
-    // 全局替换（URL encode / 原样匹配）
     result = result.split(sid).join('{sid}');
     try {
       result = result.split(encodeURIComponent(sid)).join('{sid}');
     } catch(e) {}
   }
+  
+  // 2. 兜底：如果 URL/body 中还有看起来像 sid 的长字符串，替换为 {sid}
+  //    163 sid: 32 字符字母数字混合
+  //    QQ sid: 类似 zYhjMIy0SUYuOlo2ABJKYQAA (约 22-32 字符)
+  //    只替换已知的 sid=xxx 格式，避免误替换普通数据
+  const sidParamPattern = /([?&]sid=)([a-zA-Z0-9_\-]{10,})/g;
+  result = result.replace(sidParamPattern, '$1{sid}');
+  
+  // 也替换 URL path 中的 sid（如果有）
+  const sidPathPattern = /(\/sid\/)([a-zA-Z0-9_\-]{10,})/g;
+  result = result.replace(sidPathPattern, '$1{sid}');
+  
   return result;
 }
 
