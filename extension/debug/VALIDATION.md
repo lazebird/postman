@@ -61,3 +61,78 @@ v0.9.1 针对该断链做了修复，让捕获真正工作，从而把「真实�
 | 捕获 > 0 + 关闭标签后回放成功 | ✅ 纯 SW 后台读取可行 |
 | 捕获 > 0 但回放失败 | 回放请求的 Cookie/格式仍有差异，据本批端点日志继续精修 |
 | 捕获仍 = 0 | 捕获链路仍未通，据日志继续定位（扩大匹配 / 换同源探测） |
+
+---
+
+# v0.9.2 — 深入测试：邮箱页「多级跳转 → 最终呈现邮件内容」
+
+## 背景
+
+上一轮 v0.9.1 已修复 API 捕获断链。实测中确认一个现象：**进入邮箱页面后会经历多次跳转，
+最终才呈现邮件内容**。例如：
+- QQ：`mail.qq.com` → (已登录) `wx.mail.qq.com` 网页版 → SPA 加载后才出现收件箱未读
+- 163：`mail.163.com` → `js6/main.jsp` → 收件箱内容
+- 未登录时还会先跳转到登录页（`ptlogin2`/`login` 等）
+
+内容脚本/捕获在跳转链路的**任意一段**都可能被注入，因此需要在日志中看清
+「当前到底落在跳转链的哪一段」，才能判断：
+- 是还没跳到内容页（需继续等待 / 导航）？
+- 还是已到内容页但没读到未读数（解析/注入问题）？
+- 还是根本没登录（被重定向到登录域）？
+
+## v0.9.2 新增
+
+### 1. 内容脚本导航阶段识别 (`probe-content.js`)
+内容脚本每次上报都会携带当前页面的「导航阶段」：
+- 综合当前 URL、`document.referrer`(上一跳来源)、`readyState`、是否拿到 sid / 未读
+- 输出字段：`stage`(`entry`/`login-redirect`/`webmail-app`/`unknown`)、`frameRole`(`top`/`sub`)、
+  `contentReached`(是否已到内容页)、`referrer`
+- 日志样例：
+  - `内容脚本上报: qq 未读=3 @ ... | url=https://wx.mail.qq.com/... | stage=webmail-app (top)`
+  - `页面落点: qq @ https://mail.qq.com/... | stage=entry (top) | 尚未到内容页`
+
+### 2. Service Worker 跳转链路观测 (`probeWithRetry`)
+每次开/导航邮箱标签后轮询时，记录标签先后经历的不同 URL，并在结束时汇总整条链路：
+- `[redirect-trace:qq] tabId=123 跳转落点 #1: https://mail.qq.com/...`
+- `[redirect-trace:163] tabId=124 跳转链路共 2 段:\nhttps://mail.163.com/\n→ https://mail.163.com/js6/main.jsp`
+- 若只 1 段：`无二次跳转，最终停留: <url>`
+
+### 3. `contentPageReady` 落点日志
+内容脚本就绪即打印页面落点（含 stage/referrer/frameRole），用于观察每级跳转注入情况。
+
+## 验证步骤
+
+### Step 1：加载 v0.9.2
+`edge://extensions/` → 开发者模式 → 移除旧版 → 重新加载 `extension/`（版本 **0.9.2**）
+
+### Step 2：打开邮箱 → 观察「跳转链路」日志
+1. **163**：打开 `https://mail.163.com/`（或通过 Popup「打开邮箱」），等收件箱出现未读
+2. **QQ**：打开 `https://mail.qq.com/`，观察是否跳到 `wx.mail.qq.com`
+3. Service Worker 控制台应出现：
+   - `[redirect-trace:...] 跳转落点 #N: <url>`（每级跳转一条）
+   - `页面落点: ... | stage=webmail-app (top)`（已到网页版）
+   - `内容脚本上报: ... 未读=N @ ... | url=<wx.mail.qq.com/...>`
+4. 重点确认：**最终停留的 URL 是内容页**（stage=`webmail-app` / 读到未读）。
+
+### Step 3：API 捕获是否继续工作
+1. 打开并保持邮箱页加载完毕
+2. 日志应出现 `[capture:...] 本批捕获端点:`、`批量保存 ... API 模式 N 条`
+3. Popup → 统计页确认 163/QQ API 模式 > 0
+
+### Step 4（可选）未登录场景
+清 cookie 后打开邮箱，确认日志能定位到 `stage=login-redirect` / `登录跳转`，
+而非误判为「已到内容页但读不到未读」。
+
+## 反馈时请复制这些日志
+- `[redirect-trace:<provider>] ... 跳转落点 #N: <url>` — 跳转链每一跳
+- `[redirect-trace:<provider>] ... 跳转链路共 N 段` — 完整链路
+- `页面落点: <provider> @ <url> | stage=... (top/sub)` — 当前导航阶段
+- `内容脚本上报: <provider> 未读=N @ ...` — 已读到内容
+- `批量保存 <provider> API 模式 N 条` / `[capture:...] 本批捕获端点` — 捕获是否工作
+
+## 判定标准
+| 现象 | 结论 |
+|------|------|
+| 跳转链路日志完整、最终 stage=`webmail-app` 且读到未读 | ✅ 内容页呈现确认 |
+| 只看到 `entry`/`login-redirect`，无 `webmail-app` | 尚未跳到内容页或未登录，据 URL 判断 |
+| 无任何 `[redirect-trace]` 日志 | 页面未走轮询/导航路径，据 `页面落点` 日志定位 |

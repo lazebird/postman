@@ -382,6 +382,65 @@
   /**
    * 判断当前页面类型
    */
+
+  /**
+   * 计算「当前页面在跳转链路中的位置」(nav-stage)
+   *
+   * 背景：邮箱页面从打开到最终呈现邮件内容会经过多级跳转，例如：
+   *   - QQ： mail.qq.com → (未登录) ptlogin2 登录页 / (已登录) wx.mail.qq.com 网页版
+   *   - 163：mail.163.com → js6/main.jsp → 收件箱内容
+   * 内容脚本可能在跳转链路的任意一段被注入（含登录重定向页、SPA 加载中的中间页）。
+   * 此处综合当前 URL、document.referrer（谁跳转来）、readyState、frame 角色、
+   * 是否拿到 sid / 是否读到未读，粗判当前页面处于哪一段，供日志确认
+   * 「跳转最终呈现邮件内容」是否走通。
+   */
+  function getNavContext(diag, best) {
+    const href = location.href;
+    const referrer = document.referrer || '';
+    const path = location.pathname || '';
+    const readyState = document.readyState;
+    const title = diag ? (diag.title || '') : (document.title || '');
+    const hasSid = !!(diag && (diag.sidFromUrl || diag.sidFromDom));
+    const hasUnread = best && typeof best.unread === 'number';
+
+    // 粗判阶段：跳转链路中的角色
+    let stage = 'unknown';
+
+    const loginRe = /ptlogin|ssl\.ptlogin|login\.qq|xui\.qq|passport|login|cas|sso/i;
+    const app163Re = /js6|main\.jsp|s\?func=mbox|func=mbox|mbox/i;
+    const appQQRe = /wx\.mail\.qq\.com|cgi-bin\/(mail_list|frame_html|frame|mail|readdata)|home\/index/i;
+
+    if (isQQ) {
+      if (loginRe.test(href) && !/wx\.mail\.qq\.com/i.test(href)) stage = 'login-redirect';
+      else if (/wx\.mail\.qq\.com/i.test(href) || appQQRe.test(href)) stage = 'webmail-app';
+      else if (/mail\.qq\.com/i.test(href)) stage = 'entry';
+    } else if (is163) {
+      if (loginRe.test(href) && !app163Re.test(href)) stage = 'login-redirect';
+      else if (app163Re.test(href)) stage = 'webmail-app';
+      else if (/163\.com/i.test(href)) stage = 'entry';
+    }
+
+    // 是否能读到内容（未读 or 拿到 sid 判定在 app 域）
+    const contentReached = hasUnread || (hasSid && /webmail-app/.test(stage));
+
+    return {
+      href,
+      referrer,
+      path,
+      readyState,
+      title,
+      stage,
+      hasSid,
+      hasUnread,
+      contentReached,
+      frameRole: isTopFrame ? 'top' : 'sub',
+      // 上一跳(经 referrer)是否也是本邮箱域内 → 用于确认是否为「站内跳转链」
+      redirectFromMailDomain: (referrer && /(^|\.)(163\.com|qq\.com)$/i.test(
+        (function(){ try { return new URL(referrer).hostname; } catch(e){ return ''; } })()
+      )) || false,
+    };
+  }
+
   function classifyPage(diag, best) {
     const path = (location.pathname || '');
     const is163InboxPath = /js6\/main|main\.jsp|s\?func=mbox/i.test(path + ' ' + location.href);
@@ -425,6 +484,7 @@
         const sid = diag.sidFromUrl || diag.sidFromDom;
         const cls = classifyPage(diag, best);
 
+        const nav = getNavContext(diag, best);
         const detail = {
           provider: isQQ ? 'qq' : 'netease_163',
           host: HOST,
@@ -434,6 +494,7 @@
           isTopFrame: cls.isTopFrame,
           dom: diag,
           best,
+          nav,
         };
 
         const loggedIn = !!sid || !!best.unread;
@@ -446,6 +507,9 @@
               detail: {
                 host: HOST,
                 url: location.href,
+                referrer: document.referrer || '',
+                navStage: nav.stage,
+                readyState: document.readyState,
                 sid,
                 provider: isQQ ? 'qq' : 'netease_163',
               }
@@ -478,12 +542,18 @@
       const diag = extractUnreadFromDom();
       const best = computeBest(diag);
       const cls = classifyPage(diag, best);
+      const nav = getNavContext(diag, best);
       chrome.runtime.sendMessage({
         type: 'contentPageReady',
         detail: {
           host: HOST,
           url: location.href,
+          referrer: document.referrer || '',
           title: document.title,
+          navStage: nav.stage,
+          readyState: document.readyState,
+          contentReached: nav.contentReached,
+          frameRole: nav.frameRole,
           pageType: cls.pageType,
           unreadCount: best.unread,
           sid: diag.sidFromUrl || diag.sidFromDom,

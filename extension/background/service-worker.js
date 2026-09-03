@@ -178,10 +178,18 @@ async function handleMessage(message, sender) {
         }
       }
       const unread = message.detail?.unreadCount;
+      // 页面跳转链路落点日志：配合「邮箱页多级跳转后最终呈现邮件内容」的验证，
+      // 内容脚本每被注入一次就上报当前页面的 URL / 上一跳(referrer) / 导航阶段 / 帧角色，
+      // 便于确认当前到底落到了跳转链的哪一段（登录重定向 / webmail 应用 / 辅助子帧）。
+      const navStage = message.detail?.navStage || 'unknown';
+      const frameRole = message.detail?.frameRole || (message.detail?.url ? '?': 'ext');
+      const referrer = message.detail?.referrer ? `, referrer=${message.detail?.referrer}` : '';
+      const contentReached = message.detail?.contentReached;
       if (typeof unread === 'number') {
-        logger.info(`内容脚本上报: ${provider} 未读=${unread} @ ${message.detail?.host}`);
+        logger.info(`内容脚本上报: ${provider} 未读=${unread} @ ${message.detail?.host || ''} | url=${message.detail?.url || ''}${referrer} | stage=${navStage} (${frameRole})`, { unread });
       } else {
-        logger.debug(`内容脚本就绪 @ ${message.detail?.host || 'unknown'}`);
+        logger.info(`页面落点: ${provider} @ ${message.detail?.url || message.detail?.host || 'unknown'} | stage=${navStage} (${frameRole})${referrer}${contentReached ? ' | 已到内容页(读到未读或sid)' : ' | 尚未到内容页'}`);
+        logger.debug(`内容脚本就绪 @ ${message.detail?.host || 'unknown'} (${navStage}, ${frameRole})`);
       }
       return { success: true };
     }
@@ -550,9 +558,24 @@ async function probeWithRetry(provider, tabId, maxAttempts = 10, intervalMs = 20
   let lastProbe = null;
   let consecutiveHostMismatch = 0;
 
+  // 跳转链路观测：记录标签先后经历的不同 URL，用于确认「邮箱页多级跳转后
+  // 最终落到哪个内容 URL」的整条链路（如 mail.qq.com → ptlogin/登录 → wx.mail.qq.com → 内容）。
+  const seenUrls = new Set();
+  const observedChain = [];
+
   for (let i = 0; i < maxAttempts; i++) {
     if (Date.now() > deadline) break;
     lastProbe = await probeTabContent(provider, tabId, 8000);
+    // 记录该轮标签实际 URL（多级跳转 / SPA 加载中的真实落点）
+    try {
+      const tabNow = await chrome.tabs.get(tabId);
+      const curUrl = (tabNow && tabNow.url) || '';
+      if (curUrl && !seenUrls.has(curUrl)) {
+        seenUrls.add(curUrl);
+        observedChain.push(curUrl);
+        logger.info(`[redirect-trace:${provider}] tabId=${tabId} 跳转落点 #${observedChain.length}: ${curUrl}`);
+      }
+    } catch (e) { /* 标签可能已关闭 */ }
     // 成功读到未读数或已授权 → 退出轮询
     if (lastProbe.success && (typeof lastProbe.unreadCount === 'number' || lastProbe.authVerified)) {
       break;
@@ -573,6 +596,12 @@ async function probeWithRetry(provider, tabId, maxAttempts = 10, intervalMs = 20
     if (i < maxAttempts - 1) {
       await new Promise(r => setTimeout(r, intervalMs));
     }
+  }
+  // 汇总整条跳转链路，便于日志确认最终内容页
+  if (observedChain.length > 1) {
+    logger.info(`[redirect-trace:${provider}] tabId=${tabId} 跳转链路共 ${observedChain.length} 段:\n${observedChain.join('\n→ ')}`);
+  } else if (observedChain.length === 1) {
+    logger.info(`[redirect-trace:${provider}] tabId=${tabId} 无二次跳转，最终停留: ${observedChain[0]}`);
   }
   return lastProbe;
 }
