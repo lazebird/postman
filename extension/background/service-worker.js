@@ -151,6 +151,21 @@ const PROVIDER_HOME = {
 };
 
 /**
+ * QQ 邮箱的主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com（登录后常落于
+ * https://wx.mail.qq.com/home/index?sid=...#/list/1），而 mail.qq.com 是其旧入口/入口域。
+ * 因此识别 QQ 邮箱页面须同时匹配 mail.qq.com 与 wx.mail.qq.com，否则会漏检已打开的标签
+ * 导致每次探测都重复打开新标签。
+ */
+function isQQMailUrl(url) {
+  return /^https?:\/\/(?:wx\.)?mail\.qq\.com\//i.test(url || '');
+}
+function isQQLoginUrl(url) {
+  // QQ 未登录时会被重定向到登录域（不在内容脚本注入范围）
+  return /^(?!https?:\/\/(?:wx\.)?mail\.qq\.com\/)/i.test(url || '') &&
+         /ptlogin|ssl\.ptlogin|login\.qq|xui\.qq|passport/i.test(url || '');
+}
+
+/**
  * 打开目标邮箱首页（用于注入内容脚本并获取真实登录态 + sid）
  */
 async function openMailboxTab(provider, opts = {}) {
@@ -168,8 +183,12 @@ async function openMailboxTab(provider, opts = {}) {
  * 查找已打开的目标邮箱标签
  */
 async function findMailboxTab(provider) {
-  const url = PROVIDER_HOME[provider];
   const tabs = await chrome.tabs.query({});
+  if (provider === 'qq') {
+    // QQ 邮箱可能落在 mail.qq.com 或 wx.mail.qq.com（新网页版），都要匹配
+    return tabs.find(t => t.url && isQQMailUrl(t.url));
+  }
+  const url = PROVIDER_HOME[provider];
   return tabs.find(t => t.url && t.url.startsWith(url));
 }
 
@@ -216,15 +235,13 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
     try {
       const tab = await chrome.tabs.get(targetTabId);
       const tabUrl = (tab && tab.url) || '';
-      const hostPattern = provider === 'qq'
-        ? /^https:\/\/mail\.qq\.com\//i
-        : /^https:\/\/mail\.163\.com\//i;
+      const hostOk = provider === 'qq' ? isQQMailUrl(tabUrl) : /^https:\/\/mail\.163\.com\//i.test(tabUrl);
       // QQ 未登录时 mail.qq.com 会重定向到 ptlogin2/xui.qq.com 等登录域（不在内容脚本注入范围）
-      if (/ptlogin|ssl\.ptlogin|login\.qq|xui\.qq|passport/i.test(tabUrl) && !hostPattern.test(tabUrl)) {
+      if (provider === 'qq' && isQQLoginUrl(tabUrl)) {
         result.qqLoginRedirect = true;
         result.loginRequired = true;
         result.error = 'QQ 邮箱未登录：标签已被重定向到 QQ 登录页。请先在浏览器中登录 QQ 邮箱后重试。';
-      } else if (!hostPattern.test(tabUrl)) {
+      } else if (!hostOk) {
         result.hostMismatch = true;
         result.tabUrl = tabUrl;
       } else {
