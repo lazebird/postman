@@ -73,8 +73,10 @@
               } catch(e) {}
             }
 
-            // 检查 URL 是否与未读/邮箱相关，避免记录无关请求
-            const isRelevant = /(js6\/s|mbox|mail_list|readdata|readindex|unread|folder|getfolder|getSession|fr_show|mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com)/i.test(url);
+            // 捕获邮箱域名的 API 请求（排除静态资源）
+            const isRelevant = (/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|html?)$/i.test(url) === false) &&
+                               !/(rescdn|static|style|comm|skin|fonts|images?)/i.test(url) &&
+                               /(mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com|js6|s\?func)/i.test(url);
             if (isRelevant && !recentUrls.has(method + url + (body||''))) {
               recentUrls.add(method + url + (body||''));
               if (recentUrls.size > MAX_PATTERNS) {
@@ -112,7 +114,9 @@
         try {
           const url = String(this.__mailApiUrl || '');
           const method = String(this.__mailApiMethod || 'GET');
-          const isRelevant = /(js6\/s|mbox|mail_list|readdata|readindex|unread|folder|getfolder|getSession|fr_show|mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com)/i.test(url);
+          const isRelevant = (/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|html?)$/i.test(url) === false) &&
+                             !/\/rescdn\/|\/static\/|\/style\/|\/comm\/|\/fonts\/|\/images?\//i.test(url) &&
+                             /(mail\.163\.com|mail\.qq\.com|wx\.mail\.qq\.com)/i.test(url);
           if (isRelevant && !recentUrls.has(method + url)) {
             recentUrls.add(method + url);
             if (recentUrls.size > MAX_PATTERNS) {
