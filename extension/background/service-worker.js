@@ -1,10 +1,14 @@
 /**
  * service-worker.js - MV3 Service Worker 入口
  *
- * 混合方案（v0.5.0）：
+ * 混合方案（v0.6.0）：
  *   1. 内容脚本在邮箱页面（同源）提取 sid → 缓存到 chrome.storage.session
  *   2. SW 使用缓存 sid + 登录 Cookie 调用 webmail 内部 API → 后台独立检查
  *   3. 无缓存 sid 或 API 失败 → 回退到内容脚本 DOM 探测（需页面打开）
+ *
+ * v0.6.0 修复（本版核心）：标签页关闭时全量/自动检查均能执行
+ *   - 原因：hybrid 模式自动恢复后，抛弃了内容脚本已读到的未读，转而重试不可靠的 SW API
+ *   - 修复：自动打开邮箱后台标签，优先采用内容脚本 in-origin 读到的未读数
  *
  * v0.5.0 修复：不再依赖标签页开启即可独立运行
  *   - 163/QQ provider 不再因缺少缓存 sid 而直接中止 API 探测
@@ -572,80 +576,84 @@ async function checkSingleAccount(account, settings, context) {
         return accountResult;
       }
 
-      // v0.5.0 修复：hybrid 模式下 API 失败且无现成标签
-      // → 自动打开后台标签恢复 sid，然后重试
-      // 这在 alarm 触发自动检查时特别重要：不应因为用户关闭了标签而检查失败
+      // v0.6.0 修复：标签页关闭后也能自动检查。
+      // 根因：原 hybrid 模式自动恢复后，内容脚本在自动打开的后台邮箱标签里其实已经
+      //       读到了未读数，却被丢弃——改为去重试不可靠的 SW API（该通道多轮实测
+      //       从未成功返回未读数），最终落入"所有方法都失败"，于是标签一关全量检查就挂。
+      // 修复：自动恢复时优先直接采用内容脚本在邮箱后台标签读到的未读数（可靠路径）；
+      //       仅在内容脚本确实读不到时，hybrid 模式下才用缓存 sid 重试 SW API 作兜底。
       if ((mode === 'hybrid' || mode === 'content-script') && context.source !== 'content-probe' && context.source !== 'unknown') {
-        logger_acc.info('API 与现有标签探测均失败，尝试自动恢复会话...');
-        // content-script 模式需要保留自动打开的标签用于后续内容脚本探测
-        const rec = await autoRecoverSid(account.provider, { keepTabOpen: mode === 'content-script' });
-        if (rec.success) {
-          // 恢复 sid 后重试（hybrid → 重试 API；content-script → 重试内容脚本）
-          if (mode === 'hybrid') {
-            const apiRetry = await runSWApiProbe(account.provider, settings);
-            if (apiRetry.success) {
-              const accountResult = {
-                email: account.email,
-                provider: account.provider,
-                authVerified: true,
-                needsAuth: false,
-                allFailed: false,
-                source: context.source,
-                method: 'sw-api',
-                unreadCount: apiRetry.unreadCount,
-                unreadSource: apiRetry.unreadSource,
-                detail: apiRetry.detail,
-                timestamp: new Date().toISOString(),
-              };
-              await saveCheckResult(accountResult);
-              logger_acc.info(`自动恢复 sid 后 API 探测成功: unread=${apiRetry.unreadCount}`);
-              return accountResult;
-            }
-          } else {
-            // content-script 模式：autoRecoverSid 已保留自动打开的标签，
-            // 直接使用其中的内容脚本探测结果
-            const probe = rec.probe || {};
-            if (probe.success && typeof probe.unreadCount === 'number') {
-              const accountResult = {
-                email: account.email,
-                provider: account.provider,
-                authVerified: true,
-                needsAuth: false,
-                allFailed: false,
-                source: context.source,
-                method: 'content-script',
-                unreadCount: probe.unreadCount,
-                unreadSource: probe.unreadSource || null,
-                detail: probe.detail || {},
-                timestamp: new Date().toISOString(),
-              };
-              await saveCheckResult(accountResult);
-              logger_acc.info(`自动恢复后内容脚本探测成功: unread=${probe.unreadCount}`);
-              return accountResult;
-            }
-            // 未读到未读数但有 sid → 已授权但需打开收件箱主页面
-            if (probe.sid) {
-              const accountResult = {
-                email: account.email,
-                provider: account.provider,
-                authVerified: true,
-                needsAuth: false,
-                allFailed: false,
-                needsInboxPage: true,
-                source: context.source,
-                method: 'content-script',
-                unreadCount: null,
-                unreadSource: null,
-                detail: probe.detail || {},
-                timestamp: new Date().toISOString(),
-              };
-              await saveCheckResult(accountResult);
-              logger_acc.info('已授权（sid 已提取），但需打开收件箱主页面才能读到未读数');
-              return accountResult;
-            }
+        logger_acc.info('API 与现有标签探测均失败，尝试自动打开邮箱后台标签读取未读...');
+        // 自动打开/复用邮箱后台标签，由内容脚本 in-origin 读取未读（最可靠路径）
+        const auto = await runContentProbe(account.provider, { openTab: true });
+        const ap = (auto && auto.probe) || {};
+
+        // 1) 内容脚本读到未读数 → 直接作为成功结果返回
+        if (ap.success && typeof ap.unreadCount === 'number') {
+          const accountResult = {
+            email: account.email,
+            provider: account.provider,
+            authVerified: true,
+            needsAuth: false,
+            allFailed: false,
+            needsInboxPage: false,
+            source: context.source,
+            method: 'content-script',
+            unreadCount: ap.unreadCount,
+            unreadSource: ap.unreadSource || null,
+            detail: ap.detail || {},
+            timestamp: new Date().toISOString(),
+          };
+          await saveCheckResult(accountResult);
+          logger_acc.info(`自动打开后台标签后内容脚本探测成功: unread=${ap.unreadCount}`);
+          return accountResult;
+        }
+
+        // 2) 已授权（拿到 sid）但未能读到未读数 → 需打开收件箱主页面才能读数
+        if (ap.sid || ap.authVerified || ap.success) {
+          const accountResult = {
+            email: account.email,
+            provider: account.provider,
+            authVerified: true,
+            needsAuth: false,
+            allFailed: false,
+            needsInboxPage: true,
+            source: context.source,
+            method: 'content-script',
+            unreadCount: typeof ap.unreadCount === 'number' ? ap.unreadCount : null,
+            unreadSource: ap.unreadSource || null,
+            detail: ap.detail || {},
+            timestamp: new Date().toISOString(),
+          };
+          await saveCheckResult(accountResult);
+          logger_acc.info('已授权（sid 已提取），但需打开收件箱主页面才能读到未读数');
+          return accountResult;
+        }
+
+        // 3) 内容脚本仍失败：hybrid 模式下再用缓存的 sid 重试 SW API 作为兜底
+        if (mode === 'hybrid') {
+          const apiRetry = await runSWApiProbe(account.provider, settings);
+          if (apiRetry.success) {
+            const accountResult = {
+              email: account.email,
+              provider: account.provider,
+              authVerified: true,
+              needsAuth: false,
+              allFailed: false,
+              source: context.source,
+              method: 'sw-api',
+              unreadCount: apiRetry.unreadCount,
+              unreadSource: apiRetry.unreadSource,
+              detail: apiRetry.detail,
+              timestamp: new Date().toISOString(),
+            };
+            await saveCheckResult(accountResult);
+            logger_acc.info(`自动恢复后 SW API 探测成功: unread=${apiRetry.unreadCount}`);
+            return accountResult;
           }
         }
       }
+
     }
 
     // ===== 所有方法都失败 =====
