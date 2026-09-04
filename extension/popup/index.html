@@ -120,11 +120,12 @@
       border: 1px solid #dee2e6;
       display: flex;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
       justify-content: space-between;
       align-items: center;
     }
-    .account-card:hover { background: #f1f6fd; }
+    .account-card:hover { background: #f1f6fd; box-shadow: 0 2px 8px rgba(25,118,210,0.15); }
+    .account-card:active { transform: scale(0.98); }
     .account-card:last-child { margin-bottom: 0; }
     .account-card .acc-info {
       flex: 1;
@@ -481,6 +482,14 @@
     <h1>📧 Mail Notifier</h1>
   </div>
 
+  <!-- 全局 Loading Overlay -->
+  <div id="global-loading" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.8);z-index:1000;justify-content:center;align-items:center;">
+    <div style="text-align:center;">
+      <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 8px;"></div>
+      <div style="font-size:12px;color:#6c757d;">处理中...</div>
+    </div>
+  </div>
+
   <div class="content">
     <div class="tabs">
       <div class="tab active" data-tab="overview">状态</div>
@@ -508,30 +517,32 @@
     <div class="tab-content" id="tab-debug">
       <!-- 同步会话 -->
       <div class="section">
+        <div class="section-title">同步会话</div>
         <div class="row">
-            <button id="btn-sync-163" class="primary mini">🔑同步163</button>
-            <button id="btn-sync-qq" class="primary mini">🔑同步QQ</button>
-            <button id="btn-sync-ustc" class="primary mini">🔑同步USTC</button>
-            <button id="btn-sync-gmail" class="primary mini">🔑同步Gmail</button>
+            <button id="btn-sync-163" class="primary mini">🔑163</button>
+            <button id="btn-sync-qq" class="primary mini">🔑QQ</button>
+            <button id="btn-sync-ustc" class="primary mini">🔑USTC</button>
+            <button id="btn-sync-gmail" class="primary mini">🔑Gmail</button>
           </div>
         <div class="hint">打开邮箱页 → 提取会话令牌(sid) → 缓存供后台检查</div>
       </div>
 
       <!-- 获取未读数 -->
       <div class="section">
+        <div class="section-title">获取未读数</div>
         <div class="row">
-          <button id="btn-content-163" class="success">📥 未读数·163</button>
-          <button id="btn-content-qq" class="success">📥 未读数·QQ</button>
-          <button id="btn-content-ustc" class="success">📥 未读数·USTC</button>
-          <button id="btn-content-gmail" class="success">📥 未读数·Gmail</button>
+          <button id="btn-content-163" class="success mini">📥163</button>
+          <button id="btn-content-qq" class="success mini">📥QQ</button>
+          <button id="btn-content-ustc" class="success mini">📥USTC</button>
+          <button id="btn-content-gmail" class="success mini">📥Gmail</button>
         </div>
         <div class="hint">若未读为空：请在邮箱中打开「收件箱」后重试</div>
       </div>
 
       <!-- 诊断 & 高级探测 -->
       <div class="section">
-        <button id="btn-diagnose-cookies" class="secondary mini" style="width:100%;">🍪 诊断会话 Cookie</button>
-        <div class="divider"></div>
+        <div class="section-title">诊断与探测</div>
+        <button id="btn-diagnose-cookies" class="secondary" style="width:100%;margin-bottom:6px;">🍪 诊断会话 Cookie</button>
         <button id="btn-toggle-advanced" class="collapse-btn">▸ 高级探测（SW 直调）</button>
         <div class="collapsible-content" id="advanced-probe">
           <div class="divider"></div>
@@ -540,21 +551,25 @@
             <button id="btn-probe-qq" class="secondary mini">探测QQ</button>
             <button id="btn-probe-ustc" class="secondary mini">探测USTC</button>
             <button id="btn-probe-gmail" class="secondary mini">探测Gmail</button>
+          </div>
+          <div class="row" style="margin-top:4px;">
             <button id="btn-check-bridge" class="secondary mini">检查认证</button>
             <button id="btn-refresh-session" class="secondary mini">🔄刷新会话</button>
+          </div>
+          <div class="row" style="margin-top:4px;">
             <button id="btn-possibility" class="secondary mini" style="width:100%;">🧪 全可能性后台测试</button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 结果展示区域 -->
-    <div id="probe-result" class="action-result" style="display:none;margin-bottom:8px;">
+    <!-- 结果展示区域（固定在底部） -->
+    <div id="probe-result" class="action-result" style="display:none;position:sticky;bottom:0;left:0;right:0;background:#f8f9fa;border-top:1px solid #dee2e6;z-index:100;margin-top:auto;">
       <div class="result-header">
         <span class="result-title" id="probe-result-title"></span>
         <button id="btn-copy-result" class="btn-copy" title="复制结果">📋</button>
       </div>
-      <pre id="probe-result-text"></pre>
+      <pre id="probe-result-text" style="max-height:120px;"></pre>
     </div>
 
     <!-- ═══ Tab: 设置 ═══ -->
@@ -631,7 +646,7 @@
       <!-- 页脚信息（放入设置标签页内） -->
       <div class="footer">
         <a href="#" id="link-options" style="color:#1976d2;text-decoration:none;">打开完整设置页</a>
-        <span style="color:#adb5bd;"> · Edge Mail Notifier v0.8.0</span>
+        <span style="color:#adb5bd;"> · Mail Notifier v0.9.5</span>
       </div>
     </div>
 

@@ -393,27 +393,33 @@ function renderSessionStatus(status) {
   const container = document.getElementById('session-status');
   if (!container) return;
 
-  const sid163 = status.cachedSids?.netease_163;
-  const sidQQ = status.cachedSids?.qq;
-  const sid163Badge = sid163
-    ? '<span class="sid-chip sid-ok">✅ 已授权</span>'
-    : '<span class="sid-chip sid-no">❌ 未授权</span>';
-  const sidQQBadge = sidQQ
-    ? '<span class="sid-chip sid-ok">✅ 已授权</span>'
-    : '<span class="sid-chip sid-no">❌ 未授权</span>';
+  const sids = status.cachedSids || {};
+  const providers = [
+    { key: 'netease_163', label: '163邮箱' },
+    { key: 'qq', label: 'QQ邮箱' },
+    { key: 'ustc', label: '中科大' },
+    { key: 'gmail', label: 'Gmail' },
+  ];
+
+  const rows = providers
+    .map((p) => {
+      const hasSid = !!sids[p.key];
+      const badge = hasSid
+        ? '<span class="sid-chip sid-ok">✅ 已授权</span>'
+        : '<span class="sid-chip sid-no">❌ 未授权</span>';
+      return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
+        <strong style="font-size:12px;">${p.label}</strong>${badge}
+      </div>
+    `;
+    })
+    .join('');
 
   container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;">
-      <div style="flex:1;">
-        <strong style="font-size:12px;">163邮箱</strong>${sid163Badge}
-      </div>
-      <div style="flex:1;text-align:right;">
-        <strong style="font-size:12px;">QQ邮箱</strong>${sidQQBadge}
-      </div>
-    </div>
-    <div class="hint" style="margin-top:4px;">
+    ${rows}
+    <div class="hint" style="margin-top:6px;">
       sid 约 7 天有效，过期需重新同步授权。<br>
-      在「探测」标签页点「同步」按钮即可授权。
+      在「调试」标签页点「同步」按钮即可授权。
     </div>
   `;
 }
@@ -781,6 +787,17 @@ async function runRefreshSession() {
   }
 }
 
+// 全局 Loading 控制
+function showLoading() {
+  const el = document.getElementById('global-loading');
+  if (el) el.style.display = 'flex';
+}
+
+function hideLoading() {
+  const el = document.getElementById('global-loading');
+  if (el) el.style.display = 'none';
+}
+
 // 全量检查
 async function runFullCheck() {
   // 同时处理状态页和调试页的全量检查按钮
@@ -791,6 +808,7 @@ async function runFullCheck() {
     btn.disabled = true;
     btn.textContent = '⏳ 检查中...';
   }
+  showLoading();
   try {
     const result = await sendMessage({ type: 'runCheck' });
     showProbeResult('全量检查结果', result);
@@ -798,6 +816,7 @@ async function runFullCheck() {
   } catch (err) {
     showProbeResult('全量检查失败', { success: false, error: err.message });
   } finally {
+    hideLoading();
     if (btn) {
       btn.disabled = false;
       btn.textContent = origText || '🚀 全量检查';
