@@ -161,6 +161,29 @@ export async function probeSingleEndpoint(endpoint, sid, opts = {}) {
     // ---- 构造 URL ----
     const url = applySidToUrl(endpoint?.url || '', sid);
 
+    // ---- requiresSid 守卫：无 sid 时跳过需 sid 的接口 ----
+    // 目的：避免在 sid 过期/缺失时对服务器发起注定失败的请求（表现为
+    // "Failed to fetch" 等网络层异常），改为明确标记 needsSid 供上层引导。
+    // 注意：captured 模式（页面真实捕获回放）与部分 Cookie 鉴权接口
+    // 即便无 sid 也可能成功，因此仅对 `requiresSid && !sid` 的内置端点跳过。
+    if (endpoint?.requiresSid && !sid && !endpoint?.captured) {
+      const elapsedSkip = Math.round(performance.now() - startTime);
+      loggerEp.warn(`接口 ${epName} 需要 sid 但无可用 sid，跳过探测`);
+      return {
+        endpointName: epName,
+        url,
+        success: false,
+        skippedNoSid: true,
+        authBlocked: false,
+        httpStatus: 0,
+        elapsedMs: elapsedSkip,
+        error: 'requires sid but no sid available',
+        errorName: 'SkipNoSid',
+        needsSid: true,
+        sidUsed: false,
+      };
+    }
+
     // ---- 构建 fetch options ----
     const fetchOptions = {
       method: endpoint?.method || 'GET',
@@ -184,8 +207,19 @@ export async function probeSingleEndpoint(endpoint, sid, opts = {}) {
     const method = String(fetchOptions.method || 'GET').toUpperCase();
     if (method === 'POST' && endpoint?.bodyTemplate) {
       let body = endpoint.bodyTemplate.replace(/\{sid\}/g, sid || '');
+      // 仅 URL 编码 key=value 中 value 部分，保留表单键值分隔符 `=`。
+      // 此前对整个 body（含 var= 前缀）整体 encodeURIComponent 会把 `=`
+      // 也编码为 %3D，导致服务器无法按 key=value 表单解析请求体，
+      // 可能表现为请求异常（Failed to fetch）。
       if (endpoint.isUrlEncoded) {
-        body = encodeURIComponent(body);
+        const eqIdx = body.indexOf('=');
+        if (eqIdx > 0) {
+          const key = body.slice(0, eqIdx);
+          const rawVal = body.slice(eqIdx + 1);
+          body = `${key}=${encodeURIComponent(rawVal)}`;
+        } else {
+          body = encodeURIComponent(body);
+        }
       }
       fetchOptions.body = body;
       loggerEp.debug(`POST body: ${body.substring(0, 300)}`);
