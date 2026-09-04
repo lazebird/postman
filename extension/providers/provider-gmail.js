@@ -89,8 +89,12 @@ export async function probeGmail(_options = {}) {
 
 async function fetchGmailUnread(token) {
   try {
+    // 注意：/messages 列表接口只返回 id/threadId/resultSizeEstimate/nextPageToken，
+    // 不支持 messageId / snippet / threads 字段选择，传了会得到 400 "Invalid field selection messageId"，
+    // 导致即便令牌有效也会探测失败并把有效令牌当失效清掉（引发反复弹授权窗）。
+    // 这里不做字段裁剪（避免再次踩无效字段的坑），未读详情改由下面的消息明细接口单独获取。
     const apiUrl =
-      'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=5&fields=messageId,snippet,threads';
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=5';
 
     const response = await fetch(apiUrl, {
       method: 'GET',
@@ -140,9 +144,11 @@ async function fetchGmailUnread(token) {
  * 解析 Gmail API 的错误响应，区分「令牌失效（需重新授权）」与
  * 「令牌有效但项目/API 配置问题（重授权无济于事）」，并返回可读错误消息。
  *
- * 背景：此前对 401/403 一律视为令牌失效并清空缓存令牌，导致在「Gmail API
- * 未启用 / 配额受限」这类项目侧配置问题时，即便授权成功也会被判为需授权，
- * 进而反复弹出授权窗口、无法真正完成授权（AGENTS 规则 2：体验优先）。
+ * 背景：此前把 401/403 及一切非 2xx（含我们自身请求参数错误的 400）都视为令牌失效，
+ * 清空缓存令牌并引导重授权，导致「令牌明明有效却被清掉 → 反复弹出授权窗」的死循环。
+ * 现在只在错误确实由「令牌/凭据失效或权限不足」引起时才判定 tokenInvalid，
+ * 其余（参数错误 400、资源不存在 404、服务端 5xx 等）一律视为令牌仍有效，
+ * 不清令牌、不弹授权，避免误伤正常令牌（AGENTS 规则 2：体验优先）。
  *
  * @param {Response} response fetch 的非 2xx 响应
  * @returns {Promise<{tokenInvalid: boolean, message: string|null}>}
@@ -193,10 +199,25 @@ async function classifyGmailApiError(response) {
     };
   }
 
-  // 其他 403（scope 不足 / 账号受限等）：令牌视为不可用，需重新授权
+  // scope 不足 / 权限受限：令牌本身可用，但拿不到所需数据，需重新用更完整 scope 授权
+  const scopeDenied =
+    status === 403 &&
+    (/insufficient/i.test(text) ||
+      /scope/i.test(text) ||
+      reason === 'insufficientPermissions' ||
+      /permission/i.test(text));
+  if (scopeDenied) {
+    return {
+      tokenInvalid: true,
+      message: message || 'Gmail 授权权限不足，请重新授权',
+    };
+  }
+
+  // 其余（400 参数错误 / 404 / 5xx 服务端错误等）通常与令牌有效性无关，
+  // 令牌仍有效，不应清缓存、不应触发重新授权，避免误判引发反复弹窗。
   return {
-    tokenInvalid: true,
-    message: message || 'Gmail 访问被拒绝，请重新授权',
+    tokenInvalid: false,
+    message: message || `Gmail API 请求失败（HTTP ${status}）`,
   };
 }
 
