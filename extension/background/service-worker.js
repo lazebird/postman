@@ -1470,9 +1470,19 @@ async function getStatus() {
   const checkResults = await getCheckResults(50);
   const alarm = await chrome.alarms.get('check-email');
 
-  // 检查是否有缓存 sid
-  const sid163 = await getCachedSid('netease_163');
-  const sidQQ = await getCachedSid('qq');
+  // 检查是否有缓存 sid（覆盖全部 provider，统计页与状态页一致判定）
+  // 统计页 / 状态页均以 cachedSids / hasSid 作为「已授权」判据之一，
+  // 之前只读 163/qq 导致 ustc 等账户统计页恒为「未授权」，与状态页矛盾。
+  const STATUS_PROVIDER_KEYS = [
+    PROVIDERS.NETEASE_163,
+    PROVIDERS.QQ,
+    PROVIDERS.USTC,
+    PROVIDERS.GMAIL,
+  ];
+  const sidByProvider = {};
+  for (const p of STATUS_PROVIDER_KEYS) {
+    sidByProvider[p] = !!(await getCachedSid(p));
+  }
 
   // 检查 API pattern 数量
   const apiP163 = await getApiPatterns('netease_163');
@@ -1506,7 +1516,7 @@ async function getStatus() {
       method: matched?.method || null,
       error: matched?.error || null,
       timestamp: matched?.timestamp || null,
-      hasSid: acc.provider === 'netease_163' ? !!sid163 : acc.provider === 'qq' ? !!sidQQ : false,
+      hasSid: !!sidByProvider[acc.provider],
     };
   });
 
@@ -1516,10 +1526,7 @@ async function getStatus() {
     accountStatus: perAccount,
     accountCount: accounts.length,
     settings,
-    cachedSids: {
-      netease_163: !!sid163,
-      qq: !!sidQQ,
-    },
+    cachedSids: sidByProvider,
     apiPatternCounts: {
       netease_163: apiP163.length,
       qq: apiPQQ.length,
