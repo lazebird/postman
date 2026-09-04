@@ -84,10 +84,10 @@ class DebugLogger {
   async _getLogLevel() {
     try {
       const { settings = {} } = await chrome.storage.local.get('settings');
-      const level = settings.logLevel || 'INFO';
-      return LOG_LEVELS[level] ?? LOG_LEVELS.INFO;
+      const level = settings.logLevel || 'WARN';
+      return LOG_LEVELS[level] ?? LOG_LEVELS.WARN;
     } catch {
-      return LOG_LEVELS.INFO;
+      return LOG_LEVELS.WARN;
     }
   }
 
@@ -95,11 +95,11 @@ class DebugLogger {
    * 记录一条日志
    */
   async _log(level, message, detail) {
-    let currentLevel = LOG_LEVELS.INFO;
+    let currentLevel = LOG_LEVELS.WARN;
     try {
       currentLevel = await this._getLogLevel();
     } catch {
-      currentLevel = LOG_LEVELS.INFO;
+      currentLevel = LOG_LEVELS.WARN;
     }
     if (LOG_LEVELS[level] < currentLevel) return;
 
