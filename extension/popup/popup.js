@@ -119,8 +119,12 @@ function renderOverviewAccounts(status) {
       statusBadge = '<span class="acc-status-badge acc-status-err">未检查</span>';
     }
 
-    const jumpBtn = `<button class="acc-action-btn jump" data-email="${escapeHtml(acc.email)}" data-provider="${acc.provider}" title="打开邮箱收件箱">📥</button>`;
-    const refreshBtn = `<button class="acc-action-btn" data-email="${escapeHtml(acc.email)}" data-provider="${acc.provider}" data-action="refresh" title="检查该账户">🔄</button>`;
+    // 「打开收件箱」按钮移除：点击邮箱卡片即可直接打开
+    card.dataset.provider = acc.provider;
+    card.dataset.email = acc.email;
+    card.title = '点击打开邮箱收件箱';
+
+    const refreshBtn = `<button class="acc-action-btn" data-provider="${acc.provider}" data-action="refresh" title="检查该账户">🔄</button>`;
 
     card.innerHTML = `
       <div class="acc-info">
@@ -129,25 +133,28 @@ function renderOverviewAccounts(status) {
       </div>
       <div style="display:flex;align-items:center;">
         ${unreadHtml}
-        <div class="acc-actions">${refreshBtn}${jumpBtn}</div>
+        <div class="acc-actions">${refreshBtn}</div>
       </div>
     `;
     accountsList.appendChild(card);
   });
 
-  // 绑定事件
-  accountsList.querySelectorAll('.acc-action-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const provider = btn.dataset.provider;
-      const action = btn.dataset.action || 'jump';
-      if (action === 'jump') {
-        try { await sendMessage({ type: 'openInbox', provider }); }
-        catch (err) { console.error('打开邮箱失败:', err); }
-      } else if (action === 'refresh') {
+  // 绑定事件：点击邮箱卡片直接打开收件箱
+  accountsList.querySelectorAll('.account-card').forEach(card => {
+    card.addEventListener('click', async () => {
+      const provider = card.dataset.provider;
+      try { await sendMessage({ type: 'openInbox', provider }); }
+      catch (err) { console.error('打开邮箱失败:', err); }
+    });
+    card.querySelectorAll('.acc-action-btn[data-action="refresh"]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const provider = btn.dataset.provider;
         btn.disabled = true; btn.textContent = '…';
         try { await sendMessage({ type: 'testProvider', provider }); await refreshStatus(); }
         catch (err) { console.error('刷新失败:', err); }
-      }
+        btn.disabled = false; btn.textContent = '🔄';
+      });
     });
   });
 }

@@ -119,9 +119,12 @@
       margin-bottom: 6px;
       border: 1px solid #dee2e6;
       display: flex;
+      cursor: pointer;
+      transition: background 0.2s;
       justify-content: space-between;
       align-items: center;
     }
+    .account-card:hover { background: #f1f6fd; }
     .account-card:last-child { margin-bottom: 0; }
     .account-card .acc-info {
       flex: 1;
@@ -480,7 +483,7 @@
 
   <div class="content">
     <div class="tabs">
-      <div class="tab" data-tab="overview">状态</div>
+      <div class="tab active" data-tab="overview">状态</div>
       <div class="tab" data-tab="settings">设置</div>
       <div class="tab" data-tab="stats">统计</div>
       <div class="tab" data-tab="logs">日志</div>
