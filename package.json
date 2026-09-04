@@ -10,9 +10,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\"",
-    "format:check": "prettier --check \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\"",
-    "release:check": "bash scripts/release-pack.sh --check",
-    "release:pack": "bash scripts/release-pack.sh pack"
+    "format:check": "prettier --check \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\""
   },
   "devDependencies": {
     "eslint": "9.39.5",

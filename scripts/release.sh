@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# release-pack.sh - 扩展商店发布一键打包脚本（MV3，bash 版）
+# release.sh - 扩展商店发布一键打包脚本（MV3，bash 版）
 #
 # 目标平台：Chrome Web Store / Microsoft Edge Add-ons
 # 要求：zip 内 manifest.json 位于根级；排除调试/文档等非发布文件；
 #       版本号与 package.json 一致；产出前做结构与必含文件校验。
 #
 # 用法：
-#   ./scripts/release-pack.sh            # 校验并打包到 releases/
-#   ./scripts/release-pack.sh --check    # 仅发布前校验（版本/结构），不产出 zip
-#   ./scripts/release-pack.sh --verify <zip>  # 校验已有 zip 根级结构与必含文件
-#   ./scripts/release-pack.sh --version  # 打印 manifest 版本
+#   ./scripts/release.sh            # 校验并打包到 releases/
+#   ./scripts/release.sh --check    # 仅发布前校验（版本/结构），不产出 zip
+#   ./scripts/release.sh --verify <zip>  # 校验已有 zip 根级结构与必含文件
+#   ./scripts/release.sh --version  # 打印 manifest 版本
 #
 # 产物：releases/mail-notifier-<version>.zip（manifest 位于 zip 根级）
 # 排除：debug/、*.md、*.map、隐藏/临时文件（.DS_Store、Thumbs.db、__MACOSX）
@@ -176,6 +176,6 @@ case "$cmd" in
     ;;
   *)
     fail "未知参数：$cmd
-用法：./scripts/release-pack.sh [pack|--check|--verify <zip>|--version]"
+用法：./scripts/release.sh [pack|--check|--verify <zip>|--version]"
     ;;
 esac
