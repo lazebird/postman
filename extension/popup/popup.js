@@ -63,6 +63,14 @@ async function checkAccountCard(provider, btn) {
         const auth = await sendMessage({ type: 'gmailAuthorize' });
         if (auth?.success) {
           await sendMessage({ type: 'testProvider', provider: 'gmail' });
+        } else {
+          // 授权未成功：把具体原因展示出来，避免状态页只停留在「需授权」却无任何线索
+          showProbeResult('Gmail 授权未完成', {
+            success: false,
+            message: 'Gmail 授权失败或已取消，请检查下方原因后重试',
+            error: auth?.error || '未知原因',
+            needsManual: auth?.needsManual === true,
+          });
         }
       }
     } else {
@@ -126,7 +134,7 @@ function renderOverviewAccounts(status) {
     const actionsHtml = `
       <div class="acc-actions">
         <button class="acc-action-btn jump" data-action="open" data-provider="${acc.provider}"
-          title="打开邮箱收件箱" aria-label="打开 ${escapeHtml(acc.email)} 收件箱">打开</button>
+          title="打开邮箱收件箱" aria-label="打开 ${escapeHtml(acc.email)} 收件箱">📬</button>
         <button class="acc-action-btn" data-action="refresh" data-provider="${acc.provider}"
           title="检查该账户" aria-label="检查 ${escapeHtml(acc.email)}">🔄</button>
       </div>

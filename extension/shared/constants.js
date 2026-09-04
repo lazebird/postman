@@ -23,8 +23,8 @@ export const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 // 符合 AGENTS 规则 3：会话令牌优先持久化存储，后台直调时从缓存读取，
 // 避免每次后台检查都依赖 chrome.identity（在 Microsoft Edge 上不受支持）。
 export const GMAIL_TOKEN_KEYS = {
-  TOKEN: 'gmail_token',
-  EXPIRY: 'gmail_token_expiry',
+  TOKEN: 'gmail_access_token',
+  EXPIRY: 'gmail_access_token_expiry',
 };
 
 // 已捕获 API 模式的存储键
