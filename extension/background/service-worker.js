@@ -17,11 +17,12 @@
 
 import { createLogger } from '../shared/debug.js';
 import { getAccounts, getSettings, saveCheckResult, getCheckResults } from '../shared/storage.js';
-import { PROVIDERS, API_PATTERN_KEYS, PROVIDER_CONFIG } from '../shared/constants.js';
+import { PROVIDERS, API_PATTERN_KEYS } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
 import { probeGmail } from '../providers/provider-gmail.js';
+import { authorizeGmailInteractive, hasGmailToken } from '../shared/gmail-oauth.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -48,38 +49,11 @@ chrome.runtime.onInstalled.addListener((details) => {
     setupAlarms().catch(err => {
       logger.error(`注册定时检查闹钟失败: ${err.message}`);
     });
-    // 初始化 Gmail OAuth2
-    initGmailOAuth2();
+    // 注意：安装/更新时不再自动触发 Gmail OAuth（避免非用户主动弹授权页）。
+    // 需等用户在 Popup/Options 点击"同步 Gmail"才走 launchWebAuthFlow 授权。
+    void hasGmailToken().then(has => logger.info(has ? '检测到已缓存 Gmail 令牌' : '尚未授权 Gmail，需手动同步'));
   }
 });
-
-/**
- * 初始化 Gmail OAuth2
- */
-async function initGmailOAuth2() {
-  try {
-    const clientId = PROVIDER_CONFIG['gmail']?.oauth2?.clientId;
-    if (!clientId || clientId === 'YOUR_CLIENT_ID.apps.googleusercontent.com') {
-      logger.warn('Gmail Client ID 未配置，跳过 OAuth2 初始化');
-      return;
-    }
-    
-    const extensionId = chrome.runtime.id;
-    const scopes = PROVIDER_CONFIG['gmail'].oauth2.scopes.join(' ');
-    // Chrome Extension OAuth2 使用 chromiumapp.org 作为 redirect URI
-    const redirectUri = `https://${extensionId}.chromiumapp.org/`;
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes)}&prompt=consent`;
-    
-    await chrome.identity.launchWebAuthFlow({
-      url: authUrl,
-      interactive: true,
-    });
-    
-    logger.info('Gmail OAuth2 初始化完成');
-  } catch (err) {
-    logger.warn(`Gmail OAuth2 初始化失败: ${err.message}`);
-  }
-}
 
 chrome.runtime.onStartup.addListener(() => {
   logger.info('浏览器启动，Service Worker 被唤醒');
@@ -186,13 +160,13 @@ async function handleMessage(message, sender) {
     }
 
     case 'gmailAuthorize': {
-      // Gmail OAuth2 授权流程
-      try {
-        const result = await chrome.identity.getAuthToken({ interactive: true });
-        return { success: !!result, token: result ? 'obtained' : null };
-      } catch (err) {
-        return { success: false, error: err.message };
+      // Gmail OAuth2 授权流程（Chrome / Edge 通用，基于 launchWebAuthFlow）
+      // 仅由用户主动点击"同步 Gmail"触发，会弹出 Google 授权页。
+      const result = await authorizeGmailInteractive();
+      if (result.success) {
+        return { success: true, token: 'obtained' };
       }
+      return { success: false, error: result.error || 'Gmail 授权失败', needsManual: !!result.needsManual };
     }
 
     case 'openMailboxTab':

@@ -2,27 +2,31 @@
  * provider-gmail.js - Gmail 邮箱未读接口探测实现
  *
  * 使用 Gmail REST API + OAuth2 认证
+ *
+ * v0.10.0 跨浏览器兼容：
+ *   - 令牌获取统一迁移到 shared/gmail-oauth.js（基于 chrome.identity.launchWebAuthFlow，
+ *     同时兼容 Chrome 与 Microsoft Edge）。
+ *   - 移除对 chrome.identity.getAuthToken 的依赖——该 API 在 Edge 上不被支持，
+ *     导致 Gmail 在 Edge 里始终无法检查。
+ *   - 后台定时检查仅读取持久化的缓存令牌，绝不开标签、不弹授权页（AGENTS 规则 1）；
+ *     令牌缺失/过期时返回 needsAuth，交由上层引导用户手动同步授权。
  */
 
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG } from '../shared/constants.js';
+import { getCachedGmailToken, clearGmailToken } from '../shared/gmail-oauth.js';
 
 const logger = createLogger('provider-gmail');
 
-// Gmail API scopes
-const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-];
-
 export async function probeGmail(options = {}) {
   const config = PROVIDER_CONFIG['gmail'];
-  
+
   logger.info('开始探测 Gmail 未读接口');
 
-  // 1. 获取 OAuth2 访问令牌
-  const token = await getGmailAccessToken();
+  // 1. 获取缓存的 OAuth2 访问令牌（后台安全路径：仅读缓存，不弹窗/不开标签）
+  const token = await getCachedGmailToken();
   if (!token) {
-    logger.warn('Gmail 未授权，需要用户登录');
+    logger.warn('Gmail 未授权或令牌已过期，需要用户手动同步授权');
     return {
       provider: 'gmail',
       providerName: config.name,
@@ -30,15 +34,16 @@ export async function probeGmail(options = {}) {
       authVerified: false,
       needsAuth: true,
       allFailed: true,
-      session: { sidObtained: false, loggedIn: false, source: 'none' },
+      session: { sidObtained: false, loggedIn: false, source: 'oauth2' },
       results: [],
-      error: 'Gmail not authorized',
+      error: 'Gmail not authorized (需手动同步授权一次)',
+      needsManualAuth: true,
     };
   }
 
   // 2. 调用 Gmail API 获取未读数
   const result = await fetchGmailUnread(token);
-  
+
   if (result.success) {
     logger.info(`Gmail 探测成功: unread=${result.unreadCount}`);
     return {
@@ -55,12 +60,16 @@ export async function probeGmail(options = {}) {
     };
   } else {
     logger.warn(`Gmail 探测失败: ${result.error}`);
+    // 401/403 说明令牌失效，清掉缓存令牌，引导用户重新授权
+    if (result.tokenInvalid) {
+      await clearGmailToken();
+    }
     return {
       provider: 'gmail',
       providerName: config.name,
       timestamp: new Date().toISOString(),
       authVerified: false,
-      needsAuth: result.error?.includes('auth') || false,
+      needsAuth: result.error?.includes('auth') || result.tokenInvalid || false,
       allFailed: true,
       session: { sidObtained: true, loggedIn: true, source: 'oauth2' },
       results: [],
@@ -69,25 +78,10 @@ export async function probeGmail(options = {}) {
   }
 }
 
-async function getGmailAccessToken() {
-  try {
-    const token = await new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive: false, scopes: GMAIL_SCOPES }, (t) => {
-        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-        else resolve(t);
-      });
-    });
-    return token;
-  } catch (err) {
-    logger.warn(`Gmail OAuth2 token failed: ${err.message}`);
-    return null;
-  }
-}
-
 async function fetchGmailUnread(token) {
   try {
     const apiUrl = 'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=5&fields=messageId,snippet,threads';
-    
+
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -95,7 +89,7 @@ async function fetchGmailUnread(token) {
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        return { success: false, error: 'Gmail auth failed', unreadCount: 0 };
+        return { success: false, error: 'Gmail auth failed', unreadCount: 0, tokenInvalid: true };
       }
       return { success: false, error: `HTTP ${response.status}`, unreadCount: 0 };
     }
@@ -121,7 +115,7 @@ async function fetchGmailUnread(token) {
 async function fetchGmailMessageDetail(token, messageId) {
   try {
     const apiUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataName=from&metadataName=subject&metadataName=date`;
-    
+
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -139,38 +133,5 @@ async function fetchGmailMessageDetail(token, messageId) {
   } catch (err) {
     logger.warn(`Gmail message detail failed: ${err.message}`);
     return null;
-  }
-}
-
-async function refreshGmailToken() {
-  try {
-    const token = await chrome.identity.getAuthToken({ interactive: true });
-    return token;
-  } catch (err) {
-    logger.error(`Gmail token refresh failed: ${err.message}`);
-    return null;
-  }
-}
-
-export async function disconnectGmail() {
-  try {
-    const token = await chrome.identity.getAuthToken({ interactive: false });
-    if (token) {
-      await chrome.identity.disconnect(token);
-      logger.info('Gmail disconnected');
-    }
-  } catch (err) {
-    logger.warn(`Gmail disconnect failed: ${err.message}`);
-  }
-}
-
-export async function isGmailAuthorized() {
-  try {
-    const token = await new Promise((resolve) => {
-      chrome.identity.getAuthToken({ interactive: false }, (t) => resolve(t));
-    });
-    return !!token;
-  } catch (err) {
-    return false;
   }
 }
