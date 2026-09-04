@@ -207,15 +207,21 @@ async function handleMessage(message, sender) {
       // 内容脚本上报：如果有 sid，缓存下来供 SW 后续独立调用
       const sid = message.detail?.sid;
       const provider = message.detail?.provider ||
-                       (message.detail?.host?.includes('qq.com') ? 'qq' : 'netease_163');
+                       (message.detail?.host?.includes('qq.com') ? 'qq' :
+                        message.detail?.host?.includes('ustc.edu.cn') ? 'ustc' : 'netease_163');
       if (sid) {
         try {
-          const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+          // 根据提供商使用正确的存储键
+          let sidKey = 'sid_163';
+          if (provider === 'qq') sidKey = 'sid_qq';
+          else if (provider === 'ustc') sidKey = 'sid_ustc';
+          else if (provider === 'gmail') sidKey = 'sid_gmail';
+
           await chrome.storage.local.set({
-            [key]: sid,
-            [`${key}_expiry`]: Date.now() + SID_TTL_MS,
+            [sidKey]: sid,
+            [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
           });
-          logger.info(`从内容脚本缓存 ${provider} sid (来自页面 URL)`);
+          logger.info(`从内容脚本缓存 ${provider} sid: ${sid.substring(0, 8)}...`);
         } catch (e) {
           logger.warn(`缓存 ${provider} sid 失败: ${e.message}`);
         }
