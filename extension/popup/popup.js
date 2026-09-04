@@ -153,7 +153,7 @@ function renderOverviewAccounts(status) {
     const actionsHtml = `
       <div class="acc-actions">
         <button class="acc-action-btn jump" data-action="open" data-provider="${acc.provider}"
-          title="打开邮箱收件箱" aria-label="打开 ${escapeHtml(acc.email)} 收件箱">📬</button>
+          title="打开邮箱收件箱" aria-label="打开 ${escapeHtml(acc.email)} 收件箱">↗</button>
         <button class="acc-action-btn" data-action="refresh" data-provider="${acc.provider}"
           title="检查该账户" aria-label="检查 ${escapeHtml(acc.email)}">🔄</button>
       </div>
