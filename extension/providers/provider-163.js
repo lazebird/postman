@@ -1,6 +1,11 @@
 /**
  * provider-163.js - 163邮箱未读接口探测实现
  *
+ * v0.9.6 重构：使用 shared/endpoint-probe.js 通用请求层消除与 QQ/USTC 的重复。
+ * 本文件只保留 163 特有的逻辑：
+ *   - 163 RPC 接口的认证拦截特征识别
+ *   - 163 响应中的未读数解析（Coremail 风格多种格式）
+ *
  * v0.8.0 改进：
  *   1. 加入 API pattern 捕获回放支持
  *   2. 多接口格式探测（listMessages / getFolderCount / getUnread）
@@ -8,53 +13,58 @@
  */
 
 import { createLogger } from '../shared/debug.js';
-import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
-import { headersToObject, fetchWithTimeout } from '../shared/session.js';
-import { getSidRecord, clearSid } from '../shared/session-cache.js';
-import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
+import { PROVIDER_CONFIG } from '../shared/constants.js';
+import { clearSid } from '../shared/session-cache.js';
+import {
+  probeSingleEndpoint,
+  findUnreadCount,
+  loadProbeContext,
+} from '../shared/endpoint-probe.js';
 
 const logger = createLogger('provider-163');
+const PROVIDER_ID = 'netease_163';
+const SID_KEYS = [
+  'unread',
+  'unreadCount',
+  'unread_count',
+  'unreadnum',
+  'newCount',
+  'newMessageCount',
+  'messageCount',
+  'unReadCount',
+  'folder_unread',
+  'inboxCount',
+  'inbox_count',
+];
 
 /**
  * 探测 163 邮箱未读接口
  */
 export async function probe163(options = {}) {
-  const config = PROVIDER_CONFIG['netease_163'];
-
-  const cachedSid = await getSidRecord('netease_163');
-  const { sid, source: sidSource } = cachedSid;
-
-  let endpoints = options.endpointNames?.length
-    ? config.probeEndpoints.filter((ep) => options.endpointNames.includes(ep.name))
-    : config.probeEndpoints;
-
-  if (!endpoints.length) {
-    logger.warn('没有匹配的探测接口，回退到全部接口');
-    endpoints = config.probeEndpoints;
-  }
-
-  // 加入捕获的 API 模式（优先执行真实捕获的请求）
-  const capturedPatterns = await getApiPatterns('netease_163');
-  let capturedEndpoints = [];
-  if (capturedPatterns.length > 0) {
-    capturedEndpoints = patternsToProbeEndpoints(capturedPatterns);
-    logger.info(`发现 ${capturedPatterns.length} 条捕获的 163 API 模式`);
-  }
-
-  const allEndpoints = [...capturedEndpoints, ...endpoints];
+  const config = PROVIDER_CONFIG[PROVIDER_ID];
+  const ctx = await loadProbeContext(PROVIDER_ID, config.probeEndpoints, options.endpointNames);
+  const { sid, endpoints } = ctx;
 
   logger.info('开始探测163邮箱未读接口', {
-    endpoints: allEndpoints.map((e) => e.name),
+    endpoints: endpoints.map((e) => e.name),
     hasSid: !!sid,
-    sidSource: sidSource || 'none',
-    capturedCount: capturedEndpoints.length,
+    sidSource: ctx.sidSource,
+    capturedCount: ctx.capturedCount,
   });
 
   const results = [];
   let anySucceeded = false;
 
-  for (const endpoint of allEndpoints) {
-    const result = await probeSingleEndpoint(endpoint, sid, options);
+  for (const endpoint of endpoints) {
+    const result = await probeSingleEndpoint(endpoint, sid, {
+      loggerPrefix: '163',
+      parseResponse: parse163Response,
+      analyzeAuth,
+      onAuthBlocked: async () => {
+        logger.warn('163 会话已失效，清除缓存的 sid');
+        await clearSid(PROVIDER_ID);
+      },
+    });
     results.push(result);
 
     if (result.success) {
@@ -68,7 +78,7 @@ export async function probe163(options = {}) {
   const authBlocked = results.some((r) => r.authBlocked);
 
   const summary = {
-    provider: 'netease_163',
+    provider: PROVIDER_ID,
     providerName: config.name,
     timestamp: new Date().toISOString(),
     authVerified: anySucceeded,
@@ -78,7 +88,7 @@ export async function probe163(options = {}) {
       sidObtained: !!sid,
       sid: sid ? sid.substring(0, 8) + '...' : null,
       loggedIn: anySucceeded || sid !== null,
-      source: sidSource || 'none',
+      source: ctx.sidSource,
     },
     results,
   };
@@ -91,158 +101,6 @@ export async function probe163(options = {}) {
   });
 
   return summary;
-}
-
-/**
- * 探测单个 163 接口端点
- */
-async function probeSingleEndpoint(endpoint, sid, _options) {
-  const logger_ep = createLogger(`163:${endpoint.name}`);
-  logger_ep.info(`探测接口 ${endpoint.name}${sid ? '' : '（无 sid，仅依赖 Cookie）'}`);
-
-  const startTime = performance.now();
-
-  try {
-    // 构造 URL：避免用 URL.searchParams.toString() 自动编码 func 参数中的冒号
-    // （163 的 js6 RPC 接口要求 func=mbox:listMessages 等未编码格式）
-    let url = endpoint.url;
-    try {
-      // 替换 {sid} 占位符（在 query 或 path 中）
-      if (sid && url.includes('{sid}')) {
-        url = url.replace(/\{sid\}/g, sid);
-      }
-      // 清理残留的 sid={sid} / sid=占位符（当 sid 为空时）
-      if (!sid) {
-        url = url.replace(/[?&]sid=\{sid\}/g, '');
-        url = url.replace(/\{sid\}/g, '');
-        url = url.replace(/[?&]sid=$/g, '');
-        url = url.replace(/&sid=$/g, '');
-        url = url.replace(/\?sid=$/g, '');
-      }
-      // 若无 sid 参数但已有有效 sid，需补充
-      if (sid && !url.includes('sid=') && !url.match(/[?&]sid=[a-zA-Z0-9]/)) {
-        const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
-      }
-    } catch {
-      // fallback
-      if (sid) {
-        url = url.replace(/\{sid\}/g, sid);
-      } else {
-        url = url.replace(/[?&]sid=\{sid\}/g, '');
-      }
-    }
-
-    const fetchOptions = {
-      method: endpoint.method || 'GET',
-      credentials: 'include',
-      redirect: 'follow',
-    };
-
-    // 构建 headers
-    let headers = {};
-    if (endpoint.captured && endpoint.headers && typeof endpoint.headers === 'object') {
-      // 捕获的真实模式：使用页面实际发送的 headers
-      headers = { ...endpoint.headers };
-    } else {
-      headers = { ...(endpoint.headers || {}) };
-    }
-
-    // 替换 headers 中的 {sid} 占位符
-    for (const [key, value] of Object.entries(headers)) {
-      if (sid) {
-        headers[key] = String(value).replace(/\{sid\}/g, sid);
-      } else if (String(value).includes('{sid}')) {
-        delete headers[key];
-      }
-    }
-    fetchOptions.headers = headers;
-
-    // POST body
-    if (fetchOptions.method === 'POST' || fetchOptions.method === 'post') {
-      let body = endpoint.bodyTemplate;
-      if (body) {
-        body = body.replace(/\{sid\}/g, sid || '');
-        // 如果端点标记为 URL 编码，则对 body 进行编码
-        if (endpoint.isUrlEncoded) {
-          body = encodeURIComponent(body);
-        }
-        fetchOptions.body = body;
-        logger_ep.debug(`POST body: ${body.substring(0, 300)}`);
-      }
-    }
-
-    logger_ep.debug(`发起请求 ${fetchOptions.method} ${url}`);
-    const response = await fetchWithTimeout(url, fetchOptions);
-    const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms`);
-
-    const text = await response.text();
-    const preview =
-      text.length > DEBUG_FEATURE.maxResponsePreviewBytes
-        ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
-        : text;
-
-    const authInfo = analyzeAuth(text, response.status);
-
-    if (authInfo.authBlocked) {
-      logger_ep.warn('163 会话已失效，清除缓存的 sid');
-      try {
-        await clearSid('netease_163');
-      } catch {}
-    }
-
-    const parseResult = parse163Response(text);
-
-    const result = {
-      endpointName: endpoint.name,
-      url,
-      success: response.ok && !authInfo.authBlocked && parseResult.hasResult,
-      httpStatus: response.status,
-      elapsedMs: elapsed,
-      authBlocked: authInfo.authBlocked,
-      authReason: authInfo.reason,
-      hasResult: parseResult.hasResult,
-      unreadCount: parseResult.unreadCount,
-      responseContentType: response.headers?.get?.('content-type') || '',
-      preview: preview.substring(0, 500),
-      responseHeaders: headersToObject(response.headers),
-      sidUsed: !!sid,
-    };
-
-    if (result.success) {
-      logger_ep.info(`接口 ${endpoint.name} 探测成功: unreadCount=${parseResult.unreadCount}`);
-    } else if (result.authBlocked) {
-      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`, {
-        status: response.status,
-        preview: preview.substring(0, 500),
-      });
-    } else {
-      logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`, {
-        status: response.status,
-        contentType: result.responseContentType,
-        preview: preview.substring(0, 500),
-        sidUsed: !!sid,
-      });
-    }
-
-    return result;
-  } catch (err) {
-    const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.error(`接口 ${endpoint.name} 请求异常: ${err.message}`);
-
-    return {
-      endpointName: endpoint.name,
-      url: endpoint.url,
-      success: false,
-      authBlocked: false,
-      httpStatus: 0,
-      elapsedMs: elapsed,
-      error: err.message,
-      errorName: err.name,
-      sidUsed: !!sid,
-    };
-  }
 }
 
 /**
@@ -283,8 +141,6 @@ function analyzeAuth(text, httpStatus) {
  */
 function parse163Response(text) {
   // ===== 策略0: 163 真实 API 响应格式（包含 new Date() 和非标准 JSON）=====
-  // 响应格式: {'code':'S_OK','var':[...邮件列表...],'midoffset':-1}
-  // 注意：1. 日期格式为 new Date(...) 2. 使用单引号而非双引号
   try {
     let jsonText = text.trim();
 
@@ -292,47 +148,36 @@ function parse163Response(text) {
     const jsonpMatch = jsonText.match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
     if (jsonpMatch) jsonText = jsonpMatch[1];
 
-    // 将 new Date(...) 替换为 null（我们不需要日期，只需要判断 read 标志）
+    // 将 new Date(...) 替换为 null（日期非必要，只关心 read 标志）
     jsonText = jsonText.replace(/\bnew\s+Date\([^)]*\)/g, 'null');
 
     // 使用正则提取 var 数组中的邮件列表
-    // 格式: 'var':[ {...}, {...} ]
     const varMatch = jsonText.match(/'var'\s*:\s*\[([\s\S]*)\]/);
     if (!varMatch) {
-      // 尝试双引号格式
       const varMatch2 = jsonText.match(/"var"\s*:\s*\[([\s\S]*)\]/);
       if (!varMatch2) {
         return { hasResult: false, unreadCount: null };
       }
     }
 
-    // 提取每封邮件的 flags.read 状态
+    // 统计未读邮件（没有 read:true 标志）
     let unreadCount = 0;
-
-    // 匹配每封邮件对象（简化处理：统计没有 read:true 的邮件）
     const emailRegex = /\{\s*'id'\s*:/g;
-
     let emailMatch;
 
     while ((emailMatch = emailRegex.exec(jsonText)) !== null) {
-      // 找到这封邮件的结束位置（下一个邮件对象或数组结束）
       const nextEmail = jsonText.substring(emailMatch.index + 1).match(/\{\s*'id'\s*:/);
       const emailEnd = nextEmail
         ? emailMatch.index + 1 + nextEmail.index
         : jsonText.indexOf(']', emailMatch.index);
-
-      // 检查这封邮件是否有 read:true
       const emailText = jsonText.substring(emailMatch.index, emailEnd);
       const hasRead = /'read'\s*:\s*true/.test(emailText);
 
-      if (!hasRead) {
-        unreadCount++;
-      }
+      if (!hasRead) unreadCount++;
     }
 
-    // 如果找到了未读数，返回结果
     if (unreadCount > 0 || text.includes("'code':'S_OK'")) {
-      return { hasResult: true, unreadCount: unreadCount };
+      return { hasResult: true, unreadCount };
     }
   } catch {
     // 解析失败，继续尝试其他策略
@@ -358,11 +203,13 @@ function parse163Response(text) {
     const jsonpMatch = jsonText.match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
     if (jsonpMatch) jsonText = jsonpMatch[1];
     const data = JSON.parse(jsonText);
-    const unread = findUnreadCount(data);
+    const unread = findUnreadCount(data, SID_KEYS);
     if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
-  } catch {}
+  } catch {
+    // fallthrough
+  }
 
   // ===== 策略3: 正则提取 =====
   const regexes = [
@@ -398,23 +245,29 @@ function parse163Response(text) {
       if (atJsonMatch) {
         try {
           const data = JSON.parse(atJsonMatch[1]);
-          const unread = findUnreadCount(data);
+          const unread = findUnreadCount(data, SID_KEYS);
           if (unread !== null) return { hasResult: true, unreadCount: unread };
-        } catch {}
+        } catch {
+          // ignore parse error
+        }
       }
       const atEqMatch = text.match(/var\s*@=\s*([\s\S]*?)(?:;|$)/);
       if (atEqMatch) {
         try {
           const data = JSON.parse(atEqMatch[1]);
-          const unread = findUnreadCount(data);
+          const unread = findUnreadCount(data, SID_KEYS);
           if (unread !== null) return { hasResult: true, unreadCount: unread };
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
       const varMatch = text.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
       if (varMatch) return { hasResult: true, unreadCount: parseInt(varMatch[1], 10) };
       const countMatch2 = text.match(/count["']?\s*[:=]\s*["']?(\d+)/i);
       if (countMatch2) return { hasResult: true, unreadCount: parseInt(countMatch2[1], 10) };
-    } catch {}
+    } catch {
+      // ignore
+    }
   }
 
   // ===== 策略7: t="..."/c="..." 编码 =====
@@ -425,7 +278,9 @@ function parse163Response(text) {
         const decoded = decodeURIComponent(tMatch[1]);
         const uMatch = decoded.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
         if (uMatch) return { hasResult: true, unreadCount: parseInt(uMatch[1], 10) };
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -440,64 +295,14 @@ function parse163Response(text) {
       for (const seg of jsonMatches) {
         try {
           const data = JSON.parse(seg);
-          const unread = findUnreadCount(data);
+          const unread = findUnreadCount(data, SID_KEYS);
           if (unread !== null) return { hasResult: true, unreadCount: unread };
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
     }
   }
 
   return { hasResult: false, unreadCount: null };
-}
-
-/**
- * 递归查找未读计数字段
- */
-function findUnreadCount(data, depth = 0) {
-  if (!data || typeof data !== 'object' || depth > 8) return null;
-
-  const unreadKeys = [
-    'unread',
-    'unreadCount',
-    'unread_count',
-    'unreadnum',
-    'newCount',
-    'newMessageCount',
-    'messageCount',
-    'unReadCount',
-    'folder_unread',
-    'inboxCount',
-    'inbox_count',
-  ];
-  for (const key of unreadKeys) {
-    if (typeof data[key] === 'number') {
-      return data[key];
-    }
-    if (typeof data[key] === 'string' && /^\d+$/.test(data[key])) {
-      return parseInt(data[key], 10);
-    }
-  }
-
-  if (data.var && typeof data.var === 'string') {
-    const varMatch = data.var.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
-    if (varMatch) return parseInt(varMatch[1], 10);
-  }
-
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      const found = findUnreadCount(item, depth + 1);
-      if (found !== null) return found;
-    }
-    return null;
-  }
-
-  for (const key of Object.keys(data)) {
-    const val = data[key];
-    if (val && typeof val === 'object') {
-      const found = findUnreadCount(val, depth + 1);
-      if (found !== null) return found;
-    }
-  }
-
-  return null;
 }

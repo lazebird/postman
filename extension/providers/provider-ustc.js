@@ -1,6 +1,11 @@
 /**
  * provider-ustc.js - USTC邮箱未读接口探测实现
  *
+ * v0.9.6 重构：使用 shared/endpoint-probe.js 通用请求层消除与 163/QQ 的重复。
+ * 本文件只保留 USTC 特有的逻辑：
+ *   - USTC (Coremail) 认证拦截特征识别
+ *   - USTC getAllFolders 响应解析（unreadMessageCount 累加）
+ *
  * USTC 使用 Coremail 系统，API 格式与 163 类似。
  * 主要接口：
  * - getAllFolders: 获取所有文件夹及未读数（返回 unreadMessageCount）
@@ -8,54 +13,54 @@
  */
 
 import { createLogger } from '../shared/debug.js';
-import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
-import { headersToObject, fetchWithTimeout } from '../shared/session.js';
-import { getSidRecord, clearSid } from '../shared/session-cache.js';
-import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
+import { PROVIDER_CONFIG } from '../shared/constants.js';
+import { clearSid } from '../shared/session-cache.js';
+import {
+  probeSingleEndpoint,
+  findUnreadCount,
+  loadProbeContext,
+} from '../shared/endpoint-probe.js';
 
 const logger = createLogger('provider-ustc');
+const PROVIDER_ID = 'ustc';
+const SID_KEYS = [
+  'unread',
+  'unreadCount',
+  'unread_count',
+  'unreadMessageCount',
+  'messageCount',
+  'count',
+  'total',
+];
 
 /**
  * 探测 USTC 邮箱未读接口
  */
 export async function probeUSTC(options = {}) {
-  const config = PROVIDER_CONFIG['ustc'];
-
-  const cachedSid = await getSidRecord('ustc');
-  const { sid, source: sidSource } = cachedSid;
-
-  let endpoints = options.endpointNames?.length
-    ? config.probeEndpoints.filter((ep) => options.endpointNames.includes(ep.name))
-    : config.probeEndpoints;
-
-  if (!endpoints.length) {
-    logger.warn('没有匹配的探测接口，回退到全部接口');
-    endpoints = config.probeEndpoints;
-  }
-
-  // 加入捕获的 API 模式（如果有），优先执行
-  const capturedPatterns = await getApiPatterns('ustc');
-  let capturedEndpoints = [];
-  if (capturedPatterns.length > 0) {
-    capturedEndpoints = patternsToProbeEndpoints(capturedPatterns);
-    logger.info(`发现 ${capturedPatterns.length} 条捕获的 USTC API 模式`);
-  }
-
-  // 组合：先试捕获的真实模式，再试内置候选接口
-  const allEndpoints = [...capturedEndpoints, ...endpoints];
+  const config = PROVIDER_CONFIG[PROVIDER_ID];
+  const ctx = await loadProbeContext(PROVIDER_ID, config.probeEndpoints, options.endpointNames);
+  const { sid, endpoints } = ctx;
 
   logger.info('开始探测USTC邮箱未读接口', {
-    endpoints: allEndpoints.map((e) => e.name),
+    endpoints: endpoints.map((e) => e.name),
     hasSid: !!sid,
-    sidSource: sidSource || 'none',
-    capturedCount: capturedEndpoints.length,
+    sidSource: ctx.sidSource,
+    capturedCount: ctx.capturedCount,
   });
 
   const results = [];
   let anySucceeded = false;
 
-  for (const endpoint of allEndpoints) {
-    const result = await probeSingleEndpoint(endpoint, sid, options);
+  for (const endpoint of endpoints) {
+    const result = await probeSingleEndpoint(endpoint, sid, {
+      loggerPrefix: 'ustc',
+      parseResponse: parseUSTCResponse,
+      analyzeAuth,
+      onAuthBlocked: async () => {
+        logger.warn('USTC 会话已失效，清除缓存的 sid');
+        await clearSid(PROVIDER_ID);
+      },
+    });
     results.push(result);
 
     if (result.success) {
@@ -68,7 +73,7 @@ export async function probeUSTC(options = {}) {
   const authBlocked = results.some((r) => r.authBlocked);
 
   const summary = {
-    provider: 'ustc',
+    provider: PROVIDER_ID,
     providerName: config.name,
     timestamp: new Date().toISOString(),
     authVerified: anySucceeded,
@@ -78,7 +83,7 @@ export async function probeUSTC(options = {}) {
       sidObtained: !!sid,
       sid: sid ? sid.substring(0, 8) + '...' : null,
       loggedIn: anySucceeded || sid !== null,
-      source: sidSource || 'none',
+      source: ctx.sidSource,
     },
     results,
   };
@@ -91,142 +96,6 @@ export async function probeUSTC(options = {}) {
   });
 
   return summary;
-}
-
-/**
- * 探测单个 USTC 接口端点
- */
-async function probeSingleEndpoint(endpoint, sid, _options) {
-  const logger_ep = createLogger(`ustc:${endpoint.name}`);
-  logger_ep.info(`探测接口 ${endpoint.name}${sid ? '' : '（无 sid，仅依赖 Cookie）'}`);
-
-  const startTime = performance.now();
-
-  try {
-    // 构造 URL
-    let url = endpoint.url;
-    try {
-      if (sid && url.includes('{sid}')) {
-        url = url.replace(/\{sid\}/g, sid);
-      }
-      if (!sid) {
-        url = url.replace(/[?&]sid=\{sid\}/g, '');
-        url = url.replace(/\{sid\}/g, '');
-        url = url.replace(/[?&]sid=$/g, '');
-        url = url.replace(/&sid=$/g, '');
-      }
-      if (sid && !url.match(/[?&]sid=[a-zA-Z0-9]/)) {
-        const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
-      }
-    } catch {
-      if (sid) {
-        url = url.replace(/\{sid\}/g, sid);
-      } else {
-        url = url.replace(/[?&]sid=\{sid\}/g, '');
-      }
-    }
-
-    const fetchOptions = {
-      method: endpoint.method || 'GET',
-      credentials: 'include',
-      redirect: 'follow',
-    };
-
-    // 构建 headers
-    let headers = {};
-    if (endpoint.captured && endpoint.headers && typeof endpoint.headers === 'object') {
-      headers = { ...endpoint.headers };
-    } else {
-      headers = { ...(endpoint.headers || {}) };
-    }
-
-    // 替换 headers 中的 {sid} 占位符
-    for (const [key, value] of Object.entries(headers)) {
-      if (sid) {
-        headers[key] = String(value).replace(/\{sid\}/g, sid);
-      } else if (String(value).includes('{sid}')) {
-        delete headers[key];
-      }
-    }
-    fetchOptions.headers = headers;
-
-    // POST body
-    if (fetchOptions.method === 'POST' || fetchOptions.method === 'post') {
-      let body = endpoint.bodyTemplate;
-      if (body) {
-        body = body.replace(/\{sid\}/g, sid || '');
-        if (endpoint.isUrlEncoded) {
-          body = encodeURIComponent(body);
-        }
-        fetchOptions.body = body;
-        logger_ep.debug(`POST body: ${body.substring(0, 200)}`);
-      }
-    }
-
-    logger_ep.debug(`发起请求 ${fetchOptions.method} ${url}`);
-    const response = await fetchWithTimeout(url, fetchOptions);
-    const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms`);
-
-    const text = await response.text();
-    const preview =
-      text.length > DEBUG_FEATURE.maxResponsePreviewBytes
-        ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
-        : text;
-
-    const authInfo = analyzeAuth(text, response.status);
-
-    if (authInfo.authBlocked) {
-      logger_ep.warn('USTC 会话已失效，清除缓存的 sid');
-      try {
-        await clearSid('ustc');
-      } catch {}
-    }
-
-    const parseResult = parseUSTCResponse(text);
-
-    const result = {
-      endpointName: endpoint.name,
-      url,
-      success: response.ok && !authInfo.authBlocked && parseResult.hasResult,
-      httpStatus: response.status,
-      elapsedMs: elapsed,
-      authBlocked: authInfo.authBlocked,
-      authReason: authInfo.reason,
-      hasResult: parseResult.hasResult,
-      unreadCount: parseResult.unreadCount,
-      responseContentType: response.headers?.get?.('content-type') || '',
-      preview: preview.substring(0, 500),
-      responseHeaders: headersToObject(response.headers),
-      sidUsed: !!sid,
-    };
-
-    if (result.success) {
-      logger_ep.info(`接口 ${endpoint.name} 探测成功: unreadCount=${parseResult.unreadCount}`);
-    } else if (result.authBlocked) {
-      logger_ep.warn(`接口 ${endpoint.name} 被认证层拦截: ${authInfo.reason}`);
-    } else {
-      logger_ep.warn(`接口 ${endpoint.name} 返回但未能解析未读数`);
-    }
-
-    return result;
-  } catch (err) {
-    const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.error(`接口 ${endpoint.name} 请求异常: ${err.message}`);
-
-    return {
-      endpointName: endpoint.name,
-      url: endpoint.url,
-      success: false,
-      authBlocked: false,
-      httpStatus: 0,
-      elapsedMs: elapsed,
-      error: err.message,
-      errorName: err.name,
-      sidUsed: !!sid,
-    };
-  }
 }
 
 /**
@@ -248,7 +117,7 @@ function analyzeAuth(text, httpStatus) {
  * 解析 USTC 接口响应的未读数
  */
 function parseUSTCResponse(text) {
-  // 策略1: JSON 格式（标准）
+  // ===== 策略1: JSON 格式（标准）=====
   try {
     const data = JSON.parse(text.trim());
 
@@ -266,7 +135,7 @@ function parseUSTCResponse(text) {
     }
 
     // 尝试递归查找未读数
-    const unread = findUnreadCount(data);
+    const unread = findUnreadCount(data, SID_KEYS);
     if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
@@ -274,7 +143,7 @@ function parseUSTCResponse(text) {
     // 继续尝试其他策略
   }
 
-  // 策略2: 正则提取
+  // ===== 策略2: 正则提取 =====
   const regexes = [
     /unreadMessageCount["']?\s*[:=]\s*["']?(\d+)["']?/i,
     /unread["']?\s*[:=]\s*["']?(\d+)["']?/i,
@@ -287,47 +156,4 @@ function parseUSTCResponse(text) {
   }
 
   return { hasResult: false, unreadCount: null };
-}
-
-/**
- * 递归查找未读计数字段
- */
-function findUnreadCount(data, depth = 0) {
-  if (!data || typeof data !== 'object' || depth > 8) return null;
-
-  const unreadKeys = [
-    'unread',
-    'unreadCount',
-    'unread_count',
-    'unreadMessageCount',
-    'messageCount',
-    'count',
-    'total',
-  ];
-  for (const key of unreadKeys) {
-    if (typeof data[key] === 'number') {
-      return data[key];
-    }
-    if (typeof data[key] === 'string' && /^\d+$/.test(data[key])) {
-      return parseInt(data[key], 10);
-    }
-  }
-
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      const found = findUnreadCount(item, depth + 1);
-      if (found !== null) return found;
-    }
-    return null;
-  }
-
-  for (const key of Object.keys(data)) {
-    const val = data[key];
-    if (val && typeof val === 'object') {
-      const found = findUnreadCount(val, depth + 1);
-      if (found !== null) return found;
-    }
-  }
-
-  return null;
 }
