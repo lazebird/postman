@@ -26,13 +26,9 @@
  */
 
 import { createLogger } from './debug.js';
-import { PROVIDER_CONFIG } from './constants.js';
+import { GMAIL_TOKEN_KEYS, PROVIDER_CONFIG } from './constants.js';
 
 const logger = createLogger('gmail-oauth');
-
-// 存储键
-const STORAGE_KEY = 'gmail_access_token';
-const STORAGE_EXPIRY_KEY = 'gmail_access_token_expiry';
 
 // Gmail API 权限范围
 const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
@@ -47,13 +43,13 @@ const EXPIRY_SLACK_MS = 60 * 1000;
  */
 export async function getCachedGmailToken() {
   try {
-    const data = await chrome.storage.local.get([STORAGE_KEY, STORAGE_EXPIRY_KEY]);
-    const token = data[STORAGE_KEY];
+    const data = await chrome.storage.local.get([GMAIL_TOKEN_KEYS.TOKEN, GMAIL_TOKEN_KEYS.EXPIRY]);
+    const token = data[GMAIL_TOKEN_KEYS.TOKEN];
     if (!token) {
       logger.debug('无缓存的 Gmail 令牌，需要手动授权');
       return null;
     }
-    const expiry = data[STORAGE_EXPIRY_KEY];
+    const expiry = data[GMAIL_TOKEN_KEYS.EXPIRY];
     if (expiry && Date.now() >= expiry - EXPIRY_SLACK_MS) {
       logger.debug('缓存的 Gmail 令牌已过期，需要手动重新授权');
       await clearGmailToken();
@@ -75,8 +71,8 @@ export async function getCachedGmailToken() {
 async function persistGmailToken(token, expiresInSec) {
   const expiry = expiresInSec ? Date.now() + expiresInSec * 1000 : Date.now() + 55 * 60 * 1000; // 无 expires_in 时兜底按 55 分钟
   await chrome.storage.local.set({
-    [STORAGE_KEY]: token,
-    [STORAGE_EXPIRY_KEY]: expiry,
+    [GMAIL_TOKEN_KEYS.TOKEN]: token,
+    [GMAIL_TOKEN_KEYS.EXPIRY]: expiry,
   });
   logger.info(`Gmail 令牌已缓存，有效期至 ${new Date(expiry).toISOString()}`);
 }
@@ -86,7 +82,7 @@ async function persistGmailToken(token, expiresInSec) {
  */
 export async function clearGmailToken() {
   try {
-    await chrome.storage.local.remove([STORAGE_KEY, STORAGE_EXPIRY_KEY]);
+    await chrome.storage.local.remove([GMAIL_TOKEN_KEYS.TOKEN, GMAIL_TOKEN_KEYS.EXPIRY]);
     logger.info('已清除缓存的 Gmail 令牌');
   } catch (err) {
     logger.warn(`清除 Gmail 令牌失败: ${err.message}`);
