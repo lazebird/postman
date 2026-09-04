@@ -278,7 +278,7 @@ export const CHECK_INTERVALS = [
 // 默认设置
 export const DEFAULT_SETTINGS = {
   checkIntervalMinutes: 5,
-  logLevel: 'DEBUG',
+  logLevel: 'WARN',
   // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
   checkMode: 'hybrid',
   // 每个提供商启用的探测接口名

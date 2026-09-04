@@ -452,7 +452,7 @@ function renderStatsGrid(status) {
       '定时闹钟',
       status.alarmConfigured ? `✅ ${status.alarmInfo?.periodInMinutes || '?'}分/次` : '❌ 未配置',
     ],
-    ['日志级别', status.settings?.logLevel || 'DEBUG'],
+    ['日志级别', status.settings?.logLevel || 'WARN'],
   ];
 
   grid.innerHTML = items
