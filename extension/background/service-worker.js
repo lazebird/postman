@@ -22,18 +22,22 @@ import {
   saveCheckResult,
   getCheckResults,
   getDebugLogs,
+  getLastAuthOk,
+  setLastAuthOk,
+  getLastAuthNotify,
+  setLastAuthNotify,
 } from '../shared/storage.js';
-import { PROVIDERS, TRIGGER_SOURCE, isManualSource } from '../shared/constants.js';
+import {
+  PROVIDERS,
+  TRIGGER_SOURCE,
+  isManualSource,
+  AUTH_ALERT_NOTIFY_THROTTLE_MS,
+} from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
 import { probeGmail } from '../providers/provider-gmail.js';
-import {
-  authorizeGmailInteractive,
-  hasGmailToken,
-  gmailNotifyGate,
-  markGmailNotifySent,
-} from '../shared/gmail-oauth.js';
+import { authorizeGmailInteractive, hasGmailToken } from '../shared/gmail-oauth.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -1346,10 +1350,11 @@ async function runAllChecks(context = {}) {
   // 检查新邮件并发送通知
   await checkNewEmails(allResults);
 
-  // 自动（定时）路径下，Gmail 令牌过期且静默续期失败时，发一条**带节流**的系统
-  // 通知引导用户手动授权；全程不开标签、不弹授权窗（AGENTS 规则 1/2）。
+  // 自动（定时）路径下，任一邮箱账号授权出错/过期（曾正常工作后失效）时，发一条
+  // **带节流**的系统通知引导用户手动同步，并将工具栏图标置为红色错误状态。
+  // 全程不开标签、不弹授权窗（AGENTS 规则 1/2）；图标置红由下方 updateBadge 统一完成。
   if (trigger.auto) {
-    await maybeNotifyGmailNeedsManualAuth(allResults);
+    await maybeNotifyAuthIssues(allResults);
   }
 
   await saveCheckResult(summary);
@@ -1357,49 +1362,84 @@ async function runAllChecks(context = {}) {
   return summary;
 }
 
-// Gmail「需手动授权」提醒的节流间隔：默认 4 小时才允许提醒一次，避免反复打扰。
-const GMAIL_AUTH_NOTIFY_THROTTLE_MS = 4 * 60 * 60 * 1000;
+// 各提供商在授权告警通知中的可读名称
+const AUTH_ALERT_PROVIDER_LABELS = {
+  [PROVIDERS.NETEASE_163]: '163邮箱',
+  [PROVIDERS.QQ]: 'QQ邮箱',
+  [PROVIDERS.USTC]: '中科大邮箱',
+  [PROVIDERS.GMAIL]: 'Gmail',
+};
 
+/** 读取某账号最近一次成功授权的时间戳（委托 shared/storage） */
+function readLastOk(email) {
+  return getLastAuthOk(email);
+}
+
+/** 记录某账号最近一次成功授权的时间戳（委托 shared/storage） */
+function markLastOk(email) {
+  return setLastAuthOk(email);
+}
+
+/** 某账号是否已达到可再次弹授权提醒的间隔（节流门） */
+async function authNotifyGate(email) {
+  const last = await getLastAuthNotify(email);
+  return Date.now() - last >= AUTH_ALERT_NOTIFY_THROTTLE_MS;
+}
+
+/** 记录某账号本次授权提醒已发送的时间（配合 authNotifyGate 节流） */
+function markAuthNotifySent(email) {
+  return setLastAuthNotify(email);
+}
 /**
- * 自动检查路径下，若 Gmail 账户因令牌过期且静默续期失败而需手动授权，
- * 发送一条**带节流**的系统通知，引导用户在 Popup/Options 中手动同步授权。
+ * 授权/过期告警：任何邮箱账号授权出错/过期时，弹出**带节流**的系统通知引导用户手动同步，
+ * 同时工具栏图标会由 updateBadge/computeIconState 统一置为红色错误状态。
  *
- * 说明：
- *  - 仅在"曾授权过但令牌已过期、且静默续期确实失败"（renewalFailed）时提醒，
- *    从未授权过的场景不在此提醒（由用户在界面主动发起首次授权）。
- *  - 通过 chrome.notifications 发送，不影响页面、不开标签、不弹 OAuth 授权窗。
+ * 规则（AGENTS 规则 1/2/3）：
+ *  - 仅对「曾成功工作过（有 last-ok 记录）、本次却授权失效」的账号弹提醒，从而区分
+ *    「授权过期/出错」与「新增账号从未首次授权」——后者不打扰，交由用户在界面主动发起。
+ *  - 同一账号距上次提醒不足 AUTH_ALERT_NOTIFY_THROTTLE_MS 时不重复通知，避免骚扰。
+ *  - 全程仅用 chrome.notifications，绝不开标签、绝不弹 OAuth 授权窗。
  *
- * @param {Array} results 本次检查的账户级结果
+ * @param {Array} results 本次全量检查的账户级结果
  */
-async function maybeNotifyGmailNeedsManualAuth(results) {
+async function maybeNotifyAuthIssues(results) {
+  const list = Array.isArray(results) ? results : [];
   try {
-    const needs = results.find(
-      (r) =>
-        r.provider === PROVIDERS.GMAIL &&
-        r.needsAuth === true &&
-        r.renewalFailed === true &&
-        r.hadToken !== false
-    );
-    if (!needs) return;
+    for (const r of list) {
+      if (!r || !r.email) continue;
 
-    const { shouldNotify } = await gmailNotifyGate(GMAIL_AUTH_NOTIFY_THROTTLE_MS);
-    if (!shouldNotify) {
-      logger.info('Gmail 需手动授权提醒被节流，本次不重复通知');
-      return;
+      // 正常（已授权 / 读到未读）→ 记录"曾正常工作"，本次不提醒。
+      if (accountNormal(r)) {
+        await markLastOk(r.email);
+        continue;
+      }
+      // 非授权问题（真实异常等交给 accountError 置红，但不发"重新授权"提示）→ 跳过。
+      if (!accountAuthIssue(r)) continue;
+
+      // 仅当该账号曾成功工作过（属授权过期/出错，而非从未授权）才提醒。
+      const lastOk = await readLastOk(r.email);
+      if (!lastOk) continue;
+
+      // 节流：同一账号距上次提醒不足阈值时不重复打扰。
+      if (!(await authNotifyGate(r.email))) continue;
+
+      const label = AUTH_ALERT_PROVIDER_LABELS[r.provider] || '邮箱';
+      const detailMsg =
+        r.renewalFailed === true || r.provider === PROVIDERS.GMAIL
+          ? '授权已过期且自动续期失败，无法后台读取未读'
+          : '登录会话已失效或过期，无法后台读取未读';
+      const notification = {
+        type: 'basic',
+        iconUrl: 'icons/icon-err-48.png',
+        title: `🔑 ${label} 需要重新授权`,
+        message: `${label}${detailMsg}。请点击扩展图标并手动同步 / 重新授权一次。`,
+      };
+      await chrome.notifications.create(`auth-alert-${Date.now()}-${r.email}`, notification);
+      await markAuthNotifySent(r.email);
+      logger.info(`已发送 ${label} 授权需处理提醒通知（节流生效）`);
     }
-
-    const notification = {
-      type: 'basic',
-      iconUrl: 'icons/icon-err-48.png',
-      title: '🔑 Gmail 需要重新授权',
-      message:
-        'Gmail 登录已过期且静默续期失败，无法后台读取未读。请点击扩展图标并同步 Gmail 授权一次。',
-    };
-    await chrome.notifications.create(`gmail-auth-${Date.now()}`, notification);
-    await markGmailNotifySent();
-    logger.info('已发送 Gmail 需手动授权提醒通知（节流生效）');
   } catch (err) {
-    logger.warn(`Gmail 手动授权提醒发送失败: ${err.message}`);
+    logger.warn(`授权需处理提醒发送失败: ${err.message}`);
   }
 }
 
@@ -1810,35 +1850,41 @@ async function applyToolbarIcon(state) {
 function accountNormal(r) {
   return r && (r.authVerified === true || typeof r.unreadCount === 'number');
 }
-/** 账户是否「不可用/需授权」：会话失效、需打开收件箱或需手动同步 */
-function accountNeedAuth(r) {
-  return (
+/**
+ * 账户是否存在「授权问题」（需用户处理）：会话失效 / sid 过期 / 需手动授权 /
+ * 登录失效 / 静默续期失败等。这是「授权出错/过期」的信号，区别于"已授权但需打开
+ * 收件箱主页面"（needsInboxPage，属正常授权态，不应触发红色告警）。
+ */
+function accountAuthIssue(r) {
+  return !!(
     r &&
     (r.needsAuth === true ||
-      r.needsInboxPage === true ||
       r.loginRequired === true ||
       r.sidExpired === true ||
-      r.needsSid === true)
+      r.needsSid === true ||
+      r.needsManualAuth === true ||
+      r.renewalFailed === true)
   );
 }
 /** 账户是否「真实错误」：检查抛出异常/明确失败，且并非单纯的"需授权"问题 */
 function accountError(r) {
-  return (
+  return !!(
     r &&
     (r.success === false ||
-      (r.allFailed === true && r.needsAuth !== true) ||
-      (r.error && !accountNeedAuth(r)))
+      (r.allFailed === true && !accountAuthIssue(r)) ||
+      (r.error && !accountAuthIssue(r)))
   );
 }
 
 /**
  * 由聚合的账户级结果推算出整体运行状态：
- *   有真实错误 → err(红) ；有正常账户 → ok(绿) ；否则 → off(灰/需同步)
+ *   存在「真实错误」或「授权问题」→ err(红)；有正常账户 → ok(绿)；否则 → off(灰)。
+ * 任一账户授权出错/过期即判红，确保用户能第一时间在工具栏上看到异常需处理。
  */
 function computeIconState(allResults) {
   const list = Array.isArray(allResults) ? allResults : [];
   if (list.length === 0) return 'off';
-  if (list.some(accountError)) return 'err';
+  if (list.some(accountError) || list.some(accountAuthIssue)) return 'err';
   if (list.some(accountNormal)) return 'ok';
   return 'off';
 }

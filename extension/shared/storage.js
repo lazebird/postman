@@ -29,7 +29,7 @@
  * 4. 明确持久化/会话两级存储分层，账号配置等用户数据统一落 chrome.storage.local
  */
 
-import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants.js';
+import { DEFAULT_SETTINGS, STORAGE_KEYS, AUTH_ALERT_KEYS } from './constants.js';
 
 /* ============================================================
  * 持久级用户数据（chrome.storage.local）
@@ -165,5 +165,72 @@ export async function getMemoryLogs(limit = 100) {
     return typeof getMem === 'function' ? getMem(limit) : [];
   } catch {
     return [];
+  }
+}
+
+/* ============================================================
+ * 授权/会话告警监控数据（chrome.storage.local，持久化）
+ * —— 用于在账号授权过期/出错时向用户弹提醒并置红工具栏图标
+ * ============================================================ */
+
+/**
+ * 读取某账号「最近一次成功授权 / 正常读到未读」的时间戳。
+ * @param {string} email
+ * @returns {Promise<number>} 无记录时返回 0
+ */
+export async function getLastAuthOk(email) {
+  try {
+    const data = await chrome.storage.local.get(AUTH_ALERT_KEYS.LAST_OK_BY_EMAIL);
+    const map = data[AUTH_ALERT_KEYS.LAST_OK_BY_EMAIL] || {};
+    return typeof map[email] === 'number' ? map[email] : 0;
+  } catch (e) {
+    console.error('[storage] getLastAuthOk failed:', e.message);
+    return 0;
+  }
+}
+
+/**
+ * 记录某账号最近一次成功授权 / 正常读到未读的时间戳。
+ * @param {string} email
+ */
+export async function setLastAuthOk(email) {
+  try {
+    const data = await chrome.storage.local.get(AUTH_ALERT_KEYS.LAST_OK_BY_EMAIL);
+    const map = data[AUTH_ALERT_KEYS.LAST_OK_BY_EMAIL] || {};
+    map[email] = Date.now();
+    await chrome.storage.local.set({ [AUTH_ALERT_KEYS.LAST_OK_BY_EMAIL]: map });
+  } catch (e) {
+    console.error('[storage] setLastAuthOk failed:', e.message);
+  }
+}
+
+/**
+ * 读取某账号最近一次「授权需处理」提醒通知时间。
+ * @param {string} email
+ * @returns {Promise<number>} 无记录时返回 0
+ */
+export async function getLastAuthNotify(email) {
+  try {
+    const data = await chrome.storage.local.get(AUTH_ALERT_KEYS.LAST_AUTH_NOTIFY_BY_EMAIL);
+    const map = data[AUTH_ALERT_KEYS.LAST_AUTH_NOTIFY_BY_EMAIL] || {};
+    return typeof map[email] === 'number' ? map[email] : 0;
+  } catch (e) {
+    console.error('[storage] getLastAuthNotify failed:', e.message);
+    return 0;
+  }
+}
+
+/**
+ * 记录某账号本次「授权需处理」提醒已发送的时间。
+ * @param {string} email
+ */
+export async function setLastAuthNotify(email) {
+  try {
+    const data = await chrome.storage.local.get(AUTH_ALERT_KEYS.LAST_AUTH_NOTIFY_BY_EMAIL);
+    const map = data[AUTH_ALERT_KEYS.LAST_AUTH_NOTIFY_BY_EMAIL] || {};
+    map[email] = Date.now();
+    await chrome.storage.local.set({ [AUTH_ALERT_KEYS.LAST_AUTH_NOTIFY_BY_EMAIL]: map });
+  } catch (e) {
+    console.error('[storage] setLastAuthNotify failed:', e.message);
   }
 }
