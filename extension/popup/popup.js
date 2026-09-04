@@ -35,6 +35,9 @@ const ENDPOINT_OPTIONS = {
     { name: 'ustc_getallfolders', label: '获取所有文件夹' },
     { name: 'ustc_getattrs', label: '获取用户属性' },
   ],
+  gmail: [
+    { name: 'gmail_api', label: 'Gmail REST API' },
+  ],
 };
 
 let currentAccounts = [];
@@ -184,12 +187,19 @@ function renderSettingsAccounts() {
   currentAccounts.forEach((acc, idx) => {
     const item = document.createElement('div');
     item.className = 'acc-manage-item';
-    item.innerHTML = `
-      <span title="${escapeHtml(acc.email)}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        ${escapeHtml(acc.email)} <span style="color:#adb5bd;font-size:10px;">${PROVIDER_LABELS[acc.provider] || acc.provider}</span>
-      </span>
-      <button class="mini secondary" onclick="window._removeAccount(${idx})" style="flex-shrink:0;">删除</button>
-    `;
+    const emailSpan = document.createElement('span');
+    emailSpan.title = acc.email;
+    emailSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    emailSpan.innerHTML = `${escapeHtml(acc.email)} <span style="color:#adb5bd;font-size:10px;">${PROVIDER_LABELS[acc.provider] || acc.provider}</span>`;
+    
+    const delBtn = document.createElement('button');
+    delBtn.className = 'mini secondary';
+    delBtn.style.cssText = 'flex-shrink:0;';
+    delBtn.textContent = '删除';
+    delBtn.onclick = () => _removeAccount(idx);
+    
+    item.appendChild(emailSpan);
+    item.appendChild(delBtn);
     container.appendChild(item);
   });
 }
@@ -239,11 +249,24 @@ function renderEndpoints() {
 }
 
 async function _addAccount() {
-  const provider = document.getElementById('provider-select').value;
   const email = document.getElementById('email-input').value.trim();
 
   if (!email) { showSaveStatus('请输入邮箱地址', 'error'); return; }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showSaveStatus('邮箱格式不正确', 'error'); return; }
+
+  // 根据邮箱域名自动识别提供商
+  const domain = email.split('@')[1]?.toLowerCase() || '';
+  let provider = 'gmail'; // 默认
+  if (domain.includes('163.com') || domain.includes('vip.163.com')) {
+    provider = 'netease_163';
+  } else if (domain.includes('qq.com')) {
+    provider = 'qq';
+  } else if (domain.includes('ustc.edu.cn')) {
+    provider = 'ustc';
+  } else if (domain.includes('gmail.com')) {
+    provider = 'gmail';
+  }
+
   if (currentAccounts.some(a => a.email === email && a.provider === provider)) {
     showSaveStatus('该账户已存在', 'error'); return;
   }
@@ -254,7 +277,7 @@ async function _addAccount() {
   document.getElementById('email-input').value = '';
   notifyAccountsChanged();
   showSaveStatus('账户已添加', 'success');
-  refreshStatus(); // 同步刷新状态页
+  refreshStatus();
 }
 
 async function _removeAccount(index) {
@@ -377,6 +400,8 @@ function renderStatsGrid(status) {
     ['检查模式', providerMode(status.settings?.checkMode || 'hybrid')],
     ['163 API 模式', `${status.apiPatternCounts?.netease_163 || 0} 条`],
     ['QQ API 模式', `${status.apiPatternCounts?.qq || 0} 条`],
+    ['USTC API 模式', `${status.apiPatternCounts?.ustc || 0} 条`],
+    ['Gmail API 模式', `${status.apiPatternCounts?.gmail || 0} 条`],
     ['定时闹钟', status.alarmConfigured
       ? `✅ ${status.alarmInfo?.periodInMinutes || '?'}分/次`
       : '❌ 未配置'],
@@ -460,7 +485,12 @@ async function syncSession(provider) {
   showProbeResult(`同步 ${providerLabel}`, { message: '正在同步...' });
 
   try {
-    const msgType = provider === 'qq' ? 'probeContentQQ' : 'probeContent163';
+    // 根据提供商选择正确的消息类型
+    let msgType = 'probeContent163';
+    if (provider === 'qq') msgType = 'probeContentQQ';
+    else if (provider === 'ustc') msgType = 'probeContentUSTC';
+    else if (provider === 'gmail') msgType = 'gmailAuthorize';
+
     const r = await sendMessage({ type: msgType, openTab: true });
 
     if (r?.probe?.success) {
@@ -504,7 +534,12 @@ async function runPlanC(provider) {
   if (pre) pre.textContent = '探测中...';
   const providerLabel = PROVIDER_LABELS[provider] || provider;
 
-  const msgType = provider === 'qq' ? 'probeContentQQ' : 'probeContent163';
+  // 根据提供商选择正确的消息类型
+  let msgType = 'probeContent163';
+  if (provider === 'qq') msgType = 'probeContentQQ';
+  else if (provider === 'ustc') msgType = 'probeContentUSTC';
+  else if (provider === 'gmail') msgType = 'gmailAuthorize';
+
   try {
     const r = await sendMessage({ type: msgType, openTab: true });
     const success = r?.probe?.success;
@@ -536,10 +571,11 @@ async function runCookieDiag() {
 
 // SW 探测
 async function runSWProbe(provider) {
-  const btnIdMap = {
+  const btnMap = {
     'netease_163': 'btn-probe-163',
     'qq': 'btn-probe-qq',
     'ustc': 'btn-probe-ustc',
+    'gmail': 'btn-probe-gmail',
   };
   const btn = document.getElementById(btnMap[provider]);
   const origText = btn?.textContent;
@@ -596,7 +632,8 @@ async function runRefreshSession() {
 
 // 全量检查
 async function runFullCheck() {
-  const btn = document.getElementById('btn-full-check');
+  // 同时处理状态页和调试页的全量检查按钮
+  const btn = document.getElementById('btn-full-check') || document.getElementById('btn-full-check-status');
   const origText = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 检查中...'; }
   try {
@@ -832,14 +869,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // 探测标签页 - 内容脚本探测
   document.getElementById('btn-content-163')?.addEventListener('click', () => runPlanC('netease_163'));
   document.getElementById('btn-content-qq')?.addEventListener('click', () => runPlanC('qq'));
+  document.getElementById('btn-content-ustc')?.addEventListener('click', () => runPlanC('ustc'));
+  document.getElementById('btn-content-gmail')?.addEventListener('click', () => runPlanC('gmail'));
 
   // 同步会话
   document.getElementById('btn-sync-163')?.addEventListener('click', () => syncSession('netease_163'));
   document.getElementById('btn-sync-qq')?.addEventListener('click', () => syncSession('qq'));
   document.getElementById('btn-sync-ustc')?.addEventListener('click', () => syncSession('ustc'));
+  document.getElementById('btn-sync-gmail')?.addEventListener('click', () => syncSession('gmail'));
 
   // 全量检查
   document.getElementById('btn-full-check')?.addEventListener('click', runFullCheck);
+  document.getElementById('btn-full-check-status')?.addEventListener('click', runFullCheck);
 
   // Cookie 诊断
   document.getElementById('btn-diagnose-cookies')?.addEventListener('click', runCookieDiag);
@@ -848,6 +889,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-probe-163')?.addEventListener('click', () => runSWProbe('netease_163'));
   document.getElementById('btn-probe-qq')?.addEventListener('click', () => runSWProbe('qq'));
   document.getElementById('btn-probe-ustc')?.addEventListener('click', () => runSWProbe('ustc'));
+  document.getElementById('btn-probe-gmail')?.addEventListener('click', () => runSWProbe('gmail'));
   document.getElementById('btn-check-bridge')?.addEventListener('click', runCheckBridge);
   document.getElementById('btn-refresh-session')?.addEventListener('click', runRefreshSession);
   document.getElementById('btn-possibility')?.addEventListener('click', runPossibilityTest);

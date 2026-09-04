@@ -17,10 +17,11 @@
 
 import { createLogger } from '../shared/debug.js';
 import { getAccounts, getSettings, saveCheckResult, getCheckResults } from '../shared/storage.js';
-import { PROVIDERS, API_PATTERN_KEYS } from '../shared/constants.js';
+import { PROVIDERS, API_PATTERN_KEYS, PROVIDER_CONFIG } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
+import { probeGmail } from '../providers/provider-gmail.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -47,8 +48,38 @@ chrome.runtime.onInstalled.addListener((details) => {
     setupAlarms().catch(err => {
       logger.error(`注册定时检查闹钟失败: ${err.message}`);
     });
+    // 初始化 Gmail OAuth2
+    initGmailOAuth2();
   }
 });
+
+/**
+ * 初始化 Gmail OAuth2
+ */
+async function initGmailOAuth2() {
+  try {
+    const clientId = PROVIDER_CONFIG['gmail']?.oauth2?.clientId;
+    if (!clientId || clientId === 'YOUR_CLIENT_ID.apps.googleusercontent.com') {
+      logger.warn('Gmail Client ID 未配置，跳过 OAuth2 初始化');
+      return;
+    }
+    
+    const extensionId = chrome.runtime.id;
+    const scopes = PROVIDER_CONFIG['gmail'].oauth2.scopes.join(' ');
+    // Chrome Extension OAuth2 使用 chromiumapp.org 作为 redirect URI
+    const redirectUri = `https://${extensionId}.chromiumapp.org/`;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes)}&prompt=consent`;
+    
+    await chrome.identity.launchWebAuthFlow({
+      url: authUrl,
+      interactive: true,
+    });
+    
+    logger.info('Gmail OAuth2 初始化完成');
+  } catch (err) {
+    logger.warn(`Gmail OAuth2 初始化失败: ${err.message}`);
+  }
+}
 
 chrome.runtime.onStartup.addListener(() => {
   logger.info('浏览器启动，Service Worker 被唤醒');
@@ -152,6 +183,16 @@ async function handleMessage(message, sender) {
       // 探测后更新 badge（含当前所有账户的未读总和）
       await updateBadgeFromLatest();
       return result;
+    }
+
+    case 'gmailAuthorize': {
+      // Gmail OAuth2 授权流程
+      try {
+        const result = await chrome.identity.getAuthToken({ interactive: true });
+        return { success: !!result, token: result ? 'obtained' : null };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
 
     case 'openMailboxTab':
@@ -349,7 +390,7 @@ const PROVIDER_OPEN_URL = {
 const QQ_MAIL_DOMAINS = ['mail.qq.com', 'wx.mail.qq.com', 'exmail.qq.com'];
 
 // 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
-const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ, PROVIDERS.USTC]);
+const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ, PROVIDERS.USTC, PROVIDERS.GMAIL]);
 
 /**
  * QQ 邮箱主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com 或 mail.qq.com
@@ -998,6 +1039,9 @@ async function runSWApiProbe(provider, settings) {
       case PROVIDERS.USTC:
         providerResult = await probeUSTC(commonOpts);
         break;
+      case PROVIDERS.GMAIL:
+        providerResult = await probeGmail(commonOpts);
+        break;
       default:
         return { success: false, error: `Unsupported provider: ${provider}` };
     }
@@ -1191,9 +1235,85 @@ async function runAllChecks(context = {}) {
     methods: allResults.map(r => r.method || 'none').join(','),
   });
 
+  // 检查新邮件并发送通知
+  await checkNewEmails(allResults);
+
   await saveCheckResult(summary);
   await updateBadge(summary);
   return summary;
+}
+
+/**
+ * 检查新邮件并发送通知
+ */
+async function checkNewEmails(results) {
+  try {
+    const lastResults = await getCheckResults(10);
+    if (!lastResults.length) return;
+    
+    const lastSummary = lastResults.find(r => r.results && Array.isArray(r.results));
+    if (!lastSummary) return;
+    
+    const lastByEmail = {};
+    for (const r of lastSummary.results) {
+      if (r.email && typeof r.unreadCount === 'number') {
+        lastByEmail[r.email] = r.unreadCount;
+      }
+    }
+    
+    for (const result of results) {
+      if (!result.email || typeof result.unreadCount !== 'number') continue;
+      
+      const lastCount = lastByEmail[result.email] || 0;
+      const newCount = result.unreadCount;
+      
+      if (newCount > lastCount && result.authVerified) {
+        // 有新邮件，发送通知
+        await sendNewEmailNotification(result);
+      }
+    }
+  } catch (err) {
+    logger.warn(`新邮件检查失败: ${err.message}`);
+  }
+}
+
+/**
+ * 发送新邮件通知
+ */
+async function sendNewEmailNotification(result) {
+  try {
+    const provider = result.provider;
+    const email = result.email;
+    const unreadCount = result.unreadCount;
+    
+    // 获取提供商名称
+    const providerNames = {
+      'netease_163': '163邮箱',
+      'qq': 'QQ邮箱',
+      'ustc': '中科大',
+      'gmail': 'Gmail',
+    };
+    const providerName = providerNames[provider] || provider;
+    
+    // 构建通知内容
+    const notification = {
+      type: 'basic',
+      iconUrl: 'icons/icon48.png',
+      title: `📧 新邮件通知 - ${providerName}`,
+      message: `您有 ${unreadCount} 封未读邮件`,
+    };
+    
+    // 如果有最新邮件详情，显示详细信息
+    if (result.newEmails && result.newEmails.length > 0) {
+      const latest = result.newEmails[0];
+      notification.message = `新邮件: ${latest.subject}\n来自: ${latest.from}`;
+    }
+    
+    await chrome.notifications.create(`new-email-${Date.now()}`, notification);
+    logger.info(`已发送新邮件通知: ${providerName}, 未读数=${unreadCount}`);
+  } catch (err) {
+    logger.warn(`发送新邮件通知失败: ${err.message}`);
+  }
 }
 
 async function runSingleProvider(provider, context = {}) {

@@ -4,7 +4,14 @@
  * 此文件通过 chrome.scripting API 注入，可以绕过页面的 CSP 限制。
  */
 
-(function(params) {
+(function() {
+  // 从 chrome.runtime.getMessage 获取参数（MV3 方式）
+  const params = chrome?.runtime?.message || window.__probeFetchParams;
+  if (!params) {
+    console.error('[probe-fetch] 缺少参数');
+    return;
+  }
+  
   const { url, options, fnName } = params;
   const __r = (window.__mailProbeResult) || [];
   window[fnName] = null;
@@ -20,4 +27,4 @@
       const cb = window[fnName];
       if (cb) cb({ ok: false, error: String(err && err.message || err) });
     });
-})(chrome.scripting.getInjectionParameters ? chrome.scripting.getInjectionParameters() : arguments[0]);
+})();

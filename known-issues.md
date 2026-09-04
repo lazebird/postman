@@ -1,11 +1,11 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-04 ｜ 当前版本：v0.9.4
+> 最后更新：2026-09-04 ｜ 当前版本：v0.9.5
 
 ---
 
-## ✅ 已完成功能（v0.9.4）
+## ✅ 已完成功能（v0.9.5）
 
 ### 163 邮箱
 - ✅ SW API 探测成功
@@ -27,6 +27,13 @@
 - ✅ API：`GET http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}`
 - ✅ Response：JSON，包含各文件夹的 `unreadMessageCount` 字段
 - ⚠️ 需要用户在浏览器中先登录，然后点击「同步USTC」按钮
+
+### Gmail 邮箱
+- ✅ OAuth2 认证流程
+- ✅ Gmail REST API 集成（`gmail.readonly` scope）
+- ✅ 客户端 ID 已配置（测试账号）
+- ⚠️ 需要用户首次手动授权
+- 📌 新邮件通知：检测未读数变化并发送桌面通知（优先显示发件人+主题）
 
 ---
 
@@ -116,7 +123,7 @@ WASM 文件已加载，确认 QQ 新版使用 WebAssembly 技术。
 - [x] **163 SW API 打通**（已验证，unread=11）
 - [x] **QQ SW API 打通**（已验证，unread=7）
 - [x] **USTC SW API 打通**（已验证，unread=2）
-- [ ] Gmail REST API 接入（OAuth2 + `gmail.readonly` scope）
+- [x] **Gmail REST API 接入**（OAuth2 + gmail.readonly scope）
 - [ ] 接口失效自愈 / 热更规则
 - [ ] UI 完善（多账户统一显示、通知策略）
 

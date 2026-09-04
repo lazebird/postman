@@ -354,32 +354,36 @@
   /**
    * 在页面上下文内发同源 fetch
    */
-  function probeInPageFetch(url, options) {
-    return new Promise((resolve) => {
-      const fnName = '__mailProbeFetch_' + Date.now();
-      // 使用 chrome.scripting API 注入脚本，绕过 CSP
-      if (typeof chrome !== 'undefined' && chrome.scripting) {
-        chrome.scripting.executeScript({
-          target: { allFrames: false },
-          files: ['content/probe-fetch-inject.js'],
-          injectImmediately: true,
-          world: 'MAIN',
-        }).then(() => {
-          // 设置超时
-          const timer = setTimeout(() => {
-            delete window[fnName];
-            resolve({ ok: false, error: 'in-page fetch timeout', url });
-          }, 15000);
-          window[fnName] = (result) => {
-            clearTimeout(timer);
-            delete window[fnName];
-            resolve({ url, ...result });
-          };
-        }).catch(err => {
-          resolve({ ok: false, error: err.message, url });
-        });
-        return;
-      }
+   function probeInPageFetch(url, options) {
+     return new Promise((resolve) => {
+       const fnName = '__mailProbeFetch_' + Date.now();
+       // 使用 chrome.scripting API 注入脚本，绕过 CSP
+       if (typeof chrome !== 'undefined' && chrome.scripting) {
+         // 先设置回调函数
+         window[fnName] = (result) => {
+           resolve({ url, ...result });
+         };
+         // 设置参数
+         window.__probeFetchParams = { url, options, fnName };
+         // 注入脚本
+         chrome.scripting.executeScript({
+           target: { allFrames: false },
+           files: ['content/probe-fetch-inject.js'],
+           injectImmediately: true,
+           world: 'MAIN',
+         }).catch(err => {
+           delete window[fnName];
+           resolve({ ok: false, error: err.message, url });
+         });
+         // 设置超时
+         setTimeout(() => {
+           if (window[fnName]) {
+             delete window[fnName];
+             resolve({ ok: false, error: 'in-page fetch timeout', url });
+           }
+         }, 15000);
+         return;
+       }
       
       // 降级方案：inline 注入（可能被 CSP 阻止）
       const script = document.createElement('script');

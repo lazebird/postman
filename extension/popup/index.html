@@ -480,11 +480,11 @@
 
   <div class="content">
     <div class="tabs">
-      <div class="tab active" data-tab="overview">状态</div>
-      <div class="tab" data-tab="probe">探测</div>
+      <div class="tab" data-tab="overview">状态</div>
       <div class="tab" data-tab="settings">设置</div>
       <div class="tab" data-tab="stats">统计</div>
       <div class="tab" data-tab="logs">日志</div>
+      <div class="tab" data-tab="debug">调试</div>
     </div>
 
     <!-- ═══ Tab: 状态 ═══ -->
@@ -495,16 +495,21 @@
       <div id="status-no-account" style="display:none;">
         <div class="empty">未配置邮箱账户<br><span style="font-size:11px;">请前往 <b>设置</b> 标签添加</span></div>
       </div>
+      <!-- 全量检查按钮 -->
+      <div class="section" style="margin-top:8px;">
+        <button id="btn-full-check-status" class="warning" style="width:100%;">🚀 全量检查</button>
+      </div>
     </div>
 
-    <!-- ═══ Tab: 探测 ═══ -->
-    <div class="tab-content" id="tab-probe">
+    <!-- ═══ Tab: 调试 ═══ -->
+    <div class="tab-content" id="tab-debug">
       <!-- 同步会话 -->
       <div class="section">
         <div class="row">
             <button id="btn-sync-163" class="primary mini">🔑同步163</button>
             <button id="btn-sync-qq" class="primary mini">🔑同步QQ</button>
             <button id="btn-sync-ustc" class="primary mini">🔑同步USTC</button>
+            <button id="btn-sync-gmail" class="primary mini">🔑同步Gmail</button>
           </div>
         <div class="hint">打开邮箱页 → 提取会话令牌(sid) → 缓存供后台检查</div>
       </div>
@@ -514,7 +519,8 @@
         <div class="row">
           <button id="btn-content-163" class="success">📥 未读数·163</button>
           <button id="btn-content-qq" class="success">📥 未读数·QQ</button>
-          <button id="btn-full-check" class="warning">🚀 全量检查</button>
+          <button id="btn-content-ustc" class="success">📥 未读数·USTC</button>
+          <button id="btn-content-gmail" class="success">📥 未读数·Gmail</button>
         </div>
         <div class="hint">若未读为空：请在邮箱中打开「收件箱」后重试</div>
       </div>
@@ -527,24 +533,25 @@
         <div class="collapsible-content" id="advanced-probe">
           <div class="divider"></div>
           <div class="row">
-<button id="btn-probe-163" class="secondary mini">探测163</button>
-<button id="btn-probe-qq" class="secondary mini">探测QQ</button>
-<button id="btn-probe-ustc" class="secondary mini">探测USTC</button>
+            <button id="btn-probe-163" class="secondary mini">探测163</button>
+            <button id="btn-probe-qq" class="secondary mini">探测QQ</button>
+            <button id="btn-probe-ustc" class="secondary mini">探测USTC</button>
+            <button id="btn-probe-gmail" class="secondary mini">探测Gmail</button>
             <button id="btn-check-bridge" class="secondary mini">检查认证</button>
             <button id="btn-refresh-session" class="secondary mini">🔄刷新会话</button>
             <button id="btn-possibility" class="secondary mini" style="width:100%;">🧪 全可能性后台测试</button>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- 结果区 -->
-      <div id="probe-result" class="action-result" style="display:none;margin-bottom:8px;">
-        <div class="result-header">
-          <span class="result-title" id="probe-result-title"></span>
-          <button id="btn-copy-result" class="btn-copy">📋</button>
-        </div>
-        <pre id="probe-result-text"></pre>
+    <!-- 结果展示区域 -->
+    <div id="probe-result" class="action-result" style="display:none;margin-bottom:8px;">
+      <div class="result-header">
+        <span class="result-title" id="probe-result-title"></span>
+        <button id="btn-copy-result" class="btn-copy" title="复制结果">📋</button>
       </div>
+      <pre id="probe-result-text"></pre>
     </div>
 
     <!-- ═══ Tab: 设置 ═══ -->
@@ -552,12 +559,13 @@
       <!-- 账户管理 -->
       <div class="section">
         <div class="form-inline">
-          <select id="provider-select" style="width:90px;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
-            <option value="netease_163">163邮箱</option>
-            <option value="qq">QQ邮箱</option>
-            <option value="ustc">中科大</option>
-          </select>
-          <input type="text" id="email-input" placeholder="邮箱地址" style="flex:1;min-width:0;padding:4px 8px;font-size:11px;border:1px solid #ced4da;border-radius:4px;">
+          <input type="text" id="email-input" placeholder="输入邮箱地址，如 user@163.com" style="flex:1;min-width:0;padding:4px 8px;font-size:11px;border:1px solid #ced4da;border-radius:4px;" list="email-suggestions" autocomplete="off">
+          <datalist id="email-suggestions">
+            <option value="@163.com" label="163邮箱">
+            <option value="@qq.com" label="QQ邮箱">
+            <option value="@ustc.edu.cn" label="中科大邮箱">
+            <option value="@gmail.com" label="Gmail">
+          </datalist>
           <button id="btn-add-account" class="mini">添加</button>
         </div>
         <div id="settings-accounts-list" class="accounts-manage">

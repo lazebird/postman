@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Edge Mail Notifier",
-  "version": "0.9.4",
+  "name": "Mail Notifier",
+  "version": "0.9.5",
   "description": "纯后台检查：Cookie+API 独立探测，API 模式自动捕获学习(含所有frame/sendBeacon/EventSource)；拦截器提前至 document_start 捕获 SPA 初始 API;含跳转链路落点日志(多级跳转→内容页)，绝不自动打开标签",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -11,15 +11,36 @@
     "tabs",
     "cookies",
     "scripting",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "identity"
   ],
   "host_permissions": [
+    "https://gmail.googleapis.com/*",
     "https://mail.163.com/*",
     "https://*.163.com/*",
     "https://mail.qq.com/*",
     "https://*.qq.com/*",
     "http://mail.ustc.edu.cn/*",
     "https://mail.ustc.edu.cn/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "oauth2": {
+    "client_id": "428257971477-hgals4i0e445jdl1ame35i8ir3nll9ua.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly"
+    ]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
   ],
   "background": {
     "service_worker": "background/service-worker.js",

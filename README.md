@@ -110,7 +110,8 @@
 - [x] **163 SW API 打通**（实测 unread=11）
 - [x] **QQ SW API 打通**（实测 unread=7）
 - [x] **USTC SW API 打通**（实测 unread=2）
-- [ ] Gmail REST API 接入
+- [x] **Gmail OAuth2 接入**（测试账号已配置）
+- [x] **新邮件通知系统**（检测变化并发送桌面通知）
 - [ ] 完整 UI 与生产功能
 - [ ] 多邮箱统一通知
 

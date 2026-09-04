@@ -260,7 +260,14 @@ export const PROVIDER_CONFIG = {
     entryPoints: [],
     sessionEndpoints: [],
     probeEndpoints: [],
-    contentDomains: [],
+    contentDomains: ['mail.google.com'],
+    // Gmail OAuth2 配置
+    oauth2: {
+      clientId: '428257971477-hgals4i0e445jdl1ame35i8ir3nll9ua.apps.googleusercontent.com',
+      scopes: [
+        'https://www.googleapis.com/auth/gmail.readonly',
+      ],
+    },
   },
 };
 
@@ -279,12 +286,13 @@ export const CHECK_INTERVALS = [
       logLevel: 'DEBUG',
       // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
       checkMode: 'hybrid',
-  // 每个提供商启用的探测接口名
-  enabledEndpoints: {
-    netease_163: ['js6_rpc_list'],
-    qq: ['wx_maillist'],
-    ustc: ['ustc_getallfolders'],
-  },
+   // 每个提供商启用的探测接口名
+   enabledEndpoints: {
+     netease_163: ['js6_rpc_list'],
+     qq: ['wx_maillist'],
+     ustc: ['ustc_getallfolders'],
+     gmail: ['gmail_api'],
+   },
     };
 
 // 存储键
