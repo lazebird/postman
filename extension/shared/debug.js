@@ -46,7 +46,7 @@ function persistLog(entry) {
       try {
         await chrome.storage.session.get(LOG_KEY);
         sessionAvailable = true;
-      } catch (e) {
+      } catch {
         sessionAvailable = false;
       }
     }
@@ -57,15 +57,12 @@ function persistLog(entry) {
     .then(probe)
     .then(() => {
       if (sessionAvailable === false) return;
-      return chrome.storage.session.get(LOG_KEY)
-        .then(({ [LOG_KEY]: list = [] }) => {
-          const arr = Array.isArray(list) ? list : [];
-          arr.unshift(entry); // 最新放头部
-          const trimmed = arr.length > MAX_MEMORY_LOGS
-            ? arr.slice(0, MAX_MEMORY_LOGS)
-            : arr;
-          return chrome.storage.session.set({ [LOG_KEY]: trimmed });
-        });
+      return chrome.storage.session.get(LOG_KEY).then(({ [LOG_KEY]: list = [] }) => {
+        const arr = Array.isArray(list) ? list : [];
+        arr.unshift(entry); // 最新放头部
+        const trimmed = arr.length > MAX_MEMORY_LOGS ? arr.slice(0, MAX_MEMORY_LOGS) : arr;
+        return chrome.storage.session.set({ [LOG_KEY]: trimmed });
+      });
     })
     .catch(() => {
       // session storage 不可用时静默失败（不影响主流程）
@@ -89,7 +86,7 @@ class DebugLogger {
       const { settings = {} } = await chrome.storage.local.get('settings');
       const level = settings.logLevel || 'INFO';
       return LOG_LEVELS[level] ?? LOG_LEVELS.INFO;
-    } catch (e) {
+    } catch {
       return LOG_LEVELS.INFO;
     }
   }
@@ -101,7 +98,7 @@ class DebugLogger {
     let currentLevel = LOG_LEVELS.INFO;
     try {
       currentLevel = await this._getLogLevel();
-    } catch (e) {
+    } catch {
       currentLevel = LOG_LEVELS.INFO;
     }
     if (LOG_LEVELS[level] < currentLevel) return;
@@ -124,7 +121,7 @@ class DebugLogger {
       } else {
         console.log(prefix, entry.message, entry.detail || '');
       }
-    } catch (e) {
+    } catch {
       // console 不可用（理论上不会发生）
     }
 
@@ -138,10 +135,18 @@ class DebugLogger {
     persistLog(entry);
   }
 
-  debug(msg, detail) { this._log('DEBUG', msg, detail); }
-  info(msg, detail) { this._log('INFO', msg, detail); }
-  warn(msg, detail) { this._log('WARN', msg, detail); }
-  error(msg, detail) { this._log('ERROR', msg, detail); }
+  debug(msg, detail) {
+    this._log('DEBUG', msg, detail);
+  }
+  info(msg, detail) {
+    this._log('INFO', msg, detail);
+  }
+  warn(msg, detail) {
+    this._log('WARN', msg, detail);
+  }
+  error(msg, detail) {
+    this._log('ERROR', msg, detail);
+  }
 }
 
 /**
@@ -150,16 +155,20 @@ class DebugLogger {
 function safeStringify(obj) {
   try {
     const seen = new Set();
-    return JSON.stringify(obj, (key, value) => {
-      if (typeof value === 'object' && value !== null) {
-        if (seen.has(value)) {
-          return '[Circular]';
+    return JSON.stringify(
+      obj,
+      (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            return '[Circular]';
+          }
+          seen.add(value);
         }
-        seen.add(value);
-      }
-      return value;
-    }, 2);
-  } catch (e) {
+        return value;
+      },
+      2
+    );
+  } catch {
     return String(obj);
   }
 }

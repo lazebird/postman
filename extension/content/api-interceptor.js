@@ -4,7 +4,7 @@
  * 此文件通过 chrome.scripting API 注入，可以绕过页面的 CSP 限制。
  */
 
-(function() {
+(function () {
   if (window.__mailApiInterceptorInstalled__) return;
   window.__mailApiInterceptorInstalled__ = true;
 
@@ -17,14 +17,23 @@
       const parsed = new URL(u);
       const host = parsed.hostname;
       if (!/(^|\.)(163\.com|qq\.com|ustc\.edu\.cn)$/i.test(host)) return false;
-    } catch (e) { return false; }
+    } catch {
+      return false;
+    }
     if (/\.(css|js|png|jpe?g|gif|svg|ico|woff2?|ttf|eot|map)([?#]|$)/i.test(u)) return false;
-    if (/(rescdn|qpic|gtimg|alicdn|gslb|exmailcdn|static\.|\.css|\.js|\.png|\.gif|fonts|images?|comm|skin|style)/i.test(u)) return false;
+    if (
+      /(rescdn|qpic|gtimg|alicdn|gslb|exmailcdn|static\.|\.css|\.js|\.png|\.gif|fonts|images?|comm|skin|style)/i.test(
+        u
+      )
+    )
+      return false;
     return true;
   }
 
   function reportCapture(capture) {
-    try { window.postMessage({ source: '__mailApiCapture__', capture }, '*'); } catch (e) {}
+    try {
+      window.postMessage({ source: '__mailApiCapture__', capture }, '*');
+    } catch {}
   }
 
   function record(entry) {
@@ -50,13 +59,13 @@
         headers,
         timestamp: Date.now(),
       });
-    } catch (e) {}
+    } catch {}
   }
 
   // 拦截 fetch
   const origFetch = window.fetch;
   if (origFetch) {
-    window.fetch = function(...args) {
+    window.fetch = function (...args) {
       try {
         const arg0 = args[0];
         let url = typeof arg0 === 'string' ? arg0 : (arg0 && arg0.url) || '';
@@ -66,12 +75,15 @@
         let headers = {};
         if (opts.headers) {
           try {
-            if (opts.headers instanceof Headers) opts.headers.forEach((v, k) => { headers[k] = v; });
+            if (opts.headers instanceof Headers)
+              opts.headers.forEach((v, k) => {
+                headers[k] = v;
+              });
             else if (typeof opts.headers === 'object') headers = { ...opts.headers };
-          } catch (e) {}
+          } catch {}
         }
         record({ type: 'fetch', url, method, body, headers });
-      } catch (e) {}
+      } catch {}
       return origFetch.apply(this, args);
     };
   }
@@ -79,24 +91,34 @@
   // 拦截 XHR
   const origOpen = XMLHttpRequest.prototype.open;
   const origSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function(method, url) {
-    try { this.__mailApiUrl = new URL(url, location.href).href; }
-    catch (e) { this.__mailApiUrl = url; }
+  XMLHttpRequest.prototype.open = function (method, url) {
+    try {
+      this.__mailApiUrl = new URL(url, location.href).href;
+    } catch {
+      this.__mailApiUrl = url;
+    }
     this.__mailApiMethod = method || 'GET';
     return origOpen.apply(this, arguments);
   };
-  XMLHttpRequest.prototype.send = function(body) {
-    try { record({ type: 'xhr', url: this.__mailApiUrl || '', method: this.__mailApiMethod || 'GET', body }); }
-    catch (e) {}
+  XMLHttpRequest.prototype.send = function (body) {
+    try {
+      record({
+        type: 'xhr',
+        url: this.__mailApiUrl || '',
+        method: this.__mailApiMethod || 'GET',
+        body,
+      });
+    } catch {}
     return origSend.apply(this, arguments);
   };
 
   // 拦截 sendBeacon
   const origBeacon = navigator.sendBeacon && navigator.sendBeacon.bind(navigator);
   if (origBeacon) {
-    navigator.sendBeacon = function(url, data) {
-      try { record({ type: 'beacon', url, method: 'POST', body: data && String(data) }); }
-      catch (e) {}
+    navigator.sendBeacon = function (url, data) {
+      try {
+        record({ type: 'beacon', url, method: 'POST', body: data && String(data) });
+      } catch {}
       return origBeacon(url, data);
     };
   }
@@ -105,10 +127,12 @@
   try {
     const OrigES = window.EventSource;
     if (OrigES) {
-      window.EventSource = function(url, cfg) {
-        try { record({ type: 'eventsource', url, method: 'GET', body: null }); } catch (e) {}
+      window.EventSource = function (url, cfg) {
+        try {
+          record({ type: 'eventsource', url, method: 'GET', body: null });
+        } catch {}
         return new OrigES(url, cfg);
       };
     }
-  } catch (e) {}
+  } catch {}
 })();

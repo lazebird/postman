@@ -143,7 +143,14 @@
   - 只读检查：`./scripts/lint.sh --check`
   - 亦可通过 `npm run lint` / `npm run format` 分别调用。
 - ESLint 配置 `eslint.config.mjs`：`no-undef` 保持 `error`（可捕获「漏导入即调用」类缺陷），
-  对遗留代码常见且语义无害的空 `catch` 降级为 `warn`，并关闭 `no-useless-escape` 以免误改工作正常的正则。
+  对遗留代码常见且语义无害的空 `catch` 降级为 `warn`，并关闭 `no-useless-escape` 以免误改工作正常的正则；
+  `no-unused-vars` 忽略 catch 捕获参数，消除空 `catch(e)` 的噪音告警。
+- **规则与工具版本固定**，避免不同开发环境因版本/配置差异导致规范不一致、出现大面积 lint 问题：
+  - `devDependencies` 中的 `eslint`、`prettier` 使用**精确版本**（无 `^`），并提交 `package-lock.json`，
+    保证 `npm ci` / `npm install` 在任何机器上解析到完全一致的版本。
+  - `.nvmrc` 固定 Node 20，`package.json` 声明 `engines.node` 与 CI（`node:20`）保持一致。
+  - `.editorconfig` 统一所有编辑器的缩进/换行；`.gitattributes` 强制文本文件使用 LF，规避 Windows 换行差异。
+  - `.vscode/settings.json` 开启保存自动格式化（Prettier + ESLint），并推荐对应扩展（`.vscode/extensions.json`）。
 - 代码结构原则（数据逻辑分离 / 子模块隔离）：
   - **sid 会话缓存**统一收敛到 `extension/shared/session-cache.js`，`service-worker` 与各 provider 不再各自硬编码存储键与过期逻辑。
   - 其余通用工具按职责拆分在 `extension/shared/`，各 provider 仅依赖共享接口，降低耦合。

@@ -42,7 +42,9 @@ import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants.js';
  */
 export async function getAccounts() {
   try {
-    const { [STORAGE_KEYS.ACCOUNTS]: accounts = [] } = await chrome.storage.local.get(STORAGE_KEYS.ACCOUNTS);
+    const { [STORAGE_KEYS.ACCOUNTS]: accounts = [] } = await chrome.storage.local.get(
+      STORAGE_KEYS.ACCOUNTS
+    );
     return Array.isArray(accounts) ? accounts : [];
   } catch (e) {
     console.error('[storage] getAccounts failed:', e.message);
@@ -64,7 +66,9 @@ export async function setAccounts(accounts) {
  */
 export async function getSettings() {
   try {
-    const { [STORAGE_KEYS.SETTINGS]: settings = {} } = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+    const { [STORAGE_KEYS.SETTINGS]: settings = {} } = await chrome.storage.local.get(
+      STORAGE_KEYS.SETTINGS
+    );
     const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
     // 关键：始终合并所有默认启用的端点，确保升级后新端点可用。
     // 注意：必须逐端点合并（union），不能直接 {...defaults, ...user} 整体覆盖，
@@ -72,10 +76,7 @@ export async function getSettings() {
     // 修复：将每个 provider 的用户选择与默认列表做并集。
     const defaultEndpoints = DEFAULT_SETTINGS.enabledEndpoints || {};
     const userEndpoints = settings?.enabledEndpoints || {};
-    const allProviders = new Set([
-      ...Object.keys(defaultEndpoints),
-      ...Object.keys(userEndpoints),
-    ]);
+    const allProviders = new Set([...Object.keys(defaultEndpoints), ...Object.keys(userEndpoints)]);
     const mergedEndpoints = {};
     for (const provider of allProviders) {
       const defaults = defaultEndpoints[provider] || [];
@@ -107,7 +108,9 @@ export async function setSettings(settings) {
  */
 export async function saveCheckResult(result) {
   try {
-    const { [STORAGE_KEYS.CHECK_RESULTS]: results = [] } = await chrome.storage.local.get(STORAGE_KEYS.CHECK_RESULTS);
+    const { [STORAGE_KEYS.CHECK_RESULTS]: results = [] } = await chrome.storage.local.get(
+      STORAGE_KEYS.CHECK_RESULTS
+    );
     // 避免无限增长：最多保留 100 条
     const newResults = [result, ...(Array.isArray(results) ? results : [])].slice(0, 100);
     await chrome.storage.local.set({ [STORAGE_KEYS.CHECK_RESULTS]: newResults });
@@ -123,7 +126,9 @@ export async function saveCheckResult(result) {
  */
 export async function getCheckResults(limit = 20) {
   try {
-    const { [STORAGE_KEYS.CHECK_RESULTS]: results = [] } = await chrome.storage.local.get(STORAGE_KEYS.CHECK_RESULTS);
+    const { [STORAGE_KEYS.CHECK_RESULTS]: results = [] } = await chrome.storage.local.get(
+      STORAGE_KEYS.CHECK_RESULTS
+    );
     return (Array.isArray(results) ? results : []).slice(0, limit);
   } catch (e) {
     console.error('[storage] getCheckResults failed:', e.message);
@@ -135,7 +140,6 @@ export async function getCheckResults(limit = 20) {
  * 会话级数据（chrome.storage.session）
  * —— 浏览器重启/扩展更新会清空；属临时数据，丢失不影响功能
  * ============================================================ */
-
 
 /**
  * 读取调试日志（会话级）
@@ -159,7 +163,7 @@ export async function getMemoryLogs(limit = 100) {
   try {
     const { getMemoryLogs: getMem } = await import('./debug.js');
     return typeof getMem === 'function' ? getMem(limit) : [];
-  } catch (e) {
+  } catch {
     return [];
   }
 }
