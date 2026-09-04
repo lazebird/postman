@@ -1,7 +1,7 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-04 ｜ 当前版本：v0.9.5
+> 最后更新：2026-09-04 ｜ 当前版本：v0.9.6
 
 ---
 
@@ -35,6 +35,41 @@
 - ⚠️ 需要用户首次手动授权
 - 📌 新邮件通知：检测未读数变化并发送桌面通知（优先显示发件人+主题）
 
+---
+
+## 🟢 P0：Gmail 在 Microsoft Edge 同步失败——chrome.identity 不受支持（v0.9.6 修复）
+
+### 问题描述
+在 Microsoft Edge 中触发 Gmail 同步/探测时返回：
+
+```json
+{ "success": false, "error": "This API is not supported on Microsoft Edge. ..." }
+```
+
+### 根因
+- Gmail 走官方 REST API + OAuth2，原实现每次后台检查都调用 `chrome.identity.getAuthToken`。
+- **`chrome.identity`（Google OAuth 集成）在 Microsoft Edge 中不受支持**，任何调用都会抛上述引擎错误。
+  这是 Edge 平台限制，并非代码 Bug。错误链接（linkid=2186907）指向微软的"扩展不支持 API"文档。
+
+### 解决方案（v0.9.6）
+1. **token 持久化缓存（符合 AGENTS 规则 3）**：授权成功后把 access_token 写入 `chrome.storage.local`。
+   后台（alarm）检查优先读缓存，不再每次触碰 `chrome.identity` —— 消除了 Edge 上每轮后台检查必失败的问题。
+2. **浏览器感知**：`provider-gmail.js` 新增 `detectBrowser()`。Edge 上不再盲目调用 `chrome.identity`，
+   而是返回可读、可操作的中文提示。
+3. **跨浏览器复用**：若用户曾在 Chrome 完成过 Gmail 授权，缓存的 token 在 Edge 上可直接复用，
+   Edge 后台检查即可正常读取未读数。
+4. **去掉安装/更新时自动弹授权页**：`initGmailOAuth2` 不再于 onInstalled 时以 `interactive:true`
+   触发 `launchWebAuthFlow`（会干扰用户、且在 Edge 必然失败）。授权统一由用户在 Popup「同步Gmail」主动触发。
+
+### 修改文件
+- `extension/providers/provider-gmail.js` - 新增 token 缓存 / 浏览器检测 / 可读降级
+- `extension/background/service-worker.js` - `gmailAuthorize` 走 `authorizeGmail`；初始化去自动弹授权
+- `extension/shared/constants.js` - 新增 `GMAIL_TOKEN_KEYS`
+
+### 剩余边界
+- **Edge 首次授权**仍受限于 `chrome.identity` 缺失：Edge 上无现成 token 时无法就地弹出 Google 授权。
+  完整支持需为 Edge 走"手动 OAuth2 隐式授权（tabs 捕获 redirect token）"，并需 Web 类型 OAuth client；
+  属后续可选增强。
 ---
 
 ## 🔧 CSP 问题修复（v0.9.4）

@@ -55,6 +55,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
+
 chrome.runtime.onStartup.addListener(() => {
   logger.info('浏览器启动，Service Worker 被唤醒');
   setupAlarms().catch(err => {
@@ -181,15 +182,21 @@ async function handleMessage(message, sender) {
       // 内容脚本上报：如果有 sid，缓存下来供 SW 后续独立调用
       const sid = message.detail?.sid;
       const provider = message.detail?.provider ||
-                       (message.detail?.host?.includes('qq.com') ? 'qq' : 'netease_163');
+                       (message.detail?.host?.includes('qq.com') ? 'qq' :
+                        message.detail?.host?.includes('ustc.edu.cn') ? 'ustc' : 'netease_163');
       if (sid) {
         try {
-          const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
+          // 根据提供商使用正确的存储键
+          let sidKey = 'sid_163';
+          if (provider === 'qq') sidKey = 'sid_qq';
+          else if (provider === 'ustc') sidKey = 'sid_ustc';
+          else if (provider === 'gmail') sidKey = 'sid_gmail';
+
           await chrome.storage.local.set({
-            [key]: sid,
-            [`${key}_expiry`]: Date.now() + SID_TTL_MS,
+            [sidKey]: sid,
+            [`${sidKey}_expiry`]: Date.now() + SID_TTL_MS,
           });
-          logger.info(`从内容脚本缓存 ${provider} sid (来自页面 URL)`);
+          logger.info(`从内容脚本缓存 ${provider} sid: ${sid.substring(0, 8)}...`);
         } catch (e) {
           logger.warn(`缓存 ${provider} sid 失败: ${e.message}`);
         }
@@ -1272,7 +1279,7 @@ async function sendNewEmailNotification(result) {
     // 构建通知内容
     const notification = {
       type: 'basic',
-      iconUrl: 'icons/icon48.png',
+      iconUrl: 'icons/icon-ok-48.png',
       title: `📧 新邮件通知 - ${providerName}`,
       message: `您有 ${unreadCount} 封未读邮件`,
     };
@@ -1479,53 +1486,92 @@ async function setupAlarms() {
   }
 }
 
-async function updateBadge(summary) {
-  if (!summary || !summary.results) return;
+// ===== 工具栏图标状态（图标颜色反映插件运行状态）=====
+// 资源: extension/icons/icon-{ok|err|off}-{16|32|48|128}.png
+//   ok  = 正常（绿）  ：至少一个账户正常读取到未读/已授权
+//   err = 错误（红）  ：存在真实检查错误或异常
+//   off = 停用/不可用（灰）：未配置账户，或会话全部失效需手动同步
+const TOOLBAR_ICON_SIZES = [16, 32, 48, 128];
+const TOOLBAR_STATE_COLORS = { ok: '#26A65B', err: '#E74C3C', off: '#95A5A6' };
+
+function iconPaths(state) {
+  const paths = {};
+  for (const s of TOOLBAR_ICON_SIZES) paths[s] = 'icons/icon-' + state + '-' + s + '.png';
+  return paths;
+}
+
+/** 切换工具栏图标为指定状态颜色 */
+async function applyToolbarIcon(state) {
   try {
-    // 每个账户的未读数求和（badge 应显示所有账户未读总和）
-    let totalUnread = 0;
-    let hasUnreadData = false;
-    let anyAuthBlocked = false;
-    let anyNeedsAuth = false;
-    let hasAuth = false;
-
-    const allResults = [];
-    for (const result of summary.results) {
-      allResults.push(result);
-      if (Array.isArray(result.results)) {
-        allResults.push(...result.results);
-      }
-    }
-
-    // 去重：同 email+provider 只取最后一个（最新的）
-    const seen = new Set();
-    for (const result of allResults) {
-      const key = result.email || result.provider || '';
-      if (result.email && seen.has(key)) continue;
-      if (result.email) seen.add(key);
-
-      if (typeof result.unreadCount === 'number') {
-        totalUnread += result.unreadCount;
-        hasUnreadData = true;
-      }
-      if (result.needsAuth === true) anyNeedsAuth = true;
-      if (result.authBlocked === true) anyAuthBlocked = true;
-      if (result.authVerified === true) hasAuth = true;
-    }
-
-    const badgeText = hasUnreadData && totalUnread > 0 ? String(totalUnread) : '';
-    await chrome.action.setBadgeText({ text: badgeText });
-
-    // badge 颜色逻辑：有账户需授权 → 橙色；全部失败 → 红色；正常 → 绿色
-    let color = '#4CAF50';
-    if (anyNeedsAuth || anyAuthBlocked) color = '#FF9800';
-    if (!hasAuth && allResults.length > 0) color = '#F44336';
-    await chrome.action.setBadgeBackgroundColor({ color });
+    await chrome.action.setIcon({ path: iconPaths(state) });
   } catch (err) {
-    logger.debug(`Badge 更新失败: ${err.message}`);
+    logger.debug('设置工具栏图标失败: ' + err.message);
   }
 }
 
+/** 账户结果是否「正常」：能读到未读或已授权 */
+function accountNormal(r) {
+  return r && (r.authVerified === true || typeof r.unreadCount === 'number');
+}
+/** 账户是否「不可用/需授权」：会话失效、需打开收件箱或需手动同步 */
+function accountNeedAuth(r) {
+  return r && (r.needsAuth === true || r.needsInboxPage === true ||
+               r.loginRequired === true || r.sidExpired === true || r.needsSid === true);
+}
+/** 账户是否「真实错误」：检查抛出异常/明确失败，且并非单纯的"需授权"问题 */
+function accountError(r) {
+  return r && (r.success === false ||
+               (r.allFailed === true && r.needsAuth !== true) ||
+               (r.error && !accountNeedAuth(r)));
+}
+
+/**
+ * 由聚合的账户级结果推算出整体运行状态：
+ *   有真实错误 → err(红) ；有正常账户 → ok(绿) ；否则 → off(灰/需同步)
+ */
+function computeIconState(allResults) {
+  const list = Array.isArray(allResults) ? allResults : [];
+  if (list.length === 0) return 'off';
+  if (list.some(accountError)) return 'err';
+  if (list.some(accountNormal)) return 'ok';
+  return 'off';
+}
+
+async function updateBadge(summary) {
+  if (!summary) return;
+  const rawResults = summary.results || [];
+  const allResults = [];
+  for (const result of rawResults) {
+    allResults.push(result);
+    if (Array.isArray(result.results)) allResults.push(...result.results);
+  }
+  // 去重：同 email+provider 只取最新一条
+  const seen = new Set();
+  const uniq = [];
+  for (const result of allResults) {
+    const key = result.email || result.provider || '';
+    if (result.email && seen.has(key)) continue;
+    if (result.email) seen.add(key);
+    uniq.push(result);
+  }
+  try {
+    // badge 文本：所有账户未读总数
+    let totalUnread = 0;
+    let hasUnreadData = false;
+    for (const r of uniq) {
+      if (typeof r.unreadCount === 'number') { totalUnread += r.unreadCount; hasUnreadData = true; }
+    }
+    const badgeText = hasUnreadData && totalUnread > 0 ? String(totalUnread) : '';
+    await chrome.action.setBadgeText({ text: badgeText });
+
+    // 整体运行状态 → 红(错误)/绿(正常)/灰(停用或不可用)
+    const state = computeIconState(uniq);
+    await applyToolbarIcon(state);
+    await chrome.action.setBadgeBackgroundColor({ color: TOOLBAR_STATE_COLORS[state] });
+  } catch (err) {
+    logger.debug('工具栏状态更新失败: ' + err.message);
+  }
+}
 /**
  * 从 storage 最近结果重建 badge（用于手动探测等非全量检查场景）
  */
@@ -1550,7 +1596,13 @@ async function updateBadgeFromLatest() {
         }
       }
     }
-    if (accountResults.length === 0) return;
+    if (accountResults.length === 0) {
+      // 无任何账户/检查记录 → 置为「停用/不可用」灰色图标
+      await applyToolbarIcon('off');
+      await chrome.action.setBadgeText({ text: '' });
+      await chrome.action.setBadgeBackgroundColor({ color: TOOLBAR_STATE_COLORS.off });
+      return;
+    }
     const summary = {
       results: accountResults,
       successfulChecks: accountResults.filter(r => r.authVerified).length,
@@ -1565,3 +1617,6 @@ async function updateBadgeFromLatest() {
 
 logger.info('Service Worker 启动');
 setupAlarms().catch(err => { logger.error(`注册闹钟失败: ${err.message}`); });
+// 启动/安装后按最近一次检查结果刷新工具栏图标颜色与未读徽标
+updateBadgeFromLatest().catch(() => {});
+
