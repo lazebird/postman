@@ -854,6 +854,33 @@ async function runFullCheck() {
   try {
     const result = await sendMessage({ type: 'runCheck' });
     showProbeResult('全量检查结果', result);
+
+    // 手动点击「全量检查」按钮同样属用户主动显式操作（AGENTS 规则 1 允许弹授权）。
+    // 若任一 Gmail 账户需要授权（无有效令牌），应一并弹出 OAuth 授权窗，授权成功后
+    // 再重跑一次全量，把 Gmail 的未读数也纳入结果，避免「需授权」却无从处理。
+    const gmailNeedAuth = (result?.results || []).find(
+      (r) => r.provider === 'gmail' && r.needsAuth === true
+    );
+    if (gmailNeedAuth) {
+      showProbeResult('全量检查', {
+        success: false,
+        needsAuth: true,
+        message: `Gmail 账户 ${gmailNeedAuth.email || '（未授权）'} 需要授权，正在弹出 Google 授权窗口，请在弹出的页面中确认...`,
+      });
+      const auth = await sendMessage({ type: 'gmailAuthorize' });
+      if (auth?.success) {
+        // 授权成功：重跑全量，让刚授权的 Gmail 也能读到未读数
+        const result2 = await sendMessage({ type: 'runCheck' });
+        showProbeResult('全量检查结果', result2);
+      } else {
+        showProbeResult('Gmail 授权未完成', {
+          success: false,
+          message: 'Gmail 授权失败或已取消，请检查下方原因后重试',
+          error: auth?.error || '未知原因',
+          needsManual: auth?.needsManual === true,
+        });
+      }
+    }
     refreshStatus();
   } catch (err) {
     showProbeResult('全量检查失败', { success: false, error: err.message });
