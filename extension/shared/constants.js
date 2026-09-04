@@ -70,13 +70,14 @@ export const PROVIDER_CONFIG = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': '*/*',
+          'Accept': 'text/javascript',
           'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
           'Origin': 'https://mail.163.com',
         },
         requiresSid: true,
-        bodyTemplate: 'var=@{type:"listMessages",ver:0,pageSize:1,start:0,folderId:"1",mailto:"",readFlag:"2"}',
-        description: 'RPC - 获取未读消息列表',
+        bodyTemplate: 'var=<?xml version="1.0"?>><object><object name="filter"><string name="sentDate">2:</string></object><string name="order">date</string><boolean name="desc">true</boolean><array name="fids"><int>1</int><int>18</int><int>3685900</int></array><boolean name="skipLockedFolders">true</boolean><int name="limit">200</int><string name="mrcid">{mrcid}</string></object>',
+        isUrlEncoded: true,
+        description: 'RPC - 获取未读消息列表（真实格式，body 需 URL 编码）',
       },
       {
         name: 'js6_rpc_getfolder',
@@ -154,15 +155,15 @@ export const PROVIDER_CONFIG = {
     probeEndpoints: [
       // ===== wx.mail.qq.com 新版 SPA 接口（优先）=====
       {
-        name: 'wx_readdata',
-        url: 'https://wx.mail.qq.com/cgi-bin/readdata?sid={sid}&t=inbox',
+        name: 'wx_maillist',
+        url: 'https://wx.mail.qq.com/list/maillist?sid={sid}&dir=1&dirid=1&func=1&sort_type=1&sort_direction=1&page_now=0&page_size=50&enable_topmail=true',
         method: 'GET',
         headers: {
           'Referer': 'https://wx.mail.qq.com/',
           'Accept': 'application/json, text/plain, */*',
         },
         requiresSid: true,
-        description: '新网页版 - 读取收件箱数据',
+        description: '新网页版 - 收件箱列表（真实格式，返回 unread_num）',
       },
       {
         name: 'wx_readindex',
@@ -243,18 +244,18 @@ export const CHECK_INTERVALS = [
   { label: '30分钟', value: 30 },
 ];
 
-// 默认设置
-export const DEFAULT_SETTINGS = {
-  checkIntervalMinutes: 5,
-  logLevel: 'DEBUG',
-  // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
-  checkMode: 'hybrid',
-  // 每个提供商启用的探测接口名
-  enabledEndpoints: {
-    netease_163: ['js6_rpc_list', 'js6_rpc_getfolder', 'js6_rpc_getunread', 'js6_sys_getfolder'],
-    qq: ['wx_readdata', 'wx_readindex', 'wx_mail_list', 'wx_unread', 'cgi_mail_list', 'cgi_fr_show'],
-  },
-};
+    // 默认设置
+    export const DEFAULT_SETTINGS = {
+      checkIntervalMinutes: 5,
+      logLevel: 'DEBUG',
+      // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
+      checkMode: 'hybrid',
+      // 每个提供商启用的探测接口名
+      enabledEndpoints: {
+        netease_163: ['js6_rpc_list'],
+        qq: ['wx_maillist'],
+      },
+    };
 
 // 存储键
 export const STORAGE_KEYS = {

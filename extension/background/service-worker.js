@@ -303,6 +303,25 @@ async function handleMessage(message, sender) {
       return { success: true, accountCount };
     }
 
+    case 'getDebugLogs': {
+      // 获取调试日志（供外部工具读取）
+      const limit = message.limit || 100;
+      const logs = await getDebugLogs(limit);
+      return { success: true, logs };
+    }
+
+    case 'getMemoryLogs': {
+      // 获取内存中的实时日志
+      const limit = message.limit || 50;
+      try {
+        const { getMemoryLogs: getMem } = await import('../shared/debug.js');
+        const logs = typeof getMem === 'function' ? getMem(limit) : [];
+        return { success: true, logs };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
     default:
       logger.warn(`未知消息类型: ${message.type}`);
       return { success: false, error: `Unknown message type: ${message.type}` };

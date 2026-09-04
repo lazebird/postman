@@ -150,3 +150,16 @@ export async function getDebugLogs(limit = 100) {
     return [];
   }
 }
+
+/**
+ * 读取调试日志（内存缓冲区，实时数据）
+ * @param {number} limit
+ */
+export async function getMemoryLogs(limit = 100) {
+  try {
+    const { getMemoryLogs: getMem } = await import('./debug.js');
+    return typeof getMem === 'function' ? getMem(limit) : [];
+  } catch (e) {
+    return [];
+  }
+}

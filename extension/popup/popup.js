@@ -703,13 +703,21 @@ async function refreshLogs() {
   }
 }
 
-async function fetchLogsFromStorage() {
+async function fetchLogsFromStorage(limit = 100) {
   try {
     const { debugLogs = [] } = await chrome.storage.session.get('debugLogs');
-    return Array.isArray(debugLogs) ? debugLogs : [];
+    return Array.isArray(debugLogs) ? debugLogs.slice(0, limit) : [];
   } catch (e) {
     return [];
   }
+}
+
+/**
+ * 获取日志（供外部 API 调用）
+ * 可通过 sendMessage({ type: 'getLogs' }) 调用
+ */
+async function getLogsAPI(limit = 100) {
+  return await fetchLogsFromStorage(limit);
 }
 
 function logsToPlainText(logs) {
@@ -847,4 +855,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 初始化刷新状态
   refreshStatus();
+
+  // 暴露日志获取 API（供 Playwright 等外部工具调用）
+  window.getMailNotifierLogs = async (limit = 100) => {
+    return await getLogsAPI(limit);
+  };
 });

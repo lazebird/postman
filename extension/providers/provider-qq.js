@@ -186,6 +186,10 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       let body = endpoint.bodyTemplate;
       if (body) {
         body = body.replace(/\{sid\}/g, sid || '');
+        // 如果端点标记为 URL 编码，则对 body 进行编码
+        if (endpoint.isUrlEncoded) {
+          body = encodeURIComponent(body);
+        }
         fetchOptions.body = body;
         logger_ep.debug(`POST body: ${body.substring(0, 200)}`);
       }
@@ -334,6 +338,21 @@ function analyzeQQAuth(text, httpStatus, finalUrl) {
  * 支持 QQ 新旧版接口的不同响应格式
  */
 function parseQQResponse(text) {
+  // 策略0: QQ 新版 API 返回 unread_num 字段（真实格式）
+  try {
+    const data = JSON.parse(text.trim());
+    if (typeof data.body === 'object' && data.body !== null) {
+      const unreadNum = data.body.unread_num;
+      if (typeof unreadNum === 'number' && unreadNum >= 0) {
+        return { hasResult: true, unreadCount: unreadNum };
+      }
+    }
+    const unread = findUnreadCount(data);
+    if (unread !== null) {
+      return { hasResult: true, unreadCount: unread };
+    }
+  } catch (e) {}
+
   // 策略1: JSON
   try {
     const data = JSON.parse(text.trim());

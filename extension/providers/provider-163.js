@@ -184,6 +184,10 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       let body = endpoint.bodyTemplate;
       if (body) {
         body = body.replace(/\{sid\}/g, sid || '');
+        // 如果端点标记为 URL 编码，则对 body 进行编码
+        if (endpoint.isUrlEncoded) {
+          body = encodeURIComponent(body);
+        }
         fetchOptions.body = body;
         logger_ep.debug(`POST body: ${body.substring(0, 300)}`);
       }
@@ -298,6 +302,63 @@ function analyzeAuth(text, httpStatus) {
  * 解析 163 接口响应的未读数
  */
 function parse163Response(text) {
+  // ===== 策略0: 163 真实 API 响应格式（包含 new Date() 和非标准 JSON）=====
+  // 响应格式: {'code':'S_OK','var':[...邮件列表...],'midoffset':-1}
+  // 注意：1. 日期格式为 new Date(...) 2. 使用单引号而非双引号
+  try {
+    let jsonText = text.trim();
+    
+    // 移除可能的 JSONP 包裹
+    const jsonpMatch = jsonText.match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
+    if (jsonpMatch) jsonText = jsonpMatch[1];
+    
+    // 将 new Date(...) 替换为 null（我们不需要日期，只需要判断 read 标志）
+    jsonText = jsonText.replace(/\bnew\s+Date\([^)]*\)/g, 'null');
+    
+    // 使用正则提取 var 数组中的邮件列表
+    // 格式: 'var':[ {...}, {...} ]
+    const varMatch = jsonText.match(/'var'\s*:\s*\[([\s\S]*)\]/);
+    if (!varMatch) {
+      // 尝试双引号格式
+      const varMatch2 = jsonText.match(/"var"\s*:\s*\[([\s\S]*)\]/);
+      if (!varMatch2) {
+        return { hasResult: false, unreadCount: null };
+      }
+    }
+    
+    // 提取每封邮件的 flags.read 状态
+    let unreadCount = 0;
+    
+    // 匹配每封邮件对象（简化处理：统计没有 read:true 的邮件）
+    const emailRegex = /\{\s*'id'\s*:/g;
+    const readRegex = /'read'\s*:\s*true/g;
+    
+    let emailMatch;
+    let readMatch;
+    let lastEmailEnd = 0;
+    
+    while ((emailMatch = emailRegex.exec(jsonText)) !== null) {
+      // 找到这封邮件的结束位置（下一个邮件对象或数组结束）
+      const nextEmail = jsonText.substring(emailMatch.index + 1).match(/\{\s*'id'\s*:/);
+      const emailEnd = nextEmail ? emailMatch.index + 1 + nextEmail.index : jsonText.indexOf(']', emailMatch.index);
+      
+      // 检查这封邮件是否有 read:true
+      const emailText = jsonText.substring(emailMatch.index, emailEnd);
+      const hasRead = /'read'\s*:\s*true/.test(emailText);
+      
+      if (!hasRead) {
+        unreadCount++;
+      }
+    }
+    
+    // 如果找到了未读数，返回结果
+    if (unreadCount > 0 || text.includes("'code':'S_OK'")) {
+      return { hasResult: true, unreadCount: unreadCount };
+    }
+  } catch (e) {
+    // 解析失败，继续尝试其他策略
+  }
+
   // ===== 策略1: XML 格式 =====
   if (text.includes('<result>') || text.includes('<?xml')) {
     const patterns = [
@@ -312,7 +373,7 @@ function parse163Response(text) {
     }
   }
 
-  // ===== 策略2: JSON =====
+  // ===== 策略2: 标准 JSON =====
   try {
     let jsonText = text.trim();
     const jsonpMatch = jsonText.match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
@@ -344,7 +405,6 @@ function parse163Response(text) {
   }
 
   // ===== 策略5: 163 特有 var 编码格式 =====
-  // 163 可能用 var=@ 或类似编码，尝试搜索
   const varUnread = text.match(/["']?unreadCount["']?\s*:\s*(\d+)/i) || 
                     text.match(/["']?unreadnum["']?\s*:\s*(\d+)/i);
   if (varUnread) {
@@ -352,11 +412,8 @@ function parse163Response(text) {
   }
 
   // ===== 策略6: 163 js6 RPC var 编码格式 =====
-  // 163 的 js6 接口可能返回类似: var @={...} 或 var @(...)
-  // 尝试提取 var @ 包裹的数据
   if (text.includes('var @') || text.includes('@=')) {
     try {
-      // 尝试提取 @{...} 中的 JSON
       const atJsonMatch = text.match(/@\{([\s\S]*)\}/);
       if (atJsonMatch) {
         try {
@@ -365,7 +422,6 @@ function parse163Response(text) {
           if (unread !== null) return { hasResult: true, unreadCount: unread };
         } catch (e) {}
       }
-      // 尝试 var @=... 格式中的 JSON
       const atEqMatch = text.match(/var\s*@=\s*([\s\S]*?)(?:;|$)/);
       if (atEqMatch) {
         try {
@@ -374,7 +430,6 @@ function parse163Response(text) {
           if (unread !== null) return { hasResult: true, unreadCount: unread };
         } catch (e) {}
       }
-      // 在 var 编码中搜索 unread 数字
       const varMatch = text.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
       if (varMatch) return { hasResult: true, unreadCount: parseInt(varMatch[1], 10) };
       const countMatch2 = text.match(/count["']?\s*[:=]\s*["']?(\d+)/i);
@@ -382,8 +437,7 @@ function parse163Response(text) {
     } catch (e) {}
   }
 
-  // ===== 策略7: 163 特有的 t="..."/c="..." 编码 =====
-  // 163 可能用 base64 或转义字符串编码数据
+  // ===== 策略7: t="..."/c="..." 编码 =====
   if (text.includes('t="') || text.includes("t='")) {
     const tMatch = text.match(/t=["']([^"']+)["']/);
     if (tMatch) {
@@ -395,10 +449,8 @@ function parse163Response(text) {
     }
   }
 
-  // ===== 策略8: 163 var 编码中的 @listMessages 格式 =====
-  // 检查像 "listMessages":{...} 这样的嵌套结构
+  // ===== 策略8: listMessages/getFolderCount/getUnread 嵌套结构 =====
   if (text.includes('listMessages') || text.includes('getFolderCount') || text.includes('getUnread')) {
-    // 在深层 JSON 中搜索
     const jsonMatches = text.match(/\{[^{}]*\}/g);
     if (jsonMatches) {
       for (const seg of jsonMatches) {
