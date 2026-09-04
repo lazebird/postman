@@ -15,14 +15,8 @@ export const PROVIDERS = {
   GMAIL: 'gmail',
 };
 
-// 会话密钥（存储于 chrome.storage.local，持久化跨浏览器重启保留）
-export const SESSION_KEYS = {
-  SID_163: 'sid_163',
-  SID_QQ: 'sid_qq',
-  SESSION_EXPIRY: 'session_expiry',
-};
-
 // sid 缓存有效期：7 天（webmail 会话通常持续数周，持久化后无需频繁重新同步）
+// 具体 sid 存储键映射见 shared/session-cache.js 的 sidStorageKey()
 export const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Gmail OAuth2 token 缓存键（chrome.storage.local 持久化，浏览器重启保留）
@@ -57,10 +51,7 @@ export const PROVIDER_CONFIG = {
     homepage: 'https://mail.163.com/',
     contentDomains: ['mail.163.com', '*.mail.163.com', 'js6.mail.163.com'],
     // 163 登录后首页入口
-    entryPoints: [
-      'https://mail.163.com/js6/main.jsp',
-      'https://mail.163.com/',
-    ],
+    entryPoints: ['https://mail.163.com/js6/main.jsp', 'https://mail.163.com/'],
     sessionEndpoints: [
       {
         name: 'js6_main',
@@ -78,12 +69,13 @@ export const PROVIDER_CONFIG = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': 'text/javascript',
-          'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
-          'Origin': 'https://mail.163.com',
+          Accept: 'text/javascript',
+          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          Origin: 'https://mail.163.com',
         },
         requiresSid: true,
-        bodyTemplate: 'var=<?xml version="1.0"?>><object><object name="filter"><string name="sentDate">2:</string></object><string name="order">date</string><boolean name="desc">true</boolean><array name="fids"><int>1</int><int>18</int><int>3685900</int></array><boolean name="skipLockedFolders">true</boolean><int name="limit">200</int><string name="mrcid">{mrcid}</string></object>',
+        bodyTemplate:
+          'var=<?xml version="1.0"?>><object><object name="filter"><string name="sentDate">2:</string></object><string name="order">date</string><boolean name="desc">true</boolean><array name="fids"><int>1</int><int>18</int><int>3685900</int></array><boolean name="skipLockedFolders">true</boolean><int name="limit">200</int><string name="mrcid">{mrcid}</string></object>',
         isUrlEncoded: true,
         description: 'RPC - 获取未读消息列表（真实格式，body 需 URL 编码）',
       },
@@ -93,9 +85,9 @@ export const PROVIDER_CONFIG = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': '*/*',
-          'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
-          'Origin': 'https://mail.163.com',
+          Accept: '*/*',
+          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          Origin: 'https://mail.163.com',
         },
         requiresSid: true,
         bodyTemplate: 'var=@null',
@@ -107,9 +99,9 @@ export const PROVIDER_CONFIG = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': '*/*',
-          'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
-          'Origin': 'https://mail.163.com',
+          Accept: '*/*',
+          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          Origin: 'https://mail.163.com',
         },
         requiresSid: true,
         bodyTemplate: 'var=@null',
@@ -121,9 +113,9 @@ export const PROVIDER_CONFIG = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': '*/*',
-          'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
-          'Origin': 'https://mail.163.com',
+          Accept: '*/*',
+          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          Origin: 'https://mail.163.com',
         },
         requiresSid: true,
         bodyTemplate: 'var=@null',
@@ -167,8 +159,8 @@ export const PROVIDER_CONFIG = {
         url: 'https://wx.mail.qq.com/list/maillist?sid={sid}&dir=1&dirid=1&func=1&sort_type=1&sort_direction=1&page_now=0&page_size=50&enable_topmail=true',
         method: 'GET',
         headers: {
-          'Referer': 'https://wx.mail.qq.com/',
-          'Accept': 'application/json, text/plain, */*',
+          Referer: 'https://wx.mail.qq.com/',
+          Accept: 'application/json, text/plain, */*',
         },
         requiresSid: true,
         description: '新网页版 - 收件箱列表（真实格式，返回 unread_num）',
@@ -178,8 +170,8 @@ export const PROVIDER_CONFIG = {
         url: 'https://wx.mail.qq.com/cgi-bin/readindex?sid={sid}&t=inbox&r=0',
         method: 'GET',
         headers: {
-          'Referer': 'https://wx.mail.qq.com/',
-          'Accept': 'application/json, text/plain, */*',
+          Referer: 'https://wx.mail.qq.com/',
+          Accept: 'application/json, text/plain, */*',
         },
         requiresSid: true,
         description: '新网页版 - 读取邮箱索引',
@@ -189,8 +181,8 @@ export const PROVIDER_CONFIG = {
         url: 'https://wx.mail.qq.com/cgi-bin/mail_list?t=inbox&sid={sid}',
         method: 'GET',
         headers: {
-          'Referer': 'https://wx.mail.qq.com/',
-          'Accept': 'application/json, text/plain, */*',
+          Referer: 'https://wx.mail.qq.com/',
+          Accept: 'application/json, text/plain, */*',
         },
         requiresSid: true,
         description: '新网页版 - 收件箱列表',
@@ -200,8 +192,8 @@ export const PROVIDER_CONFIG = {
         url: 'https://wx.mail.qq.com/cgi-bin/unread?sid={sid}&t=inbox',
         method: 'GET',
         headers: {
-          'Referer': 'https://wx.mail.qq.com/',
-          'Accept': 'application/json, text/plain, */*',
+          Referer: 'https://wx.mail.qq.com/',
+          Accept: 'application/json, text/plain, */*',
         },
         requiresSid: true,
         description: '新网页版 - 未读计数',
@@ -227,10 +219,7 @@ export const PROVIDER_CONFIG = {
     name: '中科大邮箱',
     domain: 'mail.ustc.edu.cn',
     homepage: 'http://mail.ustc.edu.cn/',
-    entryPoints: [
-      'http://mail.ustc.edu.cn/',
-      'http://mail.ustc.edu.cn/coremail/XT/index.jsp',
-    ],
+    entryPoints: ['http://mail.ustc.edu.cn/', 'http://mail.ustc.edu.cn/coremail/XT/index.jsp'],
     sessionEndpoints: [],
     // USTC 使用 Coremail 系统，API 格式与 163 类似
     probeEndpoints: [
@@ -239,8 +228,8 @@ export const PROVIDER_CONFIG = {
         url: 'http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}',
         method: 'GET',
         headers: {
-          'Accept': 'text/javascript, application/json',
-          'Referer': 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
+          Accept: 'text/javascript, application/json',
+          Referer: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
         },
         requiresSid: true,
         description: '获取所有文件夹及未读数（返回 unreadMessageCount）',
@@ -251,8 +240,8 @@ export const PROVIDER_CONFIG = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': 'text/javascript, application/json',
-          'Referer': 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
+          Accept: 'text/javascript, application/json',
+          Referer: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
         },
         requiresSid: true,
         bodyTemplate: '',
@@ -272,9 +261,7 @@ export const PROVIDER_CONFIG = {
     // Gmail OAuth2 配置
     oauth2: {
       clientId: '428257971477-hgals4i0e445jdl1ame35i8ir3nll9ua.apps.googleusercontent.com',
-      scopes: [
-        'https://www.googleapis.com/auth/gmail.readonly',
-      ],
+      scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
     },
   },
 };
@@ -288,20 +275,20 @@ export const CHECK_INTERVALS = [
   { label: '30分钟', value: 30 },
 ];
 
-    // 默认设置
-    export const DEFAULT_SETTINGS = {
-      checkIntervalMinutes: 5,
-      logLevel: 'DEBUG',
-      // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
-      checkMode: 'hybrid',
-   // 每个提供商启用的探测接口名
-   enabledEndpoints: {
-     netease_163: ['js6_rpc_list'],
-     qq: ['wx_maillist'],
-     ustc: ['ustc_getallfolders'],
-     gmail: ['gmail_api'],
-   },
-    };
+// 默认设置
+export const DEFAULT_SETTINGS = {
+  checkIntervalMinutes: 5,
+  logLevel: 'DEBUG',
+  // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
+  checkMode: 'hybrid',
+  // 每个提供商启用的探测接口名
+  enabledEndpoints: {
+    netease_163: ['js6_rpc_list'],
+    qq: ['wx_maillist'],
+    ustc: ['ustc_getallfolders'],
+    gmail: ['gmail_api'],
+  },
+};
 
 // 存储键
 export const STORAGE_KEYS = {

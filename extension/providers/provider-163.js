@@ -10,6 +10,7 @@
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
 import { headersToObject, fetchWithTimeout } from '../shared/session.js';
+import { getSidRecord, clearSid } from '../shared/session-cache.js';
 import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
 
 const logger = createLogger('provider-163');
@@ -20,11 +21,11 @@ const logger = createLogger('provider-163');
 export async function probe163(options = {}) {
   const config = PROVIDER_CONFIG['netease_163'];
 
-  const cachedSid = await getSidFromStorage();
+  const cachedSid = await getSidRecord('netease_163');
   const { sid, source: sidSource } = cachedSid;
 
   let endpoints = options.endpointNames?.length
-    ? config.probeEndpoints.filter(ep => options.endpointNames.includes(ep.name))
+    ? config.probeEndpoints.filter((ep) => options.endpointNames.includes(ep.name))
     : config.probeEndpoints;
 
   if (!endpoints.length) {
@@ -43,7 +44,7 @@ export async function probe163(options = {}) {
   const allEndpoints = [...capturedEndpoints, ...endpoints];
 
   logger.info('开始探测163邮箱未读接口', {
-    endpoints: allEndpoints.map(e => e.name),
+    endpoints: allEndpoints.map((e) => e.name),
     hasSid: !!sid,
     sidSource: sidSource || 'none',
     capturedCount: capturedEndpoints.length,
@@ -65,8 +66,8 @@ export async function probe163(options = {}) {
     if (result.error) lastError = result.error;
   }
 
-  const allFailed = results.length > 0 && results.every(r => !r.success);
-  const authBlocked = results.some(r => r.authBlocked);
+  const allFailed = results.length > 0 && results.every((r) => !r.success);
+  const authBlocked = results.some((r) => r.authBlocked);
 
   const summary = {
     provider: 'netease_163',
@@ -78,7 +79,7 @@ export async function probe163(options = {}) {
     session: {
       sidObtained: !!sid,
       sid: sid ? sid.substring(0, 8) + '...' : null,
-      loggedIn: anySucceeded || (sid !== null),
+      loggedIn: anySucceeded || sid !== null,
       source: sidSource || 'none',
     },
     results,
@@ -92,26 +93,6 @@ export async function probe163(options = {}) {
   });
 
   return summary;
-}
-
-/**
- * 从 chrome.storage.local 读取 163 的缓存 sid
- */
-async function getSidFromStorage() {
-  try {
-    const data = await chrome.storage.local.get(['sid_163', 'sid_163_expiry']);
-    if (data.sid_163) {
-      if (data.sid_163_expiry && Date.now() > data.sid_163_expiry) {
-        logger.debug('缓存 sid 已过期');
-        await chrome.storage.local.remove(['sid_163', 'sid_163_expiry']);
-        return { sid: null, source: 'expired' };
-      }
-      return { sid: data.sid_163, source: 'cache' };
-    }
-  } catch (e) {
-    logger.warn(`读取缓存 sid 失败: ${e.message}`);
-  }
-  return { sid: null, source: 'none' };
 }
 
 /**
@@ -199,16 +180,17 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms`);
 
     const text = await response.text();
-    const preview = text.length > DEBUG_FEATURE.maxResponsePreviewBytes
-      ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
-      : text;
+    const preview =
+      text.length > DEBUG_FEATURE.maxResponsePreviewBytes
+        ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
+        : text;
 
     const authInfo = analyzeAuth(text, response.status);
 
     if (authInfo.authBlocked) {
       logger_ep.warn('163 会话已失效，清除缓存的 sid');
       try {
-        await chrome.storage.local.remove(['sid_163', 'sid_163_expiry']);
+        await clearSid('netease_163');
       } catch (e) {}
     }
 
@@ -307,14 +289,14 @@ function parse163Response(text) {
   // 注意：1. 日期格式为 new Date(...) 2. 使用单引号而非双引号
   try {
     let jsonText = text.trim();
-    
+
     // 移除可能的 JSONP 包裹
     const jsonpMatch = jsonText.match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
     if (jsonpMatch) jsonText = jsonpMatch[1];
-    
+
     // 将 new Date(...) 替换为 null（我们不需要日期，只需要判断 read 标志）
     jsonText = jsonText.replace(/\bnew\s+Date\([^)]*\)/g, 'null');
-    
+
     // 使用正则提取 var 数组中的邮件列表
     // 格式: 'var':[ {...}, {...} ]
     const varMatch = jsonText.match(/'var'\s*:\s*\[([\s\S]*)\]/);
@@ -325,32 +307,34 @@ function parse163Response(text) {
         return { hasResult: false, unreadCount: null };
       }
     }
-    
+
     // 提取每封邮件的 flags.read 状态
     let unreadCount = 0;
-    
+
     // 匹配每封邮件对象（简化处理：统计没有 read:true 的邮件）
     const emailRegex = /\{\s*'id'\s*:/g;
     const readRegex = /'read'\s*:\s*true/g;
-    
+
     let emailMatch;
     let readMatch;
     let lastEmailEnd = 0;
-    
+
     while ((emailMatch = emailRegex.exec(jsonText)) !== null) {
       // 找到这封邮件的结束位置（下一个邮件对象或数组结束）
       const nextEmail = jsonText.substring(emailMatch.index + 1).match(/\{\s*'id'\s*:/);
-      const emailEnd = nextEmail ? emailMatch.index + 1 + nextEmail.index : jsonText.indexOf(']', emailMatch.index);
-      
+      const emailEnd = nextEmail
+        ? emailMatch.index + 1 + nextEmail.index
+        : jsonText.indexOf(']', emailMatch.index);
+
       // 检查这封邮件是否有 read:true
       const emailText = jsonText.substring(emailMatch.index, emailEnd);
       const hasRead = /'read'\s*:\s*true/.test(emailText);
-      
+
       if (!hasRead) {
         unreadCount++;
       }
     }
-    
+
     // 如果找到了未读数，返回结果
     if (unreadCount > 0 || text.includes("'code':'S_OK'")) {
       return { hasResult: true, unreadCount: unreadCount };
@@ -405,8 +389,9 @@ function parse163Response(text) {
   }
 
   // ===== 策略5: 163 特有 var 编码格式 =====
-  const varUnread = text.match(/["']?unreadCount["']?\s*:\s*(\d+)/i) || 
-                    text.match(/["']?unreadnum["']?\s*:\s*(\d+)/i);
+  const varUnread =
+    text.match(/["']?unreadCount["']?\s*:\s*(\d+)/i) ||
+    text.match(/["']?unreadnum["']?\s*:\s*(\d+)/i);
   if (varUnread) {
     return { hasResult: true, unreadCount: parseInt(varUnread[1], 10) };
   }
@@ -450,7 +435,11 @@ function parse163Response(text) {
   }
 
   // ===== 策略8: listMessages/getFolderCount/getUnread 嵌套结构 =====
-  if (text.includes('listMessages') || text.includes('getFolderCount') || text.includes('getUnread')) {
+  if (
+    text.includes('listMessages') ||
+    text.includes('getFolderCount') ||
+    text.includes('getUnread')
+  ) {
     const jsonMatches = text.match(/\{[^{}]*\}/g);
     if (jsonMatches) {
       for (const seg of jsonMatches) {
@@ -472,7 +461,19 @@ function parse163Response(text) {
 function findUnreadCount(data, depth = 0) {
   if (!data || typeof data !== 'object' || depth > 8) return null;
 
-  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'newCount', 'newMessageCount', 'messageCount', 'unReadCount', 'folder_unread', 'inboxCount', 'inbox_count'];
+  const unreadKeys = [
+    'unread',
+    'unreadCount',
+    'unread_count',
+    'unreadnum',
+    'newCount',
+    'newMessageCount',
+    'messageCount',
+    'unReadCount',
+    'folder_unread',
+    'inboxCount',
+    'inbox_count',
+  ];
   for (const key of unreadKeys) {
     if (typeof data[key] === 'number') {
       return data[key];
