@@ -35,6 +35,41 @@ export const API_PATTERN_KEYS = {
 };
 
 /**
+ * ===== 检查触发来源 =====
+ *
+ * 将「某次检查/同步是由什么触发」显式区分为两类，作为贯穿全链路的标识：
+ *
+ *   - 手动（manual）：由用户在界面（Popup）点击按钮/控件显式触发。
+ *     此类触发**可以**走完整交互流程——自动打开邮箱页、复用/新建标签、
+ *     弹出 Gmail OAuth 授权窗等（AGENTS 规则 1：用户主动显式操作允许）。
+ *
+ *   - 自动（auto）：由定时闹钟（chrome.alarms）、onInstalled/onStartup、
+ *     内容脚本页面事件等周期/被动事件触发。此类触发**绝不**擅自打开可见标签、
+ *     **绝不**自动弹出授权窗，避免在用户无感时打断其操作（AGENTS 规则 1/2）。
+ *     若需要用户操作（如 Gmail 令牌缺失）仅标记「需手动同步」，交由用户显式处理。
+ *
+ * 触发源字符串沿用既有实现值，避免改变持久化结果 / 日志格式等外部行为。
+ * @typedef {'manual'|'manual-test'|'alarm'|'content-probe'|'unknown'} TriggerSource
+ */
+export const TRIGGER_SOURCE = {
+  /** 手动：Popup「🚀 全量检查」按钮 → runCheck */
+  MANUAL_FULL: 'manual',
+  /** 手动：Popup 单账户「检查 / 获取未读数 / 同步」等按钮 → testProvider / 内容脚本探测 */
+  MANUAL_SINGLE: 'manual-test',
+  /** 自动：chrome.alarms 定时闹钟周期检查 */
+  AUTO_ALARM: 'alarm',
+  /** 自动：内容脚本在邮箱页面事件驱动上报（sid 捕获 / 页面探测落库） */
+  AUTO_CONTENT: 'content-probe',
+  /** 未知 / 缺省（按自动保守处理，不允许交互弹窗） */
+  UNKNOWN: 'unknown',
+};
+
+/** 是否属于「手动」触发来源（允许完整交互：开标签 / 弹授权窗） */
+export function isManualSource(source) {
+  return source === TRIGGER_SOURCE.MANUAL_FULL || source === TRIGGER_SOURCE.MANUAL_SINGLE;
+}
+
+/**
  * 提供商配置
  *
  * 每个提供商配置包含：
