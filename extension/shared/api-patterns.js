@@ -14,6 +14,7 @@
 
 import { createLogger } from './debug.js';
 import { API_PATTERN_KEYS } from './constants.js';
+import { getCachedSid } from './session-cache.js';
 
 const logger = createLogger('api-patterns');
 
@@ -24,27 +25,27 @@ const logger = createLogger('api-patterns');
 function normalizeSid(text, knownSids) {
   if (!text) return text;
   let result = String(text);
-  
+
   // 1. 先替换已知的 sid（特定值）
   for (const sid of knownSids) {
     if (!sid) continue;
     result = result.split(sid).join('{sid}');
     try {
       result = result.split(encodeURIComponent(sid)).join('{sid}');
-    } catch(e) {}
+    } catch (e) {}
   }
-  
+
   // 2. 兜底：如果 URL/body 中还有看起来像 sid 的长字符串，替换为 {sid}
   //    163 sid: 32 字符字母数字混合
   //    QQ sid: 类似 zYhjMIy0SUYuOlo2ABJKYQAA (约 22-32 字符)
   //    只替换已知的 sid=xxx 格式，避免误替换普通数据
   const sidParamPattern = /([?&]sid=)([a-zA-Z0-9_\-]{10,})/g;
   result = result.replace(sidParamPattern, '$1{sid}');
-  
+
   // 也替换 URL path 中的 sid（如果有）
   const sidPathPattern = /(\/sid\/)([a-zA-Z0-9_\-]{10,})/g;
   result = result.replace(sidPathPattern, '$1{sid}');
-  
+
   return result;
 }
 
@@ -55,30 +56,30 @@ function normalizeSid(text, knownSids) {
  */
 export async function saveApiPatterns(provider, patterns) {
   if (!provider || !patterns || !patterns.length) return false;
-  
+
   const key = provider === 'qq' ? API_PATTERN_KEYS.CAPTURED_QQ : API_PATTERN_KEYS.CAPTURED_163;
-  
+
   try {
-    // 读取当前已知的 sid 用于替换
-    const sidKey = provider === 'qq' ? 'sid_qq' : 'sid_163';
-    const sidData = await chrome.storage.local.get(sidKey);
-    const currentSid = sidData[sidKey] || '';
+    // 读取当前已知的 sid 用于替换（统一走 session-cache）
+    const currentSid = (await getCachedSid(provider)) || '';
     const knownSids = [currentSid].filter(Boolean);
-    
+
     // 规范化每个捕获的模式
-    const normalized = patterns.map(p => ({
+    const normalized = patterns.map((p) => ({
       ...p,
       url: normalizeSid(p.url || '', knownSids),
       body: normalizeSid(p.body || null, knownSids),
-      headers: p.headers ? Object.fromEntries(
-        Object.entries(p.headers).map(([k, v]) => [k, normalizeSid(v, knownSids)])
-      ) : {},
+      headers: p.headers
+        ? Object.fromEntries(
+            Object.entries(p.headers).map(([k, v]) => [k, normalizeSid(v, knownSids)])
+          )
+        : {},
     }));
-    
+
     // 与已有模式合并（去重）
     const existing = await getApiPatterns(provider);
     const merged = [...normalized, ...existing];
-    
+
     // 去重：相同 URL + method + body 只保留一份
     const seen = new Set();
     const unique = [];
@@ -88,12 +89,12 @@ export async function saveApiPatterns(provider, patterns) {
       seen.add(dedupeKey);
       unique.push(p);
     }
-    
+
     // 最多保留 30 条模式
     const trimmed = unique.slice(0, 30);
-    
+
     await chrome.storage.local.set({ [key]: trimmed });
-    
+
     logger.info(`已保存 ${provider} 的 API 模式 ${trimmed.length} 条`);
     return true;
   } catch (e) {
@@ -136,7 +137,7 @@ export async function clearApiPatterns(provider) {
  */
 export function patternsToProbeEndpoints(patterns) {
   if (!patterns || !patterns.length) return [];
-  
+
   return patterns.map((p, idx) => ({
     name: `captured_${idx + 1}`,
     url: p.url || '',

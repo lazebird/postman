@@ -23,6 +23,7 @@ import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG } from '../shared/constants.js';
 import { fetchWithTimeout, headersToObject } from '../shared/session.js';
 import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
+import { getCachedSid as getCachedSidShared } from '../shared/session-cache.js';
 
 const logger = createLogger('possibility-tests');
 
@@ -35,7 +36,6 @@ const PROVIDER_TARGET = {
   netease_163: {
     label: '163邮箱',
     // 优先用捕获的真实 API；无捕获时用内部候选接口
-    sidKey: 'sid_163',
     cookies: { domain: '.163.com' },
     cookieUrls: ['https://mail.163.com/', 'https://www.163.com/'],
     entryDomain: 'https://mail.163.com/',
@@ -46,9 +46,9 @@ const PROVIDER_TARGET = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': '*/*',
-          'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
-          'Origin': 'https://mail.163.com',
+          Accept: '*/*',
+          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          Origin: 'https://mail.163.com',
         },
         bodyTemplate: 'var=@null',
       },
@@ -58,38 +58,51 @@ const PROVIDER_TARGET = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': '*/*',
-          'Referer': 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
-          'Origin': 'https://mail.163.com',
+          Accept: '*/*',
+          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          Origin: 'https://mail.163.com',
         },
-        bodyTemplate: 'var=@{type:"listMessages",ver:0,pageSize:1,start:0,folderId:"1",mailto:"",readFlag:"2"}',
+        bodyTemplate:
+          'var=@{type:"listMessages",ver:0,pageSize:1,start:0,folderId:"1",mailto:"",readFlag:"2"}',
       },
     ],
   },
   qq: {
     label: 'QQ邮箱',
-    sidKey: 'sid_qq',
     cookies: { domain: '.qq.com' },
-    cookieUrls: ['https://mail.qq.com/', 'https://mail.qq.com/cgi-bin/login', 'https://wx.mail.qq.com/'],
+    cookieUrls: [
+      'https://mail.qq.com/',
+      'https://mail.qq.com/cgi-bin/login',
+      'https://wx.mail.qq.com/',
+    ],
     entryDomain: 'https://wx.mail.qq.com/',
     defaultEndpoints: [
       {
         name: 'wx_readdata',
         url: 'https://wx.mail.qq.com/cgi-bin/readdata?sid={sid}&t=inbox',
         method: 'GET',
-        headers: { 'Referer': 'https://wx.mail.qq.com/', 'Accept': 'application/json, text/plain, */*' },
+        headers: {
+          Referer: 'https://wx.mail.qq.com/',
+          Accept: 'application/json, text/plain, */*',
+        },
       },
       {
         name: 'wx_readindex',
         url: 'https://wx.mail.qq.com/cgi-bin/readindex?sid={sid}&t=inbox&r=0',
         method: 'GET',
-        headers: { 'Referer': 'https://wx.mail.qq.com/', 'Accept': 'application/json, text/plain, */*' },
+        headers: {
+          Referer: 'https://wx.mail.qq.com/',
+          Accept: 'application/json, text/plain, */*',
+        },
       },
       {
         name: 'wx_unread',
         url: 'https://wx.mail.qq.com/cgi-bin/unread?sid={sid}&t=inbox',
         method: 'GET',
-        headers: { 'Referer': 'https://wx.mail.qq.com/', 'Accept': 'application/json, text/plain, */*' },
+        headers: {
+          Referer: 'https://wx.mail.qq.com/',
+          Accept: 'application/json, text/plain, */*',
+        },
       },
       {
         name: 'cgi_mail_list',
@@ -102,19 +115,10 @@ const PROVIDER_TARGET = {
 };
 
 /**
- * 读取指定 provider 缓存的 sid（与 service-worker 相同的键）
+ * 读取指定 provider 缓存的 sid（统一走 shared/session-cache）
  */
 async function getCachedSid(provider) {
-  const key = PROVIDER_TARGET[provider]?.sidKey;
-  if (!key) return null;
-  try {
-    const data = await chrome.storage.local.get([key, `${key}_expiry`]);
-    if (data[key]) {
-      if (data[`${key}_expiry`] && Date.now() > data[`${key}_expiry`]) return null;
-      return data[key];
-    }
-  } catch (e) {}
-  return null;
+  return getCachedSidShared(provider);
 }
 
 /**
@@ -128,7 +132,11 @@ async function buildCookieHeader(provider) {
   const collected = [];
   const seen = new Set();
   // 按 Cookie 域名
-  for (const query of [{ domain: cfg.cookies.domain }, { url: cfg.entryDomain }, ...(cfg.cookieUrls||[]).map(url => ({ url }))]) {
+  for (const query of [
+    { domain: cfg.cookies.domain },
+    { url: cfg.entryDomain },
+    ...(cfg.cookieUrls || []).map((url) => ({ url })),
+  ]) {
     try {
       const cookies = query.url
         ? await chrome.cookies.getAll({ url: query.url })
@@ -145,10 +153,8 @@ async function buildCookieHeader(provider) {
   }
 
   // 过滤：优先取高价值会话 Cookie；全部拼入
-  const names = collected.map(c => c.name);
-  const header = collected
-    .map(c => `${c.name}=${c.value}`)
-    .join('; ');
+  const names = collected.map((c) => c.name);
+  const header = collected.map((c) => `${c.name}=${c.value}`).join('; ');
 
   return { header, count: collected.length, names };
 }
@@ -225,17 +231,17 @@ async function applyDnrCookieRule(cookieHeader, targetUrl) {
   try {
     await chrome.declarativeNetRequest.updateSessionRules({
       removeRuleIds: [ruleId],
-      addRules: [{
-        id: ruleId,
-        priority: 1,
-        action: {
-          type: 'modifyHeaders',
-          requestHeaders: [
-            { header: 'Cookie', operation: 'set', value: cookieHeader },
-          ],
+      addRules: [
+        {
+          id: ruleId,
+          priority: 1,
+          action: {
+            type: 'modifyHeaders',
+            requestHeaders: [{ header: 'Cookie', operation: 'set', value: cookieHeader }],
+          },
+          condition: { urlFilter, resourceTypes: ['xmlhttprequest', 'other', 'main_frame'] },
         },
-        condition: { urlFilter, resourceTypes: ['xmlhttprequest', 'other', 'main_frame'] },
-      }],
+      ],
     });
     return { ok: true, ruleId };
   } catch (e) {
@@ -349,8 +355,11 @@ async function probeEndpointWithStrategy(provider, endpoint, sid, strategy) {
       const ct = response.headers?.get?.('content-type') || '';
       const ab = await response.arrayBuffer();
       const enc = /gb18030|gbk|gb2312/i.test(ct) ? 'gb18030' : 'utf-8';
-      try { text = new TextDecoder(enc, { fatal: false }).decode(ab); }
-      catch (e) { text = new TextDecoder('utf-8', { fatal: false }).decode(ab); }
+      try {
+        text = new TextDecoder(enc, { fatal: false }).decode(ab);
+      } catch (e) {
+        text = new TextDecoder('utf-8', { fatal: false }).decode(ab);
+      }
     } catch (e) {
       text = '';
     }
@@ -401,7 +410,8 @@ function classifyVerdict(provider, status, text, finalUrl) {
     if (/FA_UNAUTHORIZED/.test(text)) return { type: 'AUTH_BLOCKED', reason: 'FA_UNAUTHORIZED' };
     if (/FA_SECURITY/.test(text)) return { type: 'AUTH_BLOCKED', reason: 'FA_SECURITY' };
     if (/No sid parameter/i.test(text)) return { type: 'AUTH_BLOCKED', reason: 'No sid parameter' };
-    if (/FA_SESSION_EXPIRED/.test(text)) return { type: 'AUTH_BLOCKED', reason: 'FA_SESSION_EXPIRED' };
+    if (/FA_SESSION_EXPIRED/.test(text))
+      return { type: 'AUTH_BLOCKED', reason: 'FA_SESSION_EXPIRED' };
   }
   // 登录页特征
   if (/gbIsNoCheck|loginFrame|qm_login|您还未登录|需要登录|登录QQ邮箱|ptlogin/i.test(text)) {
@@ -428,7 +438,13 @@ async function collectEndpoints(provider) {
   if (captured.length) {
     const converted = patternsToProbeEndpoints(captured);
     for (const ep of converted.slice(0, 6)) {
-      list.push({ name: ep.name, url: ep.url, method: ep.method || 'GET', headers: ep.headers || {}, bodyTemplate: ep.bodyTemplate || null });
+      list.push({
+        name: ep.name,
+        url: ep.url,
+        method: ep.method || 'GET',
+        headers: ep.headers || {},
+        bodyTemplate: ep.bodyTemplate || null,
+      });
     }
   }
   for (const ep of cfg.defaultEndpoints) list.push(ep);
