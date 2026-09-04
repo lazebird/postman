@@ -500,6 +500,26 @@ async function syncSession(provider) {
 
     const r = await sendMessage({ type: msgType, openTab: true });
 
+    // Gmail 走 OAuth2 授权，返回扁平结果 { success, token }，无 probe 字段。
+    if (provider === 'gmail' && r?.success) {
+      showProbeResult(`${providerLabel} 授权成功`, { success: true, message: 'Gmail 授权成功，正在读取未读数...' });
+      // 授权完成后触发一次后台探测，读取未读数
+      const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
+      const acc = probe?.results?.[0];
+      const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
+      showProbeResult(`${providerLabel} 授权成功`, {
+        success: true,
+        authVerified: acc?.authVerified === true,
+        unreadCount: unread,
+        message: unread != null
+          ? `授权成功，未读 ${unread} 封`
+          : (acc?.needsAuth ? '已授权但未能读取未读数，请稍后重试' : 'Gmail 授权成功'),
+        detail: acc?.error || null,
+      });
+      refreshStatus();
+      return;
+    }
+
     if (r?.probe?.success) {
       const sid = r.probe.sid;
       const unread = r.probe.unreadCount;
@@ -549,6 +569,51 @@ async function runPlanC(provider) {
 
   try {
     const r = await sendMessage({ type: msgType, openTab: true });
+
+    // Gmail：先直接后台探测（读缓存令牌）；未授权/令牌失效时引导交互授权
+    if (provider === 'gmail') {
+      if (pre) pre.textContent = '读取未读数中...';
+      const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
+      const acc = probe?.results?.[0];
+      const needsManual = acc?.needsManual === true || acc?.needsAuth === true;
+      let unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
+
+      // 无有效令牌 → 弹交互授权（仅用户主动点击时）
+      if (needsManual && unread == null) {
+        showProbeResult(`获取未读数 · ${providerLabel}`, { success: false, message: 'Gmail 未授权，正在弹出授权窗口，请在弹出的 Google 页面中确认...' });
+        const auth = await sendMessage({ type: 'gmailAuthorize' });
+        if (auth?.success) {
+          if (pre) pre.textContent = '授权成功，读取未读数中...';
+          const probe2 = await sendMessage({ type: 'testProvider', provider: 'gmail' });
+          const acc2 = probe2?.results?.[0];
+          unread = acc2 && typeof acc2.unreadCount === 'number' ? acc2.unreadCount : null;
+          if (pre) {
+            showProbeResult(`获取未读数 · ${providerLabel}`, {
+              success: unread != null,
+              unreadCount: unread,
+              authVerified: acc2?.authVerified === true,
+              detail: acc2?.error || null,
+            });
+          }
+        } else {
+          if (pre) showProbeResult(`获取未读数 · ${providerLabel}`, { success: false, message: 'Gmail 授权未完成或已取消', error: auth?.error || null });
+        }
+        refreshStatus();
+        return;
+      }
+
+      if (pre) {
+        showProbeResult(`获取未读数 · ${providerLabel}`, {
+          success: unread != null,
+          unreadCount: unread,
+          authVerified: acc?.authVerified === true,
+          detail: acc?.error || null,
+        });
+      }
+      refreshStatus();
+      return;
+    }
+
     const success = r?.probe?.success;
     const result = success ? r?.probe : r;
     if (pre) {

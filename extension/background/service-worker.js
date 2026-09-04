@@ -17,11 +17,12 @@
 
 import { createLogger } from '../shared/debug.js';
 import { getAccounts, getSettings, saveCheckResult, getCheckResults } from '../shared/storage.js';
-import { PROVIDERS, API_PATTERN_KEYS, PROVIDER_CONFIG } from '../shared/constants.js';
+import { PROVIDERS, API_PATTERN_KEYS } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
-import { probeGmail, authorizeGmail } from '../providers/provider-gmail.js';
+import { probeGmail } from '../providers/provider-gmail.js';
+import { authorizeGmailInteractive, hasGmailToken } from '../shared/gmail-oauth.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -48,38 +49,12 @@ chrome.runtime.onInstalled.addListener((details) => {
     setupAlarms().catch(err => {
       logger.error(`注册定时检查闹钟失败: ${err.message}`);
     });
-    // 初始化 Gmail OAuth2
-    initGmailOAuth2();
+    // 注意：安装/更新时不再自动触发 Gmail OAuth（避免非用户主动弹授权页）。
+    // 需等用户在 Popup/Options 点击"同步 Gmail"才走 launchWebAuthFlow 授权。
+    void hasGmailToken().then(has => logger.info(has ? '检测到已缓存 Gmail 令牌' : '尚未授权 Gmail，需手动同步'));
   }
 });
 
-/**
- * 初始化 Gmail OAuth2
- *
- * v0.9.6：不再在安装/更新时自动触发 interactive 授权。
- *   - 交互式 launchWebAuthFlow 会在安装/更新时自动弹出 Google 授权页，干扰用户；
- *   - 在 Microsoft Edge 上 chrome.identity 根本不受支持，自动弹授权页必然失败且毫无意义。
- * 现改为：仅在已存在有效 clientId 且浏览器为 Chromium(Chrome) 时，做一次静默探测，
- * 不做任何交互、不弹窗。真正的授权由用户在 Popup「同步Gmail」按钮主动触发（authorizeGmail）。
- */
-async function initGmailOAuth2() {
-  try {
-    const clientId = PROVIDER_CONFIG['gmail']?.oauth2?.clientId;
-    if (!clientId || clientId === 'YOUR_CLIENT_ID.apps.googleusercontent.com') {
-      logger.warn('Gmail Client ID 未配置，跳过 OAuth2 初始化');
-      return;
-    }
-    // Edge 不支持 chrome.identity，跳过自动初始化
-    const { detectBrowser } = await import('../providers/provider-gmail.js');
-    if (detectBrowser() === 'edge') {
-      logger.warn('当前为 Microsoft Edge，chrome.identity 不受支持，跳过 Gmail OAuth2 自动初始化');
-      return;
-    }
-    logger.info('Gmail Client ID 已配置（授权将由用户在「同步Gmail」时主动触发）');
-  } catch (err) {
-    logger.warn(`Gmail OAuth2 初始化失败: ${err.message}`);
-  }
-}
 
 chrome.runtime.onStartup.addListener(() => {
   logger.info('浏览器启动，Service Worker 被唤醒');
@@ -186,10 +161,13 @@ async function handleMessage(message, sender) {
     }
 
     case 'gmailAuthorize': {
-      // Gmail OAuth2 授权流程（浏览器感知）
-      // chrome.identity 在 Microsoft Edge 上不受支持，此处统一走 provider 层，
-      // 返回结构化结果，避免把引擎原始英文错误原样抛给用户。
-      return await authorizeGmail();
+      // Gmail OAuth2 授权流程（Chrome / Edge 通用，基于 launchWebAuthFlow）
+      // 仅由用户主动点击"同步 Gmail"触发，会弹出 Google 授权页。
+      const result = await authorizeGmailInteractive();
+      if (result.success) {
+        return { success: true, token: 'obtained' };
+      }
+      return { success: false, error: result.error || 'Gmail 授权失败', needsManual: !!result.needsManual };
     }
 
     case 'openMailboxTab':
@@ -1641,3 +1619,4 @@ logger.info('Service Worker 启动');
 setupAlarms().catch(err => { logger.error(`注册闹钟失败: ${err.message}`); });
 // 启动/安装后按最近一次检查结果刷新工具栏图标颜色与未读徽标
 updateBadgeFromLatest().catch(() => {});
+
