@@ -7,8 +7,9 @@
 //
 // 设计取舍：
 //   - no-undef 保持 error：能捕获真实的「未导入即调用」类缺陷（如曾漏 import getDebugLogs）。
-//   - no-empty 降级为 warn（容忍刻意为之的空 catch）；no-useless-escape 关闭，
+//   - no-empty 仅对空 catch 降级为 warn（allowEmptyCatch）；no-useless-escape 关闭，
 //     避免其自动修复误动遗留代码中工作正常的正则。
+//   - no-unused-vars 忽略 catch 错误参数（caughtErrors: none），catch 块中的 e 往往无需使用。
 //   - 格式化交由 Prettier，CI 中先 prettier 后 eslint，顺序固定。
 import js from '@eslint/js';
 
@@ -78,10 +79,13 @@ export default [
       ...js.configs.recommended.rules,
       // 保持 error：缺全局引用是真实缺陷
       'no-undef': 'error',
-      // 容忍刻意为之的空 catch 与正则转义（遗留代码常见、语义无害）
-      'no-empty': 'warn',
+      // 容忍刻意为之的空 catch（allowEmptyCatch）与正则转义（遗留代码常见、语义无害）
+      'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-useless-escape': 'off',
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' },
+      ],
       'no-console': 'off',
       'no-constant-condition': ['error', { checkLoops: false }],
     },
@@ -109,8 +113,8 @@ export default [
     },
     rules: {
       ...js.configs.recommended.rules,
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-      'no-empty': 'warn',
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
+      'no-empty': ['warn', { allowEmptyCatch: true }],
       'no-useless-escape': 'off',
       'no-console': 'off',
     },

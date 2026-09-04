@@ -56,7 +56,8 @@ function renderAccounts() {
   const list = document.getElementById('accounts-list');
 
   if (!currentAccounts.length) {
-    list.innerHTML = '<div class="help-text">暂无账户，请先在下方添加。添加邮箱账户后，需先在浏览器中打开并登录对应邮箱网页。</div>';
+    list.innerHTML =
+      '<div class="help-text">暂无账户，请先在下方添加。添加邮箱账户后，需先在浏览器中打开并登录对应邮箱网页。</div>';
   } else {
     list.innerHTML = '';
     const ul = document.createElement('ul');
@@ -101,27 +102,31 @@ function renderEndpoints() {
   const container = document.getElementById('endpoint-config');
 
   const providers = Object.keys(ENDPOINT_OPTIONS);
-  const sections = providers.map(provider => {
-    const endpoints = ENDPOINT_OPTIONS[provider];
-    const enabled = currentSettings.enabledEndpoints?.[provider] || [];
+  const sections = providers
+    .map((provider) => {
+      const endpoints = ENDPOINT_OPTIONS[provider];
+      const enabled = currentSettings.enabledEndpoints?.[provider] || [];
 
-    const checks = endpoints.map(ep => {
-      const checked = enabled.includes(ep.name) ? 'checked' : '';
-      return `
+      const checks = endpoints
+        .map((ep) => {
+          const checked = enabled.includes(ep.name) ? 'checked' : '';
+          return `
         <div class="endpoint-checkbox">
           <input type="checkbox" id="ep-${provider}-${ep.name}" data-provider="${provider}" data-endpoint="${ep.name}" ${checked}>
           <label for="ep-${provider}-${ep.name}">${escapeHtml(ep.label)}</label>
         </div>
       `;
-    }).join('');
+        })
+        .join('');
 
-    return `
+      return `
       <div style="margin-bottom:12px;">
         <div style="font-weight:600;font-size:14px;margin-bottom:6px;">${PROVIDER_LABELS[provider] || provider}</div>
         ${checks}
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
   container.innerHTML = sections;
 }
@@ -151,9 +156,10 @@ async function renderSessionStatus() {
         : '<span class="sid-chip sid-no">未授权 ❌</span>';
 
       // 获取最近一次单账户结果，展示授权/获取的清晰状态
-      const recent = status.recentResults?.find ? status.recentResults.find(r => r.provider && !r.source) : null;
-      const sample = status.recentResults?.find(r => r.unreadCount != null || r.authVerified === true || r.needsInboxPage === true)
-                    || status.recentResults?.[0];
+      const sample =
+        status.recentResults?.find(
+          (r) => r.unreadCount != null || r.authVerified === true || r.needsInboxPage === true
+        ) || status.recentResults?.[0];
       let recentInfo = '';
       if (sample) {
         const time = new Date(sample.timestamp || Date.now()).toLocaleTimeString();
@@ -189,7 +195,8 @@ async function renderSessionStatus() {
         ${recentInfo}
       `;
     } else {
-      container.innerHTML = '<div class="help-text">无法获取状态。请检查 Service Worker 是否正常运行。</div>';
+      container.innerHTML =
+        '<div class="help-text">无法获取状态。请检查 Service Worker 是否正常运行。</div>';
     }
   } catch (err) {
     container.innerHTML = `<div class="help-text">会话状态检查失败: ${escapeHtml(err.message)}</div>`;
@@ -202,7 +209,10 @@ async function renderSessionStatus() {
 async function syncSession(provider) {
   const providerLabel = PROVIDER_LABELS[provider] || provider;
   const pre = document.getElementById('plan-c-result');
-  if (pre) { pre.style.display = 'block'; pre.textContent = `正在同步 ${providerLabel} 会话...`; }
+  if (pre) {
+    pre.style.display = 'block';
+    pre.textContent = `正在同步 ${providerLabel} 会话...`;
+  }
 
   try {
     // 请求 SW 打开邮箱页并等待内容脚本提取 sid
@@ -215,31 +225,44 @@ async function syncSession(provider) {
       const pageType = r.probe.pageType || null;
       const needsInbox = r.probe.needsInboxPage === true || r.probe.authVerified === true;
       if (pre) {
-        pre.textContent = JSON.stringify({
-          success: true,
-          authVerified: !!sid,
-          sidObtained: !!sid,
-          sid: sid ? sid.substring(0, 8) + '...' : null,
-          unreadCount: unread ?? null,
-          pageType,
-          detail: r.probe.detail,
-        }, null, 2);
+        pre.textContent = JSON.stringify(
+          {
+            success: true,
+            authVerified: !!sid,
+            sidObtained: !!sid,
+            sid: sid ? sid.substring(0, 8) + '...' : null,
+            unreadCount: unread ?? null,
+            pageType,
+            detail: r.probe.detail,
+          },
+          null,
+          2
+        );
       }
       if (sid) {
         // 已授权
         if (typeof unread === 'number') {
           showStatus(`${providerLabel} 授权成功 ✅，未读 ${unread} 封`, 'success');
         } else if (needsInbox || pageType !== 'inbox') {
-          showStatus(`${providerLabel} 已授权 ✅，但当前在辅助页面，请在邮箱中打开「收件箱」后再读取未读数`, 'success');
+          showStatus(
+            `${providerLabel} 已授权 ✅，但当前在辅助页面，请在邮箱中打开「收件箱」后再读取未读数`,
+            'success'
+          );
         } else {
           showStatus(`${providerLabel} 授权成功 ✅`, 'success');
         }
       } else {
-        showStatus(`${providerLabel} 未检测到登录会话。请先在浏览器打开并登录 ${providerLabel}，再点「同步会话」`, 'error');
+        showStatus(
+          `${providerLabel} 未检测到登录会话。请先在浏览器打开并登录 ${providerLabel}，再点「同步会话」`,
+          'error'
+        );
       }
     } else {
       if (pre) pre.textContent = JSON.stringify(r, null, 2);
-      showStatus(`${providerLabel} 同步失败: ${r?.probe?.error || '请确认已在浏览器登录 ' + providerLabel + ' 并打开邮箱页'}`, 'error');
+      showStatus(
+        `${providerLabel} 同步失败: ${r?.probe?.error || '请确认已在浏览器登录 ' + providerLabel + ' 并打开邮箱页'}`,
+        'error'
+      );
     }
     await renderSessionStatus();
   } catch (err) {
@@ -254,13 +277,19 @@ async function syncSession(provider) {
  */
 async function runPlanC(provider) {
   const pre = document.getElementById('plan-c-result');
-  if (pre) { pre.style.display = 'block'; pre.textContent = '探测中...'; }
+  if (pre) {
+    pre.style.display = 'block';
+    pre.textContent = '探测中...';
+  }
 
   const msgType = provider === 'qq' ? 'probeContentQQ' : 'probeContent163';
   try {
     const r = await sendSWMessage({ type: msgType, openTab: true });
     if (pre) pre.textContent = JSON.stringify(r, null, 2);
-    showStatus(`内容脚本探测完成 (${PROVIDER_LABELS[provider]})`, r?.probe?.success ? 'success' : 'error');
+    showStatus(
+      `内容脚本探测完成 (${PROVIDER_LABELS[provider]})`,
+      r?.probe?.success ? 'success' : 'error'
+    );
     await renderSessionStatus();
   } catch (err) {
     if (pre) pre.textContent = '错误: ' + err.message;
@@ -273,7 +302,10 @@ async function runPlanC(provider) {
  */
 async function runCookieDiag() {
   const pre = document.getElementById('plan-c-result');
-  if (pre) { pre.style.display = 'block'; pre.textContent = '诊断中...'; }
+  if (pre) {
+    pre.style.display = 'block';
+    pre.textContent = '诊断中...';
+  }
   try {
     const r = await sendSWMessage({ type: 'diagnoseCookies' });
     if (pre) pre.textContent = JSON.stringify(r, null, 2);
@@ -298,7 +330,7 @@ async function addAccount() {
     return;
   }
 
-  if (currentAccounts.some(a => a.email === email && a.provider === provider)) {
+  if (currentAccounts.some((a) => a.email === email && a.provider === provider)) {
     showStatus('该账户已存在', 'error');
     return;
   }
@@ -390,7 +422,7 @@ async function saveSettings() {
 
   // 收集接口启用状态
   const enabledEndpoints = {};
-  document.querySelectorAll('input[type="checkbox"][data-provider]').forEach(cb => {
+  document.querySelectorAll('input[type="checkbox"][data-provider]').forEach((cb) => {
     const provider = cb.dataset.provider;
     const endpoint = cb.dataset.endpoint;
 
@@ -440,7 +472,9 @@ function showStatus(msg, type) {
   el.textContent = msg;
   el.className = `save-status ${type}`;
   el.style.display = 'block';
-  setTimeout(() => { el.style.display = 'none'; }, 4000);
+  setTimeout(() => {
+    el.style.display = 'none';
+  }, 4000);
 }
 
 function escapeHtml(text) {

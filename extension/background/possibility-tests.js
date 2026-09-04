@@ -20,7 +20,6 @@
  */
 
 import { createLogger } from '../shared/debug.js';
-import { PROVIDER_CONFIG } from '../shared/constants.js';
 import { fetchWithTimeout, headersToObject } from '../shared/session.js';
 import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
 import { getCachedSid as getCachedSidShared } from '../shared/session-cache.js';
@@ -166,7 +165,7 @@ const STRATEGIES = [
   {
     id: 'A1',
     label: 'credentials=include（基线，现状）',
-    build: async (provider) => ({ credentials: 'include' }),
+    build: async () => ({ credentials: 'include' }),
   },
   {
     id: 'A2',

@@ -35,9 +35,7 @@ const STORAGE_KEY = 'gmail_access_token';
 const STORAGE_EXPIRY_KEY = 'gmail_access_token_expiry';
 
 // Gmail API 权限范围
-const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-];
+const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
 
 // 提前多少毫秒认为令牌"即将过期"，避免边界竞态
 const EXPIRY_SLACK_MS = 60 * 1000;
@@ -75,9 +73,7 @@ export async function getCachedGmailToken() {
  * @param {number} expiresInSec 令牌有效秒数（来自 OAuth 响应 expires_in）
  */
 async function persistGmailToken(token, expiresInSec) {
-  const expiry = expiresInSec
-    ? Date.now() + expiresInSec * 1000
-    : Date.now() + 55 * 60 * 1000; // 无 expires_in 时兜底按 55 分钟
+  const expiry = expiresInSec ? Date.now() + expiresInSec * 1000 : Date.now() + 55 * 60 * 1000; // 无 expires_in 时兜底按 55 分钟
   await chrome.storage.local.set({
     [STORAGE_KEY]: token,
     [STORAGE_EXPIRY_KEY]: expiry,
@@ -135,7 +131,10 @@ export async function authorizeGmailInteractive() {
   const cfg = PROVIDER_CONFIG['gmail']?.oauth2;
   const clientId = cfg?.clientId;
   if (!clientId || clientId === 'YOUR_CLIENT_ID.apps.googleusercontent.com') {
-    return { success: false, error: 'Gmail OAuth Client ID 未配置，请在 constants.js 中填写正确的 clientId' };
+    return {
+      success: false,
+      error: 'Gmail OAuth Client ID 未配置，请在 constants.js 中填写正确的 clientId',
+    };
   }
 
   const scopes = (cfg?.scopes?.length ? cfg.scopes : GMAIL_SCOPES).join(' ');
@@ -154,13 +153,10 @@ export async function authorizeGmailInteractive() {
   try {
     logger.info('启动 Gmail OAuth2 授权（launchWebAuthFlow）...');
     const redirectUrl = await new Promise((resolve, reject) => {
-      chrome.identity.launchWebAuthFlow(
-        { url: authUrl, interactive: true },
-        (result) => {
-          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-          else resolve(result);
-        }
-      );
+      chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (result) => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(result);
+      });
     });
 
     if (!redirectUrl) {

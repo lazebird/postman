@@ -52,7 +52,6 @@ export async function probe163(options = {}) {
 
   const results = [];
   let anySucceeded = false;
-  let lastError = null;
 
   for (const endpoint of allEndpoints) {
     const result = await probeSingleEndpoint(endpoint, sid, options);
@@ -63,7 +62,6 @@ export async function probe163(options = {}) {
       // 成功即停止，不再继续探测其他接口
       break;
     }
-    if (result.error) lastError = result.error;
   }
 
   const allFailed = results.length > 0 && results.every((r) => !r.success);
@@ -98,7 +96,7 @@ export async function probe163(options = {}) {
 /**
  * 探测单个 163 接口端点
  */
-async function probeSingleEndpoint(endpoint, sid, options) {
+async function probeSingleEndpoint(endpoint, sid, _options) {
   const logger_ep = createLogger(`163:${endpoint.name}`);
   logger_ep.info(`探测接口 ${endpoint.name}${sid ? '' : '（无 sid，仅依赖 Cookie）'}`);
 
@@ -313,11 +311,8 @@ function parse163Response(text) {
 
     // 匹配每封邮件对象（简化处理：统计没有 read:true 的邮件）
     const emailRegex = /\{\s*'id'\s*:/g;
-    const readRegex = /'read'\s*:\s*true/g;
 
     let emailMatch;
-    let readMatch;
-    let lastEmailEnd = 0;
 
     while ((emailMatch = emailRegex.exec(jsonText)) !== null) {
       // 找到这封邮件的结束位置（下一个邮件对象或数组结束）

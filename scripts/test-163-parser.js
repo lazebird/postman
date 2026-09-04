@@ -16,7 +16,9 @@ let emailMatch;
 while ((emailMatch = emailRegex.exec(jsonText)) !== null) {
   // 找到这封邮件的结束位置
   const nextEmail = jsonText.substring(emailMatch.index + 1).match(/\{\s*'id'\s*:/);
-  const emailEnd = nextEmail ? emailMatch.index + 1 + nextEmail.index : jsonText.indexOf(']', emailMatch.index);
+  const emailEnd = nextEmail
+    ? emailMatch.index + 1 + nextEmail.index
+    : jsonText.indexOf(']', emailMatch.index);
   const emailText = jsonText.substring(emailMatch.index, emailEnd);
 
   // 检查这封邮件是否有 read:true（已读）
@@ -28,4 +30,3 @@ while ((emailMatch = emailRegex.exec(jsonText)) !== null) {
 }
 
 console.log('Unread count:', unreadCount);
-

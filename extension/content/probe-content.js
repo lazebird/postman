@@ -33,15 +33,20 @@
       // 兜底轮询
       let tries = 0;
       const t = setInterval(() => {
-        if (document.body || ++tries > 100) { clearInterval(t); resolve(); }
+        if (document.body || ++tries > 100) {
+          clearInterval(t);
+          resolve();
+        }
       }, 50);
     }
   });
-  function waitForBody() { return bodyReady; }
+  function waitForBody() {
+    return bodyReady;
+  }
   const isQQ = HOST.includes('qq.com');
   const is163 = HOST.includes('163.com');
   const isUSTC = HOST.includes('ustc.edu.cn');
-  
+
   // USTC 使用 http://，需要特殊处理 sid 提取
   let sid = null;
   if (isUSTC) {
@@ -50,139 +55,22 @@
   }
   // 判断当前 frame 是否为主（顶层）frame。
   let isTopFrame = false;
-  try { isTopFrame = window === window.top; } catch (e) { isTopFrame = false; }
-
-  // ============================================================
-  // API 请求拦截器（main world 注入）
-  // ============================================================
-  // 在页面主世界注入脚本，拦截 fetch / XHR / sendBeacon / EventSource
-  // 等真实请求，记录 URL/method/headers/body 后回传给内容脚本。
-  // v0.9.1 大幅放宽捕获过滤 + 覆盖更多请求通道 + 所有 frame 独立上报，
-  // 修复「打开邮箱页却捕获不到真实 API」导致的捕获断链。
-  const API_INTERCEPTOR_SCRIPT = `
-    (function() {
-      if (window.__mailApiInterceptorInstalled__) return;
-      window.__mailApiInterceptorInstalled__ = true;
-
-      // 为避免数据膨胀设上限；放宽到更多条以便捕捉到真实未读接口
-      const MAX_BODY_LEN = 4000;
-      const MAX_PATTERNS = 200;
-      const recentUrls = new Set();
-
-      // 命中目标邮箱的任意子域/路径（163.com / qq.com）
-      // 排除纯静态资源与已知 CDN/资源域，其余 API 一律捕获
-      function isRelevant(u) {
-        try {
-          const parsed = new URL(u);
-          const host = parsed.hostname;
-          if (!/(^|\.)(163\.com|qq\.com)$/i.test(host)) return false;
-        } catch (e) { return false; }
-        // 排除静态资源后缀
-        if (/\.(css|js|png|jpe?g|gif|svg|ico|woff2?|ttf|eot|map)([?#]|$)/i.test(u)) return false;
-        // 排除已知纯静态/CDN/资源类主机路径片段
-        if (/(rescdn|qpic|gtimg|alicdn|gslb|exmailcdn|static\.|\.css|\.js|\.png|\.gif|fonts|images?|comm|skin|style)/i.test(u)) return false;
-        return true;
-      }
-
-      function reportCapture(capture) {
-        try { window.postMessage({ source: '__mailApiCapture__', capture }, '*'); } catch (e) {}
-      }
-
-      function record(entry) {
-        try {
-          const full = new URL(entry.url, location.href).href;
-          if (!isRelevant(full)) return;
-          const key = entry.method + ' ' + full + ' ' + String(entry.body || '');
-          if (recentUrls.has(key)) return;
-          if (recentUrls.size >= MAX_PATTERNS) recentUrls.delete(recentUrls.values().next().value);
-          recentUrls.add(key);
-          const headers = {};
-          if (entry.headers) {
-            for (const [k, v] of Object.entries(entry.headers)) {
-              if (/^cookie$/i.test(k)) continue; // Cookie 头由 credentials/网络层处理，不落盘
-              headers[k] = v;
-            }
-          }
-          reportCapture({
-            type: entry.type || 'fetch',
-            url: full,
-            method: entry.method || 'GET',
-            body: entry.body ? String(entry.body).substring(0, MAX_BODY_LEN) : null,
-            headers,
-            timestamp: Date.now(),
-          });
-        } catch (e) {}
-      }
-
-      // ---- 拦截 fetch ----
-      const origFetch = window.fetch;
-      if (origFetch) {
-        window.fetch = function(...args) {
-          try {
-            const arg0 = args[0];
-            let url = typeof arg0 === 'string' ? arg0 : (arg0 && arg0.url) || '';
-            const opts = args[1] || {};
-            let method = opts.method || (typeof arg0 === 'object' && arg0.method) || 'GET';
-            let body = opts.body != null ? opts.body : null;
-            let headers = {};
-            if (opts.headers) {
-              try {
-                if (opts.headers instanceof Headers) opts.headers.forEach((v, k) => { headers[k] = v; });
-                else if (typeof opts.headers === 'object') headers = { ...opts.headers };
-              } catch (e) {}
-            }
-            record({ type: 'fetch', url, method, body, headers });
-          } catch (e) {}
-          return origFetch.apply(this, args);
-        };
-      }
-
-      // ---- 拦截 XHR ----
-      const origOpen = XMLHttpRequest.prototype.open;
-      const origSend = XMLHttpRequest.prototype.send;
-      XMLHttpRequest.prototype.open = function(method, url) {
-        try { this.__mailApiUrl = new URL(url, location.href).href; }
-        catch (e) { this.__mailApiUrl = url; }
-        this.__mailApiMethod = method || 'GET';
-        return origOpen.apply(this, arguments);
-      };
-      XMLHttpRequest.prototype.send = function(body) {
-        try { record({ type: 'xhr', url: this.__mailApiUrl || '', method: this.__mailApiMethod || 'GET', body }); }
-        catch (e) {}
-        return origSend.apply(this, arguments);
-      };
-
-      // ---- 拦截 sendBeacon ----
-      const origBeacon = navigator.sendBeacon && navigator.sendBeacon.bind(navigator);
-      if (origBeacon) {
-        navigator.sendBeacon = function(url, data) {
-          try { record({ type: 'beacon', url, method: 'POST', body: data && String(data) }); }
-          catch (e) {}
-          return origBeacon(url, data);
-        };
-      }
-
-      // ---- 拦截 EventSource ----
-      try {
-        const OrigES = window.EventSource;
-        if (OrigES) {
-          window.EventSource = function(url, cfg) {
-            try { record({ type: 'eventsource', url, method: 'GET', body: null }); } catch (e) {}
-            return new OrigES(url, cfg);
-          };
-        }
-      } catch (e) {}
-    })();
-  `;
+  try {
+    isTopFrame = window === window.top;
+  } catch (e) {
+    isTopFrame = false;
+  }
 
   // 在所有 frame 中注入拦截器（各 frame 各自捕获其内发出的 API 调用）
   // 使用 chrome.scripting API 注入，绕过 CSP 限制
   try {
     if (typeof chrome !== 'undefined' && chrome.scripting) {
-      chrome.scripting.executeScript({
-        target: { allFrames: true },
-        files: ['content/api-interceptor.js'],
-      }).catch(() => {});
+      chrome.scripting
+        .executeScript({
+          target: { allFrames: true },
+          files: ['content/api-interceptor.js'],
+        })
+        .catch(() => {});
     }
   } catch (e) {
     // 注入失败不阻塞主功能
@@ -217,14 +105,16 @@
           const provider = isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null;
           if (provider) {
             try {
-              chrome.runtime.sendMessage({
-                type: 'apiCaptureBatch',
-                provider,
-                captures: batch,
-                fromFrame: isTopFrame ? 'top' : 'sub',
-                frameUrl: location.href,
-                totalCaptured: apiCaptureCount,
-              }).catch(() => {});
+              chrome.runtime
+                .sendMessage({
+                  type: 'apiCaptureBatch',
+                  provider,
+                  captures: batch,
+                  fromFrame: isTopFrame ? 'top' : 'sub',
+                  frameUrl: location.href,
+                  totalCaptured: apiCaptureCount,
+                })
+                .catch(() => {});
             } catch (e) {}
           }
         }
@@ -236,16 +126,18 @@
 
   // 顶层 frame 定期上报本页捕获总数，供 SW 以日志确认捕获链路工作
   let lastReportedCount = 0;
-  const countTimer = setInterval(() => {
+  setInterval(() => {
     if (apiCaptureCount > lastReportedCount && isTopFrame) {
       lastReportedCount = apiCaptureCount;
       try {
-        chrome.runtime.sendMessage({
-          type: 'apiCaptureCount',
-          provider: isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null,
-          count: apiCaptureCount,
-          host: HOST,
-        }).catch(() => {});
+        chrome.runtime
+          .sendMessage({
+            type: 'apiCaptureCount',
+            provider: isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null,
+            count: apiCaptureCount,
+            host: HOST,
+          })
+          .catch(() => {});
       } catch (e) {}
     }
   }, 5000);
@@ -291,21 +183,26 @@
     }
 
     // 3. 匹配侧栏常见未读字段
-    const badgeRegex = /["']?(?:unread|unreadCount|newMessageCount|count)["']?\s*[:=]\s*["']?(\d{1,4})["']?/gi;
+    const badgeRegex =
+      /["']?(?:unread|unreadCount|newMessageCount|count)["']?\s*[:=]\s*["']?(\d{1,4})["']?/gi;
     let bm;
     while ((bm = badgeRegex.exec(joined))) {
       candidates.push({ type: 'attr', value: parseInt(bm[1], 10) });
     }
 
     // 3b. class/data 属性中的未读数
-    doc.querySelectorAll('[class*="unread"],[class*="new"],[class*="count"],[class*="badge"],[data-unread]').forEach((el) => {
-      const own = el.textContent ? el.textContent.trim() : '';
-      if (/^\d{1,4}$/.test(own)) candidates.push({ type: 'attr', value: parseInt(own, 10) });
-      const dataUnread = el.getAttribute && el.getAttribute('data-unread');
-      if (dataUnread && /^\d{1,4}$/.test(dataUnread.trim())) {
-        candidates.push({ type: 'attr', value: parseInt(dataUnread.trim(), 10) });
-      }
-    });
+    doc
+      .querySelectorAll(
+        '[class*="unread"],[class*="new"],[class*="count"],[class*="badge"],[data-unread]'
+      )
+      .forEach((el) => {
+        const own = el.textContent ? el.textContent.trim() : '';
+        if (/^\d{1,4}$/.test(own)) candidates.push({ type: 'attr', value: parseInt(own, 10) });
+        const dataUnread = el.getAttribute && el.getAttribute('data-unread');
+        if (dataUnread && /^\d{1,4}$/.test(dataUnread.trim())) {
+          candidates.push({ type: 'attr', value: parseInt(dataUnread.trim(), 10) });
+        }
+      });
 
     // 4. 查找含 sid 的 iframe 或链接
     let sid = null;
@@ -327,8 +224,8 @@
     if (titleMatch) titleUnread = parseInt(titleMatch[1], 10);
 
     // 合并去重
-    const folderCount = candidates.find(c => c.type === 'folder');
-    const attrCounts = candidates.filter(c => c.type === 'attr').map(c => c.value);
+    const folderCount = candidates.find((c) => c.type === 'folder');
+    const attrCounts = candidates.filter((c) => c.type === 'attr').map((c) => c.value);
 
     const allValues = [];
     if (folderCount) allValues.push(folderCount.value);
@@ -346,83 +243,11 @@
       allCandidateValues: uniqueValues,
       sidFromDom: sid,
       sidFromUrl: winSid,
-      bodyLength: (doc.body && doc.body.innerText ? doc.body.innerText.length : 0),
+      bodyLength: doc.body && doc.body.innerText ? doc.body.innerText.length : 0,
       timestamp: new Date().toISOString(),
     };
   }
 
-  /**
-   * 在页面上下文内发同源 fetch
-   */
-   function probeInPageFetch(url, options) {
-     return new Promise((resolve) => {
-       const fnName = '__mailProbeFetch_' + Date.now();
-       // 使用 chrome.scripting API 注入脚本，绕过 CSP
-       if (typeof chrome !== 'undefined' && chrome.scripting) {
-         // 先设置回调函数
-         window[fnName] = (result) => {
-           resolve({ url, ...result });
-         };
-         // 设置参数
-         window.__probeFetchParams = { url, options, fnName };
-         // 注入脚本
-         chrome.scripting.executeScript({
-           target: { allFrames: false },
-           files: ['content/probe-fetch-inject.js'],
-           injectImmediately: true,
-           world: 'MAIN',
-         }).catch(err => {
-           delete window[fnName];
-           resolve({ ok: false, error: err.message, url });
-         });
-         // 设置超时
-         setTimeout(() => {
-           if (window[fnName]) {
-             delete window[fnName];
-             resolve({ ok: false, error: 'in-page fetch timeout', url });
-           }
-         }, 15000);
-         return;
-       }
-      
-      // 降级方案：inline 注入（可能被 CSP 阻止）
-      const script = document.createElement('script');
-      script.textContent = `
-        (function(){
-          const __r = (window.__mailProbeResult) || [];
-          window.${fnName} = null;
-          fetch(${JSON.stringify(url)}, ${JSON.stringify(options || {})})
-            .then(async (resp) => {
-              let text = '';
-              try { text = await resp.text(); } catch(e) {}
-              const cb = window.${fnName};
-              if (cb) cb({ ok: resp.ok, status: resp.status, text: text.substring(0, 4000) });
-            })
-            .catch((err) => {
-              const cb = window.${fnName};
-              if (cb) cb({ ok: false, error: String(err && err.message || err) });
-            });
-        })();
-      `;
-      document.documentElement.appendChild(script);
-      script.remove();
-
-      const timer = setTimeout(() => {
-        delete window[fnName];
-        resolve({ ok: false, error: 'in-page fetch timeout', url });
-      }, 15000);
-
-      window[fnName] = (result) => {
-        clearTimeout(timer);
-        delete window[fnName];
-        resolve({ url, ...result });
-      };
-    });
-  }
-
-  /**
-   * 计算「最可信」未读数
-   */
   function computeBest(diag) {
     if (typeof diag.titleUnread === 'number' && diag.titleUnread >= 0) {
       return { unread: diag.titleUnread, source: 'title' };
@@ -431,7 +256,7 @@
       return { unread: diag.folderCount, source: 'folder-dom' };
     }
     if (diag.attrCandidates && diag.attrCandidates.length) {
-      const vals = diag.attrCandidates.filter(v => v >= 0);
+      const vals = diag.attrCandidates.filter((v) => v >= 0);
       if (vals.length) {
         return { unread: Math.min(...vals), source: 'attr-dom' };
       }
@@ -459,7 +284,7 @@
     const referrer = document.referrer || '';
     const path = location.pathname || '';
     const readyState = document.readyState;
-    const title = diag ? (diag.title || '') : (document.title || '');
+    const title = diag ? diag.title || '' : document.title || '';
     const hasSid = !!(diag && (diag.sidFromUrl || diag.sidFromDom));
     const hasUnread = best && typeof best.unread === 'number';
 
@@ -468,7 +293,8 @@
 
     const loginRe = /ptlogin|ssl\.ptlogin|login\.qq|xui\.qq|passport|login|cas|sso/i;
     const app163Re = /js6|main\.jsp|s\?func=mbox|func=mbox|mbox/i;
-    const appQQRe = /wx\.mail\.qq\.com|cgi-bin\/(mail_list|frame_html|frame|mail|readdata)|home\/index/i;
+    const appQQRe =
+      /wx\.mail\.qq\.com|cgi-bin\/(mail_list|frame_html|frame|mail|readdata)|home\/index/i;
 
     if (isQQ) {
       if (loginRe.test(href) && !/wx\.mail\.qq\.com/i.test(href)) stage = 'login-redirect';
@@ -495,16 +321,26 @@
       contentReached,
       frameRole: isTopFrame ? 'top' : 'sub',
       // 上一跳(经 referrer)是否也是本邮箱域内 → 用于确认是否为「站内跳转链」
-      redirectFromMailDomain: (referrer && /(^|\.)(163\.com|qq\.com)$/i.test(
-        (function(){ try { return new URL(referrer).hostname; } catch(e){ return ''; } })()
-      )) || false,
+      redirectFromMailDomain:
+        (referrer &&
+          /(^|\.)(163\.com|qq\.com)$/i.test(
+            (function () {
+              try {
+                return new URL(referrer).hostname;
+              } catch (e) {
+                return '';
+              }
+            })()
+          )) ||
+        false,
     };
   }
 
   function classifyPage(diag, best) {
-    const path = (location.pathname || '');
+    const path = location.pathname || '';
     const is163InboxPath = /js6\/main|main\.jsp|s\?func=mbox/i.test(path + ' ' + location.href);
-    const isQQInboxPath = /cgi-bin\/(mail_list|frame_html|frame|mail|login|readdata)|home\/index/i.test(location.href);
+    const isQQInboxPath =
+      /cgi-bin\/(mail_list|frame_html|frame|mail|login|readdata)|home\/index/i.test(location.href);
     const hasMailTitle = /邮箱|mail|收件箱|未读/i.test(diag.title || '');
     const hasUnread = typeof best.unread === 'number';
 
@@ -520,7 +356,12 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message || (message.type !== 'probeContent163' && message.type !== 'probeContentQQ' && message.type !== 'probeContentUSTC')) {
+    if (
+      !message ||
+      (message.type !== 'probeContent163' &&
+        message.type !== 'probeContentQQ' &&
+        message.type !== 'probeContentUSTC')
+    ) {
       return false;
     }
 
@@ -556,7 +397,7 @@
           dom: diag,
           best,
           nav,
-          sid: isUSTC ? sid : (diag.sidFromUrl || diag.sidFromDom),
+          sid: isUSTC ? sid : diag.sidFromUrl || diag.sidFromDom,
         };
 
         const loggedIn = !!sid || !!best.unread;
@@ -564,18 +405,20 @@
         // 通知 SW 缓存 sid
         if (sid) {
           try {
-            chrome.runtime.sendMessage({
-              type: 'contentPageReady',
-              detail: {
-                host: HOST,
-                url: location.href,
-                referrer: document.referrer || '',
-                navStage: nav.stage,
-                readyState: document.readyState,
-                sid: isUSTC ? sid : (diag.sidFromUrl || diag.sidFromDom),
-                provider: isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null,
-              }
-            }).catch(() => {});
+            chrome.runtime
+              .sendMessage({
+                type: 'contentPageReady',
+                detail: {
+                  host: HOST,
+                  url: location.href,
+                  referrer: document.referrer || '',
+                  navStage: nav.stage,
+                  readyState: document.readyState,
+                  sid: isUSTC ? sid : diag.sidFromUrl || diag.sidFromDom,
+                  provider: isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null,
+                },
+              })
+              .catch(() => {});
           } catch (e) {}
         }
 
@@ -607,23 +450,25 @@
         const best = computeBest(diag);
         const cls = classifyPage(diag, best);
         const nav = getNavContext(diag, best);
-        chrome.runtime.sendMessage({
-          type: 'contentPageReady',
-          detail: {
-            host: HOST,
-            url: location.href,
-            referrer: document.referrer || '',
-            title: document.title,
-            navStage: nav.stage,
-            readyState: document.readyState,
-            contentReached: nav.contentReached,
-            frameRole: nav.frameRole,
-            pageType: cls.pageType,
-            unreadCount: best.unread,
-            sid: isUSTC ? sid : (diag.sidFromUrl || diag.sidFromDom),
-            hasBody: !!(document.body && document.body.innerText),
-          }
-        }).catch(() => {});
+        chrome.runtime
+          .sendMessage({
+            type: 'contentPageReady',
+            detail: {
+              host: HOST,
+              url: location.href,
+              referrer: document.referrer || '',
+              title: document.title,
+              navStage: nav.stage,
+              readyState: document.readyState,
+              contentReached: nav.contentReached,
+              frameRole: nav.frameRole,
+              pageType: cls.pageType,
+              unreadCount: best.unread,
+              sid: isUSTC ? sid : diag.sidFromUrl || diag.sidFromDom,
+              hasBody: !!(document.body && document.body.innerText),
+            },
+          })
+          .catch(() => {});
       } catch (e) {}
     })();
   }
