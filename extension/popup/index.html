@@ -119,18 +119,16 @@
       margin-bottom: 6px;
       border: 1px solid #dee2e6;
       display: flex;
-      cursor: pointer;
-      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
       justify-content: space-between;
       align-items: center;
     }
-    .account-card:hover { background: #f1f6fd; box-shadow: 0 2px 8px rgba(25,118,210,0.15); }
-    .account-card:active { transform: scale(0.98); }
+    .account-card:hover { background: #f7fafd; }
     .account-card:last-child { margin-bottom: 0; }
     .account-card .acc-info {
       flex: 1;
       min-width: 0;
       overflow: hidden;
+      cursor: default;
     }
     .account-card .acc-email {
       font-size: 13px;
@@ -144,11 +142,20 @@
       color: #6c757d;
       margin-top: 1px;
     }
+    .account-card .acc-right {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      margin-left: 6px;
+    }
     .account-card .acc-unread {
       font-size: 18px;
       font-weight: 700;
       margin-right: 8px;
+      min-width: 18px;
+      text-align: right;
     }
+    .account-card .acc-unread-placeholder { font-size: 14px; font-weight: 500; }
     .account-card .acc-actions {
       display: flex;
       gap: 3px;
@@ -159,7 +166,7 @@
       color: #495057;
       border: none;
       border-radius: 3px;
-      padding: 2px 6px;
+      padding: 2px 7px;
       font-size: 10px;
       cursor: pointer;
       white-space: nowrap;
@@ -206,12 +213,6 @@
     .badge-green { background: #d1e7dd; color: #0f5132; }
     .badge-red { background: #f8d7da; color: #842029; }
     .badge-orange { background: #fff3cd; color: #664d03; }
-    .footer {
-      text-align: center;
-      font-size: 11px;
-      color: #adb5bd;
-      padding: 4px 0 8px;
-    }
     .empty {
       text-align: center;
       color: #adb5bd;
@@ -513,7 +514,7 @@
       </div>
     </div>
 
-    <!-- ═══ Tab: 调试 ═══ -->
+    <!-- ═══ Tab: 调试（面向开发） ═══ -->
     <div class="tab-content" id="tab-debug">
       <!-- 同步会话 -->
       <div class="section">
@@ -567,7 +568,7 @@
     <div id="probe-result" class="action-result" style="display:none;position:sticky;bottom:0;left:0;right:0;background:#f8f9fa;border-top:1px solid #dee2e6;z-index:100;margin-top:auto;">
       <div class="result-header">
         <span class="result-title" id="probe-result-title"></span>
-        <button id="btn-copy-result" class="btn-copy" title="复制结果">📋</button>
+        <button id="btn-copy-result" class="btn-copy" title="复制结果" aria-label="复制结果">📋</button>
       </div>
       <pre id="probe-result-text" style="max-height:120px;"></pre>
     </div>
@@ -630,7 +631,7 @@
 
       <!-- 探测接口配置（可折叠） -->
       <div class="section">
-        <button id="btn-toggle-endpoints" class="collapse-btn">▸ 探测接口（163 / QQ）</button>
+        <button id="btn-toggle-endpoints" class="collapse-btn">▸ 探测接口配置</button>
         <div class="collapsible-content" id="endpoint-config" style="margin-top:4px;"></div>
       </div>
 
@@ -643,11 +644,6 @@
         <div id="save-status" class="save-status"></div>
       </div>
 
-      <!-- 页脚信息（放入设置标签页内） -->
-      <div class="footer">
-        <a href="#" id="link-options" style="color:#1976d2;text-decoration:none;">打开完整设置页</a>
-        <span style="color:#adb5bd;"> · Mail Notifier v0.9.5</span>
-      </div>
     </div>
 
     <!-- ═══ Tab: 统计 ═══ -->
@@ -673,7 +669,7 @@
       </div>
     </div>
 
-    <!-- ═══ Tab: 日志（最后） ═══ -->
+    <!-- ═══ Tab: 日志 ═══ -->
     <div class="tab-content" id="tab-logs">
       <div class="section">
         <div class="log-header">
@@ -692,6 +688,6 @@
 
   </div>
 
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
