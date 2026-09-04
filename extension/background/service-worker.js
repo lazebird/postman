@@ -28,7 +28,12 @@ import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
 import { probeGmail } from '../providers/provider-gmail.js';
-import { authorizeGmailInteractive, hasGmailToken } from '../shared/gmail-oauth.js';
+import {
+  authorizeGmailInteractive,
+  hasGmailToken,
+  gmailNotifyGate,
+  markGmailNotifySent,
+} from '../shared/gmail-oauth.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -1341,9 +1346,61 @@ async function runAllChecks(context = {}) {
   // 检查新邮件并发送通知
   await checkNewEmails(allResults);
 
+  // 自动（定时）路径下，Gmail 令牌过期且静默续期失败时，发一条**带节流**的系统
+  // 通知引导用户手动授权；全程不开标签、不弹授权窗（AGENTS 规则 1/2）。
+  if (trigger.auto) {
+    await maybeNotifyGmailNeedsManualAuth(allResults);
+  }
+
   await saveCheckResult(summary);
   await updateBadge(summary);
   return summary;
+}
+
+// Gmail「需手动授权」提醒的节流间隔：默认 4 小时才允许提醒一次，避免反复打扰。
+const GMAIL_AUTH_NOTIFY_THROTTLE_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * 自动检查路径下，若 Gmail 账户因令牌过期且静默续期失败而需手动授权，
+ * 发送一条**带节流**的系统通知，引导用户在 Popup/Options 中手动同步授权。
+ *
+ * 说明：
+ *  - 仅在"曾授权过但令牌已过期、且静默续期确实失败"（renewalFailed）时提醒，
+ *    从未授权过的场景不在此提醒（由用户在界面主动发起首次授权）。
+ *  - 通过 chrome.notifications 发送，不影响页面、不开标签、不弹 OAuth 授权窗。
+ *
+ * @param {Array} results 本次检查的账户级结果
+ */
+async function maybeNotifyGmailNeedsManualAuth(results) {
+  try {
+    const needs = results.find(
+      (r) =>
+        r.provider === PROVIDERS.GMAIL &&
+        r.needsAuth === true &&
+        r.renewalFailed === true &&
+        r.hadToken !== false
+    );
+    if (!needs) return;
+
+    const { shouldNotify } = await gmailNotifyGate(GMAIL_AUTH_NOTIFY_THROTTLE_MS);
+    if (!shouldNotify) {
+      logger.info('Gmail 需手动授权提醒被节流，本次不重复通知');
+      return;
+    }
+
+    const notification = {
+      type: 'basic',
+      iconUrl: 'icons/icon-err-48.png',
+      title: '🔑 Gmail 需要重新授权',
+      message:
+        'Gmail 登录已过期且静默续期失败，无法后台读取未读。请点击扩展图标并同步 Gmail 授权一次。',
+    };
+    await chrome.notifications.create(`gmail-auth-${Date.now()}`, notification);
+    await markGmailNotifySent();
+    logger.info('已发送 Gmail 需手动授权提醒通知（节流生效）');
+  } catch (err) {
+    logger.warn(`Gmail 手动授权提醒发送失败: ${err.message}`);
+  }
 }
 
 /**
