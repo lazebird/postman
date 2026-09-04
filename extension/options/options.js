@@ -156,9 +156,6 @@ async function renderSessionStatus() {
         : '<span class="sid-chip sid-no">未授权 ❌</span>';
 
       // 获取最近一次单账户结果，展示授权/获取的清晰状态
-      const recent = status.recentResults?.find
-        ? status.recentResults.find((r) => r.provider && !r.source)
-        : null;
       const sample =
         status.recentResults?.find(
           (r) => r.unreadCount != null || r.authVerified === true || r.needsInboxPage === true
@@ -362,7 +359,7 @@ async function removeAccount(index) {
 function notifySWAccountsChanged() {
   try {
     chrome.runtime.sendMessage({ type: 'accountsChanged' });
-  } catch {
+  } catch (e) {
     // SW 可能不在线
   }
 }
@@ -414,7 +411,7 @@ function findUnreadFromResult(result) {
         return epResult.unreadCount;
       }
     }
-  } catch {}
+  } catch (e) {}
   return null;
 }
 
@@ -455,7 +452,7 @@ async function saveSettings() {
 
   try {
     chrome.runtime.sendMessage({ type: 'settingsChanged' });
-  } catch {}
+  } catch (e) {}
 
   showStatus('设置已保存', 'success');
 }

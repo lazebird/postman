@@ -35,8 +35,6 @@ function inRoundRect(x, y, w, h, r) {
 function samplePixel(u, v, cfg) {
   const [br, bg, bb] = cfg.base; // 背景 = 状态色
   const [dr, dg, db] = cfg.dark; // 细节（白上的状态色线）
-  const W = 1,
-    H = 1;
 
   // 背景（整块，圆角）——底色即状态色
   const rounded = inRoundRect(u * 16, v * 16, 16, 16, 3.2);
@@ -70,7 +68,6 @@ function samplePixel(u, v, cfg) {
   // 1) flap 折角 V：信封上部一个由两上角向下汇聚到约 ly=0.32 的倒三角开口(露出状态色暗调)
   const cxL = 0.5;
   const foldY = 0.3;
-  const triH = foldY; // 从顶到折点
   if (ly <= foldY) {
     // 在该三角内：|lx-cxL| <= (cxL) * (1 - ly/foldY) 渐宽到顶
     const half = cxL * (1 - ly / foldY);
@@ -98,7 +95,6 @@ function samplePixel(u, v, cfg) {
 
 function drawIcon(size, cfg) {
   const SS = 4; // 超采样
-  const big = size * SS;
   const px = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {

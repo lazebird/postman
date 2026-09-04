@@ -13,7 +13,6 @@
   }
 
   const { url, options, fnName } = params;
-  const __r = window.__mailProbeResult || [];
   window[fnName] = null;
 
   fetch(url, options || {})

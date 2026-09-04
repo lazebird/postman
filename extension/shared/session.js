@@ -98,7 +98,7 @@ export function replaceSidInUrl(url, sid) {
 export async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const { signal, ...rest } = options || {};
+  const { signal: _signal, ...rest } = options || {};
   try {
     return await fetch(url, { ...rest, signal: controller.signal });
   } finally {

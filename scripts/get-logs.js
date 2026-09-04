@@ -9,20 +9,9 @@
  *   node get-logs.js --tail       # 持续跟踪日志
  */
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-
-// 扩展 ID（需要从 edge://extensions/ 获取）
-const EXTENSION_ID = 'YOUR_EXTENSION_ID';
-
 // 获取日志
 async function getLogs(options = {}) {
-  const { limit = 100, filter = null, tail = false } = options;
-
-  // 使用 Chrome DevTools Protocol 获取日志
-  // 注意：这需要启用远程调试端口
-  const cmd = `chrome.exe --remote-debugging-port=9222`;
+  const { limit = 100, filter = null } = options;
 
   try {
     // 方法 1: 通过 chrome.storage.session 获取
@@ -40,7 +29,7 @@ async function getLogs(options = {}) {
 }
 
 // 通过 storage.session 获取日志
-async function fetchLogsFromStorage(limit) {
+async function fetchLogsFromStorage(_limit) {
   // 这个方法需要扩展提供 API
   // 我们使用 chrome.runtime.sendMessage 来获取
   return new Promise((resolve, reject) => {

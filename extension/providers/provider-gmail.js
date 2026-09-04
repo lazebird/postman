@@ -18,7 +18,7 @@ import { getCachedGmailToken, clearGmailToken } from '../shared/gmail-oauth.js';
 
 const logger = createLogger('provider-gmail');
 
-export async function probeGmail(options = {}) {
+export async function probeGmail(_options = {}) {
   const config = PROVIDER_CONFIG['gmail'];
 
   logger.info('开始探测 Gmail 未读接口');

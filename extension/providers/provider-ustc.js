@@ -53,7 +53,6 @@ export async function probeUSTC(options = {}) {
 
   const results = [];
   let anySucceeded = false;
-  let lastError = null;
 
   for (const endpoint of allEndpoints) {
     const result = await probeSingleEndpoint(endpoint, sid, options);
@@ -63,7 +62,6 @@ export async function probeUSTC(options = {}) {
       anySucceeded = true;
       break;
     }
-    if (result.error) lastError = result.error;
   }
 
   const allFailed = results.length > 0 && results.every((r) => !r.success);
@@ -98,7 +96,7 @@ export async function probeUSTC(options = {}) {
 /**
  * 探测单个 USTC 接口端点
  */
-async function probeSingleEndpoint(endpoint, sid, options) {
+async function probeSingleEndpoint(endpoint, sid, _options) {
   const logger_ep = createLogger(`ustc:${endpoint.name}`);
   logger_ep.info(`探测接口 ${endpoint.name}${sid ? '' : '（无 sid，仅依赖 Cookie）'}`);
 

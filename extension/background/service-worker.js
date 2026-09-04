@@ -23,7 +23,7 @@ import {
   getCheckResults,
   getDebugLogs,
 } from '../shared/storage.js';
-import { PROVIDERS, API_PATTERN_KEYS, PROVIDER_CONFIG } from '../shared/constants.js';
+import { PROVIDERS } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
@@ -127,9 +127,7 @@ async function handleMessage(message, sender) {
     }
 
     case 'testEndpoint':
-      return await runEndpointTest(message.provider, message.endpointName, {
-        source: 'manual-test',
-      });
+      return await runEndpointTest(message.provider, message.endpointName);
 
     case 'possibilityTest': {
       // 「所有可能性」后台无标签测试：穷举 Cookie 附加策略 + 各端点，
@@ -386,9 +384,6 @@ const PROVIDER_OPEN_URL = {
   ustc: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp',
   gmail: 'https://mail.google.com/mail/u/0/#inbox',
 };
-
-// QQ 页面中可识别的域名
-const QQ_MAIL_DOMAINS = ['mail.qq.com', 'wx.mail.qq.com', 'exmail.qq.com'];
 
 // 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
 const CONTENT_PROBE_PROVIDERS = new Set([
@@ -1324,7 +1319,6 @@ async function checkNewEmails(results) {
 async function sendNewEmailNotification(result) {
   try {
     const provider = result.provider;
-    const email = result.email;
     const unreadCount = result.unreadCount;
 
     // 获取提供商名称
@@ -1395,7 +1389,7 @@ async function runSingleProvider(provider, context = {}) {
   return { success: true, provider, results };
 }
 
-async function runEndpointTest(provider, endpointName, context = {}) {
+async function runEndpointTest(provider, endpointName) {
   logger.info(`手动测试接口: provider=${provider}, endpoint=${endpointName}`);
   let providerResult;
   const opts = { endpointNames: endpointName ? [endpointName] : [] };
