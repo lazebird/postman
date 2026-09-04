@@ -25,6 +25,14 @@ export const SESSION_KEYS = {
 // sid 缓存有效期：7 天（webmail 会话通常持续数周，持久化后无需频繁重新同步）
 export const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// Gmail OAuth2 token 缓存键（chrome.storage.local 持久化，浏览器重启保留）
+// 符合 AGENTS 规则 3：会话令牌优先持久化存储，后台直调时从缓存读取，
+// 避免每次后台检查都依赖 chrome.identity（在 Microsoft Edge 上不受支持）。
+export const GMAIL_TOKEN_KEYS = {
+  TOKEN: 'gmail_token',
+  EXPIRY: 'gmail_token_expiry',
+};
+
 // 已捕获 API 模式的存储键
 export const API_PATTERN_KEYS = {
   CAPTURED_163: 'api_patterns_163',

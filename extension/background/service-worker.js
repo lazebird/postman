@@ -21,7 +21,7 @@ import { PROVIDERS, API_PATTERN_KEYS, PROVIDER_CONFIG } from '../shared/constant
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
-import { probeGmail } from '../providers/provider-gmail.js';
+import { probeGmail, authorizeGmail } from '../providers/provider-gmail.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -55,6 +55,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 /**
  * 初始化 Gmail OAuth2
+ *
+ * v0.9.6：不再在安装/更新时自动触发 interactive 授权。
+ *   - 交互式 launchWebAuthFlow 会在安装/更新时自动弹出 Google 授权页，干扰用户；
+ *   - 在 Microsoft Edge 上 chrome.identity 根本不受支持，自动弹授权页必然失败且毫无意义。
+ * 现改为：仅在已存在有效 clientId 且浏览器为 Chromium(Chrome) 时，做一次静默探测，
+ * 不做任何交互、不弹窗。真正的授权由用户在 Popup「同步Gmail」按钮主动触发（authorizeGmail）。
  */
 async function initGmailOAuth2() {
   try {
@@ -63,19 +69,13 @@ async function initGmailOAuth2() {
       logger.warn('Gmail Client ID 未配置，跳过 OAuth2 初始化');
       return;
     }
-    
-    const extensionId = chrome.runtime.id;
-    const scopes = PROVIDER_CONFIG['gmail'].oauth2.scopes.join(' ');
-    // Chrome Extension OAuth2 使用 chromiumapp.org 作为 redirect URI
-    const redirectUri = `https://${extensionId}.chromiumapp.org/`;
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes)}&prompt=consent`;
-    
-    await chrome.identity.launchWebAuthFlow({
-      url: authUrl,
-      interactive: true,
-    });
-    
-    logger.info('Gmail OAuth2 初始化完成');
+    // Edge 不支持 chrome.identity，跳过自动初始化
+    const { detectBrowser } = await import('../providers/provider-gmail.js');
+    if (detectBrowser() === 'edge') {
+      logger.warn('当前为 Microsoft Edge，chrome.identity 不受支持，跳过 Gmail OAuth2 自动初始化');
+      return;
+    }
+    logger.info('Gmail Client ID 已配置（授权将由用户在「同步Gmail」时主动触发）');
   } catch (err) {
     logger.warn(`Gmail OAuth2 初始化失败: ${err.message}`);
   }
@@ -186,13 +186,10 @@ async function handleMessage(message, sender) {
     }
 
     case 'gmailAuthorize': {
-      // Gmail OAuth2 授权流程
-      try {
-        const result = await chrome.identity.getAuthToken({ interactive: true });
-        return { success: !!result, token: result ? 'obtained' : null };
-      } catch (err) {
-        return { success: false, error: err.message };
-      }
+      // Gmail OAuth2 授权流程（浏览器感知）
+      // chrome.identity 在 Microsoft Edge 上不受支持，此处统一走 provider 层，
+      // 返回结构化结果，避免把引擎原始英文错误原样抛给用户。
+      return await authorizeGmail();
     }
 
     case 'openMailboxTab':
