@@ -8,13 +8,14 @@
  *     同时兼容 Chrome 与 Microsoft Edge）。
  *   - 移除对 chrome.identity.getAuthToken 的依赖——该 API 在 Edge 上不被支持，
  *     导致 Gmail 在 Edge 里始终无法检查。
- *   - 后台定时检查仅读取持久化的缓存令牌，绝不开标签、不弹授权页（AGENTS 规则 1）；
- *     令牌缺失/过期时返回 needsAuth，交由上层引导用户手动同步授权。
+ *   - 后台定时检查优先读取持久化的缓存令牌（chrome.storage.local），令牌过期时
+ *     先尝试**静默续期**（interactive=false + prompt=none，绝不开标签、不弹授权页，
+ *     符合 AGENTS 规则 1/2）；仅当静默续期也失败时返回 needsAuth，交由上层引导用户手动同步授权。
  */
 
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG } from '../shared/constants.js';
-import { getCachedGmailToken, clearGmailToken } from '../shared/gmail-oauth.js';
+import { resolveGmailToken, clearGmailToken } from '../shared/gmail-oauth.js';
 
 const logger = createLogger('provider-gmail');
 
@@ -23,10 +24,13 @@ export async function probeGmail(_options = {}) {
 
   logger.info('开始探测 Gmail 未读接口');
 
-  // 1. 获取缓存的 OAuth2 访问令牌（后台安全路径：仅读缓存，不弹窗/不开标签）
-  const token = await getCachedGmailToken();
+  // 1. 获取有效 OAuth2 访问令牌。后台安全路径：缓存有效则直用；缓存过期/缺失且曾
+  //    授权过时先尝试**静默续期**（interactive=false + prompt=none），全程不开标签、
+  //    不弹授权窗（AGENTS 规则 1/2）。仅当续期也失败时才返回 needsAuth 引导手动授权。
+  const resolved = await resolveGmailToken({ allowSilentRenew: true });
+  const token = resolved.token;
   if (!token) {
-    logger.warn('Gmail 未授权或令牌已过期，需要用户手动同步授权');
+    logger.warn('Gmail 无有效令牌，静默续期失败，需用户手动同步授权');
     return {
       provider: 'gmail',
       providerName: config.name,
@@ -36,8 +40,12 @@ export async function probeGmail(_options = {}) {
       allFailed: true,
       session: { sidObtained: false, loggedIn: false, source: 'oauth2' },
       results: [],
-      error: 'Gmail not authorized (需手动同步授权一次)',
+      error: 'Gmail not authorized (静默续期失败，需手动同步授权一次)',
       needsManualAuth: true,
+      renewalAttempted: !!resolved.renewalAttempted,
+      renewalFailed: !!resolved.renewalFailed,
+      renewalReason: resolved.reason || null,
+      hadToken: !!resolved.hadToken,
     };
   }
 

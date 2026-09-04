@@ -27,6 +27,17 @@ export const GMAIL_TOKEN_KEYS = {
   EXPIRY: 'gmail_access_token_expiry',
 };
 
+// Gmail 静默续期 / 授权提醒的节流时间戳存储键（chrome.storage.local 持久化）。
+// 符合 AGENTS 规则 3：节流状态同样持久化，浏览器重启不清零，避免漏/重提醒。
+//  - SILENT_LAST_ATTEMPT：最近一次静默续期尝试时间；用于避免每次 alarm 都打一次
+//    Google 授权端点（无会话时反复失败既浪费又可能触达限流）。
+//  - NOTIFY_LAST_TIME：最近一次「需手动授权」提醒通知时间；用于对通知节流，
+//    避免自动检查每次失败都弹一条骚扰用户。
+export const GMAIL_RENEWAL_KEYS = {
+  SILENT_LAST_ATTEMPT: 'gmail_silent_renew_last_attempt',
+  NOTIFY_LAST_TIME: 'gmail_auth_notify_last_time',
+};
+
 // 已捕获 API 模式的存储键
 export const API_PATTERN_KEYS = {
   CAPTURED_163: 'api_patterns_163',
