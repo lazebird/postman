@@ -35,7 +35,6 @@
 │   │   ├── storage.js           # chrome.storage 分层封装
 │   │   └── api-patterns.js      # API 模式捕获与回放
 │   ├── popup/                   # Popup UI
-│   ├── options/                 # 设置页面
 │   └── debug/                   # 调试与验证指南
 ```
 

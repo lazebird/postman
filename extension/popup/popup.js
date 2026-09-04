@@ -1,42 +1,15 @@
 /**
- * popup.js - Popup 逻辑（v0.8.0 UI 重构版）
+ * popup.js - Popup 逻辑（单一 UI，Options 页已移除）
  *
- * 标签页结构：状态 → 探测 → 设置 → 统计 → 日志
- * - 设置标签页：整合原 Options 页面的配置内容（账户管理/检查设置/接口选择）
+ * 标签页结构（与 popup/index.html 的 DOM 顺序一致）：
+ *   状态 → 设置 → 统计 → 日志 → 调试
+ * - 设置标签页：账户管理 / 检查设置 / 探测接口选择（原 Options 内容已全部收敛于此）
  * - 统计标签页：会话授权状态、数据统计、最近检查记录
- * - 日志标签页放最后
- * - 所有标签页内去除冗余标题行，精简界面
+ * - 调试标签页：面向开发的诊断能力（折叠，普通用户默认不展开）
  */
 
-// ========== 常量 ==========
-const PROVIDER_LABELS = {
-  netease_163: '163邮箱',
-  qq: 'QQ邮箱',
-  ustc: '中科大',
-  gmail: 'Gmail',
-};
-
-const ENDPOINT_OPTIONS = {
-  netease_163: [
-    { name: 'js6_rpc_list', label: 'RPC · 收件箱列表' },
-    { name: 'js6_rpc_getfolder', label: 'RPC · 文件夹计数' },
-    { name: 'js6_rpc_getunread', label: 'RPC · 未读计数' },
-    { name: 'js6_sys_getfolder', label: 'RPC · 会话信息' },
-  ],
-  qq: [
-    { name: 'wx_readdata', label: '新网页版 · 读取收件箱' },
-    { name: 'wx_readindex', label: '新网页版 · 读取邮箱索引' },
-    { name: 'wx_mail_list', label: '新网页版 · 收件箱列表' },
-    { name: 'wx_unread', label: '新网页版 · 未读计数' },
-    { name: 'cgi_mail_list', label: '旧版 · 收件箱列表' },
-    { name: 'cgi_fr_show', label: '旧版 · 轻量未读' },
-  ],
-  ustc: [
-    { name: 'ustc_getallfolders', label: '获取所有文件夹' },
-    { name: 'ustc_getattrs', label: '获取用户属性' },
-  ],
-  gmail: [{ name: 'gmail_api', label: 'Gmail REST API' }],
-};
+// ========== 常量（收敛于 shared/ui-meta.js 单一事实源）==========
+import { PROVIDER_LABELS, ENDPOINT_OPTIONS } from '../shared/ui-meta.js';
 
 let currentAccounts = [];
 let currentSettings = {};
@@ -54,12 +27,6 @@ document.querySelectorAll('.tab').forEach((tab) => {
     if (tabId === 'settings') loadSettingsPanel();
     if (tabId === 'logs') refreshLogs();
   });
-});
-
-// ========== 打开完整设置页 ==========
-document.getElementById('link-options').addEventListener('click', (e) => {
-  e.preventDefault();
-  if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
 });
 
 // ========== 状态标签页 ==========
@@ -137,7 +104,7 @@ function renderOverviewAccounts(status) {
     const unreadHtml =
       unread !== null
         ? `<span class="acc-unread ${unread > 0 ? 'acc-unread-num' : 'acc-unread-zero'}">${unread}</span>`
-        : '<span class="acc-unread acc-unread-zero" style="font-size:13px;">-</span>';
+        : '<span class="acc-unread acc-unread-zero acc-unread-placeholder">-</span>';
 
     let statusBadge = '';
     if (st.needsInboxPage === true) {
@@ -152,39 +119,46 @@ function renderOverviewAccounts(status) {
       statusBadge = '<span class="acc-status-badge acc-status-err">未检查</span>';
     }
 
-    // 「打开收件箱」按钮移除：点击邮箱卡片即可直接打开
+    // 明确的操作按钮：打开邮箱 / 检查该账户，避免整卡误触
     card.dataset.provider = acc.provider;
     card.dataset.email = acc.email;
-    card.title = '点击打开邮箱收件箱';
 
-    const refreshBtn = `<button class="acc-action-btn" data-provider="${acc.provider}" data-action="refresh" title="检查该账户">🔄</button>`;
+    const actionsHtml = `
+      <div class="acc-actions">
+        <button class="acc-action-btn jump" data-action="open" data-provider="${acc.provider}"
+          title="打开邮箱收件箱" aria-label="打开 ${escapeHtml(acc.email)} 收件箱">打开</button>
+        <button class="acc-action-btn" data-action="refresh" data-provider="${acc.provider}"
+          title="检查该账户" aria-label="检查 ${escapeHtml(acc.email)}">🔄</button>
+      </div>
+    `;
 
     card.innerHTML = `
       <div class="acc-info">
         <div class="acc-email">${escapeHtml(acc.email)} ${statusBadge}</div>
         <div class="acc-meta">${providerName(acc.provider)}${st.timestamp ? ` · ${new Date(st.timestamp).toLocaleTimeString()}` : ''}${st.method ? ` · ${st.method}` : ''}</div>
       </div>
-      <div style="display:flex;align-items:center;">
+      <div class="acc-right">
         ${unreadHtml}
-        <div class="acc-actions">${refreshBtn}</div>
+        ${actionsHtml}
       </div>
     `;
     accountsList.appendChild(card);
   });
 
-  // 绑定事件：点击邮箱卡片直接打开收件箱
+  // 通过显式按钮触发打开/检查，卡片整体不再作为点击热区
   accountsList.querySelectorAll('.account-card').forEach((card) => {
-    card.addEventListener('click', async () => {
-      const provider = card.dataset.provider;
-      try {
-        await sendMessage({ type: 'openInbox', provider });
-      } catch (err) {
-        console.error('打开邮箱失败:', err);
-      }
+    card.querySelectorAll('.acc-action-btn[data-action="open"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const provider = btn.dataset.provider;
+        try {
+          await sendMessage({ type: 'openInbox', provider });
+        } catch (err) {
+          console.error('打开邮箱失败:', err);
+        }
+      });
     });
     card.querySelectorAll('.acc-action-btn[data-action="refresh"]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
+      btn.addEventListener('click', () => {
         checkAccountCard(btn.dataset.provider, btn);
       });
     });
@@ -390,12 +364,17 @@ function notifyAccountsChanged() {
   } catch {}
 }
 
+// 保存提示的隐藏定时器句柄：连续操作时先清除旧的，避免提示被提前覆盖隐藏
+let saveStatusHideTimer = null;
+
 function showSaveStatus(msg, type) {
   const el = document.getElementById('save-status');
   el.textContent = msg;
   el.className = `save-status ${type}`;
-  setTimeout(() => {
+  if (saveStatusHideTimer) clearTimeout(saveStatusHideTimer);
+  saveStatusHideTimer = setTimeout(() => {
     el.style.display = 'none';
+    saveStatusHideTimer = null;
   }, 3000);
 }
 
@@ -822,9 +801,8 @@ function hideLoading() {
 
 // 全量检查
 async function runFullCheck() {
-  // 同时处理状态页和调试页的全量检查按钮
-  const btn =
-    document.getElementById('btn-full-check') || document.getElementById('btn-full-check-status');
+  // 状态页唯一入口按钮 btn-full-check-status
+  const btn = document.getElementById('btn-full-check-status');
   const origText = btn?.textContent;
   if (btn) {
     btn.disabled = true;
@@ -1108,8 +1086,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-sync-ustc')?.addEventListener('click', () => syncSession('ustc'));
   document.getElementById('btn-sync-gmail')?.addEventListener('click', () => syncSession('gmail'));
 
-  // 全量检查
-  document.getElementById('btn-full-check')?.addEventListener('click', runFullCheck);
+  // 全量检查（状态页）
   document.getElementById('btn-full-check-status')?.addEventListener('click', runFullCheck);
 
   // Cookie 诊断
