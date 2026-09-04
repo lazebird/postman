@@ -11,8 +11,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\"",
     "format:check": "prettier --check \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\"",
-    "release:check": "node scripts/release-pack.js --check",
-    "release:pack": "node scripts/release-pack.js"
+    "release:check": "bash scripts/release-pack.sh --check",
+    "release:pack": "bash scripts/release-pack.sh pack"
   },
   "devDependencies": {
     "eslint": "9.39.5",
