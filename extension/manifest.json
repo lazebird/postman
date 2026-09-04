@@ -59,7 +59,6 @@
       ],
       "js": [
         "content/api-interceptor.js",
-        "content/probe-fetch-inject.js",
         "content/probe-content.js"
       ],
       "run_at": "document_start",
