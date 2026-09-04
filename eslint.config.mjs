@@ -50,6 +50,9 @@ const webGlobals = {
   WebSocket: 'readonly',
   fetch: 'readonly',
   performance: 'readonly',
+  createImageBitmap: 'readonly',
+  OffscreenCanvas: 'readonly',
+  ImageData: 'readonly',
   // 定时器
   setTimeout: 'readonly',
   setInterval: 'readonly',
