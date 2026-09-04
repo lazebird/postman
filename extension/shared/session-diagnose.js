@@ -112,7 +112,7 @@ export async function diagnoseCookies(provider) {
       logger.error(`读取 ${domain} Cookie 失败: ${e.message}`);
     }
   }
-  for (const url of (COOKIE_URLS[provider] || [])) {
+  for (const url of COOKIE_URLS[provider] || []) {
     try {
       const cookies = await chrome.cookies.getAll({ url });
       for (const c of cookies || []) {
@@ -139,7 +139,7 @@ export async function diagnoseCookies(provider) {
   }));
 
   // 高置信度 auth cookie
-  const authCookies = allCookies.filter(c => isAuthCookie(provider, c));
+  const authCookies = allCookies.filter((c) => isAuthCookie(provider, c));
   result.authCookies = authCookies.map((c) => ({
     name: c.name,
     domain: c.domain,
@@ -156,12 +156,13 @@ export async function diagnoseCookies(provider) {
 
   if (authCookies.length === 0) {
     result.conclusion = 'NO_AUTH_COOKIE_VISIBLE';
-    result.summary = '未发现该站的高置信度登录会话 Cookie。可能原因：① 浏览器当前确实未登录该邮箱；② Cookie 被隔离或主机私有。请先在浏览器中打开并登录邮箱页面，然后刷新扩展再诊断。';
+    result.summary =
+      '未发现该站的高置信度登录会话 Cookie。可能原因：① 浏览器当前确实未登录该邮箱；② Cookie 被隔离或主机私有。请先在浏览器中打开并登录邮箱页面，然后刷新扩展再诊断。';
   } else {
     // 记录所有 auth cookie 的 SameSite 分布
-    const sameSiteSet = new Set(authCookies.map(c => c.sameSite));
-    const hasNone = authCookies.some(c => c.sameSite === 'no_restriction' && c.secure);
-    const hasLax = authCookies.some(c => c.sameSite === 'lax' || c.sameSite === 'unspecified');
+    const sameSiteSet = new Set(authCookies.map((c) => c.sameSite));
+    const hasNone = authCookies.some((c) => c.sameSite === 'no_restriction' && c.secure);
+    const hasLax = authCookies.some((c) => c.sameSite === 'lax' || c.sameSite === 'unspecified');
 
     if (hasNone) {
       result.conclusion = 'SW_CAN_ATTACH_COOKIES';

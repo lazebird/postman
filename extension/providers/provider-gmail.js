@@ -54,7 +54,14 @@ export async function probeGmail(options = {}) {
       needsAuth: false,
       allFailed: false,
       session: { sidObtained: true, loggedIn: true, source: 'oauth2' },
-      results: [{ endpointName: 'gmail_api', success: true, unreadCount: result.unreadCount, httpStatus: 200 }],
+      results: [
+        {
+          endpointName: 'gmail_api',
+          success: true,
+          unreadCount: result.unreadCount,
+          httpStatus: 200,
+        },
+      ],
       unreadCount: result.unreadCount,
       newEmails: result.newEmails || [],
     };
@@ -80,11 +87,12 @@ export async function probeGmail(options = {}) {
 
 async function fetchGmailUnread(token) {
   try {
-    const apiUrl = 'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=5&fields=messageId,snippet,threads';
+    const apiUrl =
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=5&fields=messageId,snippet,threads';
 
     const response = await fetch(apiUrl, {
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) {
@@ -118,16 +126,16 @@ async function fetchGmailMessageDetail(token, messageId) {
 
     const response = await fetch(apiUrl, {
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) return null;
 
     const data = await response.json();
     const headers = data.payload?.headers || [];
-    const from = headers.find(h => h.name === 'From')?.value || '未知发件人';
-    const subject = headers.find(h => h.name === 'Subject')?.value || '无主题';
-    const date = headers.find(h => h.name === 'Date')?.value || '';
+    const from = headers.find((h) => h.name === 'From')?.value || '未知发件人';
+    const subject = headers.find((h) => h.name === 'Subject')?.value || '无主题';
+    const date = headers.find((h) => h.name === 'Date')?.value || '';
 
     return { id: data.id, from, subject, date, snippet: data.snippet || '' };
   } catch (err) {
