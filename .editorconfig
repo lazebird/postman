@@ -1,0 +1,25 @@
+# EditorConfig - 统一所有编辑器/IDE 的代码格式
+# 参考：https://editorconfig.org
+# 规则优先级：越靠下的 section 越具体，覆盖上层；本地项目文件优先于用户全局设置。
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+# JSON / YAML / Markdown 使用 2 空格缩进（Prettier 默认）
+[*.{json,yaml,yml,md}]
+indent_style = space
+indent_size = 2
+
+# 保持已有二进制/特定文件不被无谓改写
+[*.png]
+insert_final_newline = false
+
+[Makefile]
+indent_style = tab

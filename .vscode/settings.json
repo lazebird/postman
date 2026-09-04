@@ -1,0 +1,23 @@
+{
+  // 保存时自动用 Prettier 格式化（需安装 ESLint / Prettier 扩展）
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  // Prettier 与仓库 .prettierrc.json 保持一致
+  "prettier.configPath": ".prettierrc.json",
+  "prettier.requireConfig": true,
+
+  // ESLint 使用扁平配置（eslint.config.mjs）
+  "eslint.useFlatConfig": true,
+  "eslint.validate": ["javascript"],
+
+  // 编辑时以仓库配置为基准，不套用个人偏好
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false
+}
