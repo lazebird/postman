@@ -1500,10 +1500,62 @@ function iconPaths(state) {
   return paths;
 }
 
-/** 切换工具栏图标为指定状态颜色 */
+/**
+ * 预解码 + 缓存各状态图标为 ImageData。
+ *
+ * 背景：在 MV3 Service Worker（Chrome/Edge）中，用 `chrome.action.setIcon({ path })`
+ * 传入图标文件路径，存在偶发「未生效 / 静默失败」的问题 —— 图标一直停留在
+ * manifest 里 default_icon（灰 off）而不随运行状态变色，但 badge 颜色却能正常切换。
+ * 改用 `imageData`（像素级）设置工具栏图标是官方推荐的可靠方式，
+ * 可规避路径图标异步加载/缓存导致的颜色不刷新问题。
+ */
+let ICON_IMAGEDATA_CACHE = null;
+
+async function decodeIconToImageData(state, size) {
+  const url = chrome.runtime.getURL(`icons/icon-${state}-${size}.png`);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`fetch ${url} -> ${resp.status}`);
+  const blob = await resp.blob();
+  const bmp = await createImageBitmap(blob);
+  try {
+    const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    return ctx.getImageData(0, 0, bmp.width, bmp.height);
+  } finally {
+    if (bmp.close) bmp.close();
+  }
+}
+
+/** 懒加载各状态图标 ImageData 缓存 */
+async function ensureIconImageDataCache() {
+  if (ICON_IMAGEDATA_CACHE) return ICON_IMAGEDATA_CACHE;
+  const cache = {};
+  for (const state of Object.keys(TOOLBAR_STATE_COLORS)) {
+    cache[state] = {};
+    for (const s of TOOLBAR_ICON_SIZES) {
+      try {
+        cache[state][s] = await decodeIconToImageData(state, s);
+      } catch (err) {
+        logger.debug(`解码工具栏图标失败 ${state}-${s}: ${err.message}`);
+      }
+    }
+  }
+  ICON_IMAGEDATA_CACHE = cache;
+  return cache;
+}
+
+/** 切换工具栏图标为指定状态颜色（优先用 imageData，失败时回退 path） */
 async function applyToolbarIcon(state) {
   try {
-    await chrome.action.setIcon({ path: iconPaths(state) });
+    const cache = await ensureIconImageDataCache();
+    const sizes = cache && cache[state];
+    if (sizes && Object.keys(sizes).length > 0) {
+      await chrome.action.setIcon({ imageData: sizes });
+    } else {
+      // 解码全部失败时的兜底：仍走路径方案
+      await chrome.action.setIcon({ path: iconPaths(state) });
+    }
   } catch (err) {
     logger.debug('设置工具栏图标失败: ' + err.message);
   }
