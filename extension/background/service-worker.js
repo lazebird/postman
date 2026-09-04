@@ -277,7 +277,7 @@ async function handleMessage(message, sender) {
             .map((p) => `${p.method} ${p.url}`)
             .filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
           logger.debug(`[capture:${provider}] 本批捕获端点:\n${distinct.join('\n')}`);
-        } catch (e) {}
+        } catch {}
       }
       return { success: true };
     }
@@ -536,7 +536,7 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
       } else {
         result.tabUrl = tabUrl;
       }
-    } catch (e) {
+    } catch {
       /* 忽略 URL 读取失败 */
     }
   }
@@ -698,7 +698,7 @@ async function probeWithRetry(
           `[redirect-trace:${provider}] tabId=${tabId} 跳转落点 #${observedChain.length}: ${curUrl}`
         );
       }
-    } catch (e) {
+    } catch {
       /* 标签可能已关闭 */
     }
     // 成功读到未读数或已授权 → 退出轮询
@@ -1211,7 +1211,7 @@ async function autoRecoverSid(provider, { keepTabOpen = false } = {}) {
     if (!keepTabOpen) {
       try {
         await chrome.tabs.remove(tabId);
-      } catch (e) {
+      } catch {
         /* ignore */
       }
     }

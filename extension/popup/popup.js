@@ -370,7 +370,7 @@ async function _saveSettings() {
   await chrome.storage.local.set({ settings: currentSettings });
   try {
     chrome.runtime.sendMessage({ type: 'settingsChanged' });
-  } catch (e) {}
+  } catch {}
   showSaveStatus('设置已保存', 'success');
 }
 
@@ -387,7 +387,7 @@ async function _resetSettings() {
 function notifyAccountsChanged() {
   try {
     chrome.runtime.sendMessage({ type: 'accountsChanged' });
-  } catch (e) {}
+  } catch {}
 }
 
 function showSaveStatus(msg, type) {
@@ -908,7 +908,7 @@ if (btnCopyResult) {
         btnCopyResult.textContent = '📋';
         btnCopyResult.classList.remove('copied');
       }, 2000);
-    } catch (err) {
+    } catch {
       // Fallback
       try {
         const originalText = textEl.textContent;
@@ -929,7 +929,7 @@ if (btnCopyResult) {
           btnCopyResult.textContent = '📋';
           btnCopyResult.classList.remove('copied');
         }, 2000);
-      } catch (e2) {
+      } catch {
         btnCopyResult.textContent = '❌';
       }
     }
@@ -967,7 +967,7 @@ async function fetchLogsFromStorage(limit = 100) {
   try {
     const { debugLogs = [] } = await chrome.storage.session.get('debugLogs');
     return Array.isArray(debugLogs) ? debugLogs.slice(0, limit) : [];
-  } catch (e) {
+  } catch {
     return [];
   }
 }
@@ -1006,7 +1006,7 @@ async function copyLogs() {
     await navigator.clipboard.writeText(text);
     copyBtn.textContent = '✅ 已复制';
     copyBtn.classList.add('copied');
-  } catch (err) {
+  } catch {
     // clipboard API 不可用时回退到 execCommand
     const container = document.getElementById('logs-container');
     const original = container.textContent;
@@ -1038,7 +1038,7 @@ async function clearLogs() {
     setTimeout(() => {
       clearBtn.textContent = '🗑 清除';
     }, 2000);
-  } catch (err) {
+  } catch {
     clearBtn.textContent = '❌ 清除失败';
     setTimeout(() => {
       clearBtn.textContent = '🗑 清除';

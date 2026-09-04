@@ -163,7 +163,7 @@ export async function getMemoryLogs(limit = 100) {
   try {
     const { getMemoryLogs: getMem } = await import('./debug.js');
     return typeof getMem === 'function' ? getMem(limit) : [];
-  } catch (e) {
+  } catch {
     return [];
   }
 }

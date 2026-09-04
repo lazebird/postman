@@ -362,7 +362,7 @@ async function removeAccount(index) {
 function notifySWAccountsChanged() {
   try {
     chrome.runtime.sendMessage({ type: 'accountsChanged' });
-  } catch (e) {
+  } catch {
     // SW 可能不在线
   }
 }
@@ -414,7 +414,7 @@ function findUnreadFromResult(result) {
         return epResult.unreadCount;
       }
     }
-  } catch (e) {}
+  } catch {}
   return null;
 }
 
@@ -455,7 +455,7 @@ async function saveSettings() {
 
   try {
     chrome.runtime.sendMessage({ type: 'settingsChanged' });
-  } catch (e) {}
+  } catch {}
 
   showStatus('设置已保存', 'success');
 }

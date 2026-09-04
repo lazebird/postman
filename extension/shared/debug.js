@@ -46,7 +46,7 @@ function persistLog(entry) {
       try {
         await chrome.storage.session.get(LOG_KEY);
         sessionAvailable = true;
-      } catch (e) {
+      } catch {
         sessionAvailable = false;
       }
     }
@@ -86,7 +86,7 @@ class DebugLogger {
       const { settings = {} } = await chrome.storage.local.get('settings');
       const level = settings.logLevel || 'INFO';
       return LOG_LEVELS[level] ?? LOG_LEVELS.INFO;
-    } catch (e) {
+    } catch {
       return LOG_LEVELS.INFO;
     }
   }
@@ -98,7 +98,7 @@ class DebugLogger {
     let currentLevel = LOG_LEVELS.INFO;
     try {
       currentLevel = await this._getLogLevel();
-    } catch (e) {
+    } catch {
       currentLevel = LOG_LEVELS.INFO;
     }
     if (LOG_LEVELS[level] < currentLevel) return;
@@ -121,7 +121,7 @@ class DebugLogger {
       } else {
         console.log(prefix, entry.message, entry.detail || '');
       }
-    } catch (e) {
+    } catch {
       // console 不可用（理论上不会发生）
     }
 
@@ -168,7 +168,7 @@ function safeStringify(obj) {
       },
       2
     );
-  } catch (e) {
+  } catch {
     return String(obj);
   }
 }
