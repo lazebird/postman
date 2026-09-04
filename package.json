@@ -1,0 +1,16 @@
+{
+  "name": "postman-mail-notifier",
+  "version": "0.9.5",
+  "private": true,
+  "description": "Browser mail notifier extension (MV3) + 静态审查与格式化工具（供 CI 与本地使用）",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\"",
+    "format:check": "prettier --check \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\""
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "prettier": "^3.3.3"
+  }
+}

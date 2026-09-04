@@ -10,6 +10,7 @@
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
 import { headersToObject, fetchWithTimeout } from '../shared/session.js';
+import { getSidRecord, clearSid } from '../shared/session-cache.js';
 import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
 
 const logger = createLogger('provider-ustc');
@@ -20,11 +21,11 @@ const logger = createLogger('provider-ustc');
 export async function probeUSTC(options = {}) {
   const config = PROVIDER_CONFIG['ustc'];
 
-  const cachedSid = await getSidFromStorage();
+  const cachedSid = await getSidRecord('ustc');
   const { sid, source: sidSource } = cachedSid;
 
   let endpoints = options.endpointNames?.length
-    ? config.probeEndpoints.filter(ep => options.endpointNames.includes(ep.name))
+    ? config.probeEndpoints.filter((ep) => options.endpointNames.includes(ep.name))
     : config.probeEndpoints;
 
   if (!endpoints.length) {
@@ -44,7 +45,7 @@ export async function probeUSTC(options = {}) {
   const allEndpoints = [...capturedEndpoints, ...endpoints];
 
   logger.info('开始探测USTC邮箱未读接口', {
-    endpoints: allEndpoints.map(e => e.name),
+    endpoints: allEndpoints.map((e) => e.name),
     hasSid: !!sid,
     sidSource: sidSource || 'none',
     capturedCount: capturedEndpoints.length,
@@ -65,8 +66,8 @@ export async function probeUSTC(options = {}) {
     if (result.error) lastError = result.error;
   }
 
-  const allFailed = results.length > 0 && results.every(r => !r.success);
-  const authBlocked = results.some(r => r.authBlocked);
+  const allFailed = results.length > 0 && results.every((r) => !r.success);
+  const authBlocked = results.some((r) => r.authBlocked);
 
   const summary = {
     provider: 'ustc',
@@ -78,7 +79,7 @@ export async function probeUSTC(options = {}) {
     session: {
       sidObtained: !!sid,
       sid: sid ? sid.substring(0, 8) + '...' : null,
-      loggedIn: anySucceeded || (sid !== null),
+      loggedIn: anySucceeded || sid !== null,
       source: sidSource || 'none',
     },
     results,
@@ -92,26 +93,6 @@ export async function probeUSTC(options = {}) {
   });
 
   return summary;
-}
-
-/**
- * 从 chrome.storage.local 读取 USTC 的缓存 sid
- */
-async function getSidFromStorage() {
-  try {
-    const data = await chrome.storage.local.get(['sid_ustc', 'sid_ustc_expiry']);
-    if (data.sid_ustc) {
-      if (data.sid_ustc_expiry && Date.now() > data.sid_ustc_expiry) {
-        logger.debug('缓存 sid 已过期');
-        await chrome.storage.local.remove(['sid_ustc', 'sid_ustc_expiry']);
-        return { sid: null, source: 'expired' };
-      }
-      return { sid: data.sid_ustc, source: 'cache' };
-    }
-  } catch (e) {
-    logger.warn(`读取缓存 sid 失败: ${e.message}`);
-  }
-  return { sid: null, source: 'none' };
 }
 
 /**
@@ -191,16 +172,17 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms`);
 
     const text = await response.text();
-    const preview = text.length > DEBUG_FEATURE.maxResponsePreviewBytes
-      ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
-      : text;
+    const preview =
+      text.length > DEBUG_FEATURE.maxResponsePreviewBytes
+        ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
+        : text;
 
     const authInfo = analyzeAuth(text, response.status);
 
     if (authInfo.authBlocked) {
       logger_ep.warn('USTC 会话已失效，清除缓存的 sid');
       try {
-        await chrome.storage.local.remove(['sid_ustc', 'sid_ustc_expiry']);
+        await clearSid('ustc');
       } catch (e) {}
     }
 
@@ -271,7 +253,7 @@ function parseUSTCResponse(text) {
   // 策略1: JSON 格式（标准）
   try {
     const data = JSON.parse(text.trim());
-    
+
     // 检查 getAllFolders 响应
     if (data.code === 'S_OK' && Array.isArray(data.var)) {
       let totalUnread = 0;
@@ -284,7 +266,7 @@ function parseUSTCResponse(text) {
         return { hasResult: true, unreadCount: totalUnread };
       }
     }
-    
+
     // 尝试递归查找未读数
     const unread = findUnreadCount(data);
     if (unread !== null) {
@@ -315,7 +297,15 @@ function parseUSTCResponse(text) {
 function findUnreadCount(data, depth = 0) {
   if (!data || typeof data !== 'object' || depth > 8) return null;
 
-  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadMessageCount', 'messageCount', 'count', 'total'];
+  const unreadKeys = [
+    'unread',
+    'unreadCount',
+    'unread_count',
+    'unreadMessageCount',
+    'messageCount',
+    'count',
+    'total',
+  ];
   for (const key of unreadKeys) {
     if (typeof data[key] === 'number') {
       return data[key];

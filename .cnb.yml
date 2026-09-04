@@ -1,0 +1,22 @@
+# 流水线配置：每次构建执行 scripts/lint.sh
+# 对代码做静态审查(ESLint)与格式化(Prettier)，并自动修复不符合要求的代码。
+# 触发：main 分支 push / 合并请求(PR)
+main:
+  push:
+    - name: lint
+      docker:
+        image: node:20
+      stages:
+        - name: install
+          script: npm ci --no-audit --no-fund
+        - name: lint
+          script: ./scripts/lint.sh
+  pull_request:
+    - name: lint
+      docker:
+        image: node:20
+      stages:
+        - name: install
+          script: npm ci --no-audit --no-fund
+        - name: lint
+          script: ./scripts/lint.sh

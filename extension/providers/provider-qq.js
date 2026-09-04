@@ -11,6 +11,7 @@
 import { createLogger } from '../shared/debug.js';
 import { PROVIDER_CONFIG, DEBUG_FEATURE } from '../shared/constants.js';
 import { headersToObject, fetchWithTimeout } from '../shared/session.js';
+import { getSidRecord, clearSid } from '../shared/session-cache.js';
 import { getApiPatterns, patternsToProbeEndpoints } from '../shared/api-patterns.js';
 
 const logger = createLogger('provider-qq');
@@ -21,11 +22,11 @@ const logger = createLogger('provider-qq');
 export async function probeQQ(options = {}) {
   const config = PROVIDER_CONFIG['qq'];
 
-  const cachedSid = await getSidFromStorage();
+  const cachedSid = await getSidRecord('qq');
   const { sid, source: sidSource } = cachedSid;
 
   let endpoints = options.endpointNames?.length
-    ? config.probeEndpoints.filter(ep => options.endpointNames.includes(ep.name))
+    ? config.probeEndpoints.filter((ep) => options.endpointNames.includes(ep.name))
     : config.probeEndpoints;
 
   if (!endpoints.length) {
@@ -45,7 +46,7 @@ export async function probeQQ(options = {}) {
   const allEndpoints = [...capturedEndpoints, ...endpoints];
 
   logger.info('开始探测QQ邮箱未读接口', {
-    endpoints: allEndpoints.map(e => e.name),
+    endpoints: allEndpoints.map((e) => e.name),
     hasSid: !!sid,
     sidSource: sidSource || 'none',
     capturedCount: capturedEndpoints.length,
@@ -67,8 +68,8 @@ export async function probeQQ(options = {}) {
     if (result.error) lastError = result.error;
   }
 
-  const allFailed = results.length > 0 && results.every(r => !r.success);
-  const authBlocked = results.some(r => r.authBlocked);
+  const allFailed = results.length > 0 && results.every((r) => !r.success);
+  const authBlocked = results.some((r) => r.authBlocked);
   const needsSid = !sid && (allFailed || authBlocked);
 
   const summary = {
@@ -82,7 +83,7 @@ export async function probeQQ(options = {}) {
     session: {
       sidObtained: !!sid,
       sid: sid ? sid.substring(0, 8) + '...' : null,
-      loggedIn: anySucceeded || (sid !== null),
+      loggedIn: anySucceeded || sid !== null,
       source: sidSource || 'none',
     },
     results,
@@ -97,26 +98,6 @@ export async function probeQQ(options = {}) {
   });
 
   return summary;
-}
-
-/**
- * 从 chrome.storage.local 读取 QQ 的缓存 sid
- */
-async function getSidFromStorage() {
-  try {
-    const data = await chrome.storage.local.get(['sid_qq', 'sid_qq_expiry']);
-    if (data.sid_qq) {
-      if (data.sid_qq_expiry && Date.now() > data.sid_qq_expiry) {
-        logger.debug('缓存 sid 已过期');
-        await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
-        return { sid: null, source: 'expired' };
-      }
-      return { sid: data.sid_qq, source: 'cache' };
-    }
-  } catch (e) {
-    logger.warn(`读取缓存 sid 失败: ${e.message}`);
-  }
-  return { sid: null, source: 'none' };
 }
 
 /**
@@ -165,7 +146,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       headers = { ...endpoint.headers };
     } else {
       headers = {
-        'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9',
         ...(endpoint.headers || {}),
       };
@@ -182,7 +163,7 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     fetchOptions.headers = headers;
 
     // POST body
-    if ((fetchOptions.method === 'POST' || fetchOptions.method === 'post')) {
+    if (fetchOptions.method === 'POST' || fetchOptions.method === 'post') {
       let body = endpoint.bodyTemplate;
       if (body) {
         body = body.replace(/\{sid\}/g, sid || '');
@@ -198,13 +179,16 @@ async function probeSingleEndpoint(endpoint, sid, options) {
     logger_ep.debug(`发起请求 ${fetchOptions.method} ${url}`);
     const response = await fetchWithTimeout(url, fetchOptions);
     const elapsed = Math.round(performance.now() - startTime);
-    logger_ep.info(`收到响应: status=${response.status}, 耗时=${elapsed}ms, finalUrl=${response.url}`);
+    logger_ep.info(
+      `收到响应: status=${response.status}, 耗时=${elapsed}ms, finalUrl=${response.url}`
+    );
 
     // 解码响应（QQ 使用 GB18030）
     const text = await decodeResponse(response);
-    const preview = text.length > DEBUG_FEATURE.maxResponsePreviewBytes
-      ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
-      : text;
+    const preview =
+      text.length > DEBUG_FEATURE.maxResponsePreviewBytes
+        ? text.substring(0, DEBUG_FEATURE.maxResponsePreviewBytes)
+        : text;
 
     const authInfo = analyzeQQAuth(text, response.status, response.url);
 
@@ -216,10 +200,12 @@ async function probeSingleEndpoint(endpoint, sid, options) {
       if (isWxDomain) {
         logger_ep.warn('QQ 会话已失效或未登录，清除缓存 sid');
         try {
-          await chrome.storage.local.remove(['sid_qq', 'sid_qq_expiry']);
+          await clearSid('qq');
         } catch (e) {}
       } else {
-        logger_ep.debug('mail.qq.com 域接口认证失败（sid 可能仍适用于 wx.mail.qq.com），不清除 sid');
+        logger_ep.debug(
+          'mail.qq.com 域接口认证失败（sid 可能仍适用于 wx.mail.qq.com），不清除 sid'
+        );
       }
     }
 
@@ -284,7 +270,10 @@ async function probeSingleEndpoint(endpoint, sid, options) {
  */
 async function decodeResponse(response) {
   const contentType = response.headers?.get?.('content-type') || '';
-  const isGB18030 = contentType.includes('gb18030') || contentType.includes('gbk') || contentType.includes('gb2312');
+  const isGB18030 =
+    contentType.includes('gb18030') ||
+    contentType.includes('gbk') ||
+    contentType.includes('gb2312');
 
   try {
     const arrayBuffer = await response.arrayBuffer();
@@ -418,7 +407,16 @@ function parseQQResponse(text) {
 function findUnreadCount(data, depth = 0) {
   if (!data || typeof data !== 'object' || depth > 8) return null;
 
-  const unreadKeys = ['unread', 'unreadCount', 'unread_count', 'unreadnum', 'messageCount', 'count', 'total', 'newCount'];
+  const unreadKeys = [
+    'unread',
+    'unreadCount',
+    'unread_count',
+    'unreadnum',
+    'messageCount',
+    'count',
+    'total',
+    'newCount',
+  ];
   for (const key of unreadKeys) {
     if (typeof data[key] === 'number') {
       return data[key];

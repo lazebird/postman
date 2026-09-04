@@ -9,9 +9,7 @@
  * 不再负责从远程页面主动获取 sid（因为 163 新版 SPA 页面无法在静态 HTML 中提取）。
  */
 
-import { createLogger } from './debug.js';
-
-const logger = createLogger('session');
+import { clearSid as clearCachedSid } from './session-cache.js';
 
 /**
  * 将 Headers 对象转为普通对象（便于序列化/日志）
@@ -69,15 +67,10 @@ export function extractSidFromContent(text) {
 }
 
 /**
- * 清除 163 或 QQ 的缓存 sid
+ * 清除某 provider 的缓存 sid（委托 shared/session-cache 统一实现）
  */
 export async function clearSid(provider) {
-  const key = provider === 'qq' ? 'sid_qq' : 'sid_163';
-  try {
-    await chrome.storage.local.remove([key, `${key}_expiry`]);
-  } catch (e) {
-    logger.warn(`清除 ${provider} sid 失败: ${e.message}`);
-  }
+  return clearCachedSid(provider);
 }
 
 /**

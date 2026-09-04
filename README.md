@@ -29,7 +29,8 @@
 │   ├── shared/
 │   │   ├── constants.js         # 提供商配置/接口端点/检查模式
 │   │   ├── debug.js             # 调试日志工具
-│   │   ├── session.js           # sid 工具函数
+│   │   ├── session.js           # sid 工具函数（URL/DOM 解析等）
+│   │   ├── session-cache.js     # sid 会话缓存统一封装（存储键映射 + TTL 读写清除）
 │   │   ├── session-diagnose.js  # Cookie 会话诊断
 │   │   ├── storage.js           # chrome.storage 分层封装
 │   │   └── api-patterns.js      # API 模式捕获与回放
@@ -130,3 +131,20 @@
 
 > 📋 **当前整体方案与进度**见 [`doc/整体方案与进度.md`](doc/整体方案与进度.md)；
 > 📜 历史选型论证与逐版本演进见 [`doc/技术选型文档.md`](doc/技术选型文档.md)
+
+
+## 代码规范与静态检查
+
+项目引入 ESLint + Prettier，统一代码风格并做静态审查，CI 每次构建都会自动执行并自动修复。
+
+- 根目录新增 `scripts/lint.sh`：先 Prettier 自动格式化，再 ESLint `--fix` 自动修复，
+  随后做只读复核，确保代码符合规范（修复后仍有无法自动处理的问题会以非零退出码告警）。
+  - 本地执行：`./scripts/lint.sh`
+  - 只读检查：`./scripts/lint.sh --check`
+  - 亦可通过 `npm run lint` / `npm run format` 分别调用。
+- ESLint 配置 `eslint.config.mjs`：`no-undef` 保持 `error`（可捕获「漏导入即调用」类缺陷），
+  对遗留代码常见且语义无害的空 `catch` 降级为 `warn`，并关闭 `no-useless-escape` 以免误改工作正常的正则。
+- 代码结构原则（数据逻辑分离 / 子模块隔离）：
+  - **sid 会话缓存**统一收敛到 `extension/shared/session-cache.js`，`service-worker` 与各 provider 不再各自硬编码存储键与过期逻辑。
+  - 其余通用工具按职责拆分在 `extension/shared/`，各 provider 仅依赖共享接口，降低耦合。
+- CI（`.cnb.yml`）：`main` 分支 push 与 PR 触发 lint，安装依赖后执行 `./scripts/lint.sh`。
