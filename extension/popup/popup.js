@@ -57,19 +57,38 @@ async function checkAccountCard(provider, btn) {
       const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
       const acc = probe?.results?.[0];
       const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
-      const needsManual = acc?.needsAuth === true || acc?.needsManual === true;
-      // 2) 未授权（无有效令牌）→ 用户主动点击，弹交互授权拿令牌，再重新探测
-      if (unread == null && needsManual) {
-        const auth = await sendMessage({ type: 'gmailAuthorize' });
-        if (auth?.success) {
-          await sendMessage({ type: 'testProvider', provider: 'gmail' });
+
+      // 是否已持有有效 Gmail 令牌（来自当前状态，hasSid 对 gmail 即令牌存在性）
+      const status = await sendMessage({ type: 'getStatus' });
+      const accSt = status?.accountStatus?.find((a) => a.provider === 'gmail');
+      const hasToken = accSt?.hasSid === true;
+
+      // 2) 已读到未读数 → 成功，无需处理
+      // 3) 未读到未读数：
+      //    a) 无有效令牌（未授权）→ 用户主动点击，弹交互授权拿令牌后重新探测
+      //    b) 已有有效令牌但 API 探测失败（如 Gmail API 未启用 / 配额受限）→
+      //       重授权无济于事，直接展示具体原因，避免「授权→再失败→又弹窗」的死循环
+      if (unread == null) {
+        if (!hasToken) {
+          const auth = await sendMessage({ type: 'gmailAuthorize' });
+          if (auth?.success) {
+            await sendMessage({ type: 'testProvider', provider: 'gmail' });
+          } else {
+            // 授权未成功：把具体原因展示出来，避免状态页只停留在「需授权」却无任何线索
+            showProbeResult('Gmail 授权未完成', {
+              success: false,
+              message: 'Gmail 授权失败或已取消，请检查下方原因后重试',
+              error: auth?.error || '未知原因',
+              needsManual: auth?.needsManual === true,
+            });
+          }
         } else {
-          // 授权未成功：把具体原因展示出来，避免状态页只停留在「需授权」却无任何线索
-          showProbeResult('Gmail 授权未完成', {
+          // 已有有效令牌但仍未读到未读数：展示 API 返回的具体原因，不再重复弹授权
+          showProbeResult('Gmail 检查失败', {
             success: false,
-            message: 'Gmail 授权失败或已取消，请检查下方原因后重试',
-            error: auth?.error || '未知原因',
-            needsManual: auth?.needsManual === true,
+            message: '已持有 Gmail 授权令牌，但未能读取未读数',
+            error: acc?.error || '请检查下方原因后处理',
+            hint: '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。',
           });
         }
       }
@@ -645,18 +664,24 @@ async function runPlanC(provider) {
   else if (provider === 'gmail') msgType = 'gmailAuthorize';
 
   try {
-    const r = await sendMessage({ type: msgType, openTab: true });
+    // Gmail：不走开头的 gmailAuthorize（避免每次探测都先弹授权窗）。改为先被动探测，
+    // 仅当确认没有有效令牌时，才由用户主动点击触发交互授权（AGENTS 规则 1）。
+    const r = provider === 'gmail' ? null : await sendMessage({ type: msgType, openTab: true });
 
     // Gmail：先直接后台探测（读缓存令牌）；未授权/令牌失效时引导交互授权
     if (provider === 'gmail') {
       if (pre) pre.textContent = '读取未读数中...';
       const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
       const acc = probe?.results?.[0];
-      const needsManual = acc?.needsManual === true || acc?.needsAuth === true;
       let unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
 
-      // 无有效令牌 → 弹交互授权（仅用户主动点击时）
-      if (needsManual && unread == null) {
+      // 是否已持有有效 Gmail 令牌（无令牌 → 需授权；有令牌但探测失败 → 展示原因，不重复弹窗）
+      const st = await sendMessage({ type: 'getStatus' });
+      const accSt = st?.accountStatus?.find((a) => a.provider === 'gmail');
+      const hasToken = accSt?.hasSid === true;
+
+      if (unread == null && !hasToken) {
+        // 无有效令牌 → 弹交互授权（仅用户主动点击时）
         showProbeResult(`获取未读数 · ${providerLabel}`, {
           success: false,
           message: 'Gmail 未授权，正在弹出授权窗口，请在弹出的 Google 页面中确认...',
@@ -692,7 +717,17 @@ async function runPlanC(provider) {
           success: unread != null,
           unreadCount: unread,
           authVerified: acc?.authVerified === true,
+          message:
+            unread != null
+              ? undefined
+              : hasToken
+                ? '已持有 Gmail 授权令牌，但未能读取未读数'
+                : 'Gmail 未读取到未读数',
           detail: acc?.error || null,
+          hint:
+            unread == null && hasToken
+              ? '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。'
+              : undefined,
         });
       }
       refreshStatus();
@@ -700,7 +735,6 @@ async function runPlanC(provider) {
     }
 
     const success = r?.probe?.success;
-    const result = success ? r?.probe : r;
     if (pre) {
       showProbeResult(`获取未读数 · ${providerLabel}`, {
         success,

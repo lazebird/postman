@@ -1481,7 +1481,10 @@ async function getStatus() {
   ];
   const sidByProvider = {};
   for (const p of STATUS_PROVIDER_KEYS) {
-    sidByProvider[p] = !!(await getCachedSid(p));
+    // Gmail 走 OAuth2 令牌而非 sid：此处用「是否存在有效令牌」作为其「已授权」判据，
+    // 否则 gmail 账户 hasSid 恒为 false，导致即使授权成功也一直停留在「需授权」。
+    sidByProvider[p] =
+      p === PROVIDERS.GMAIL ? !!(await hasGmailToken()) : !!(await getCachedSid(p));
   }
 
   // 检查 API pattern 数量
