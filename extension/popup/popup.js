@@ -78,6 +78,38 @@ function isTabVisible(tabId) {
   return document.getElementById(`tab-${tabId}`)?.classList.contains('active') || false;
 }
 
+// ========== 状态标签页：单账户「检查」按钮 ==========
+// 普通账户走被动探测；Gmail 走「读缓存令牌 → 未授权则弹交互授权 → 再探测」链路，
+// 让状态页 Gmail 的「检查」在未授权时也能真正把令牌拿下来（用户主动点击，符合 AGENTS 规则 1）。
+async function checkAccountCard(provider, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    if (provider === 'gmail') {
+      // 1) 先被动探测：仅读缓存令牌，不开标签 / 不弹窗
+      const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
+      const acc = probe?.results?.[0];
+      const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
+      const needsManual = acc?.needsAuth === true || acc?.needsManual === true;
+      // 2) 未授权（无有效令牌）→ 用户主动点击，弹交互授权拿令牌，再重新探测
+      if (unread == null && needsManual) {
+        const auth = await sendMessage({ type: 'gmailAuthorize' });
+        if (auth?.success) {
+          await sendMessage({ type: 'testProvider', provider: 'gmail' });
+        }
+      }
+    } else {
+      await sendMessage({ type: 'testProvider', provider });
+    }
+    await refreshStatus();
+  } catch (err) {
+    console.error('刷新失败:', err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄';
+  }
+}
+
 // 渲染 状态 标签页中的账户卡片
 function renderOverviewAccounts(status) {
   const accountsList = document.getElementById('accounts-list');
@@ -151,19 +183,9 @@ function renderOverviewAccounts(status) {
       }
     });
     card.querySelectorAll('.acc-action-btn[data-action="refresh"]').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const provider = btn.dataset.provider;
-        btn.disabled = true;
-        btn.textContent = '…';
-        try {
-          await sendMessage({ type: 'testProvider', provider });
-          await refreshStatus();
-        } catch (err) {
-          console.error('刷新失败:', err);
-        }
-        btn.disabled = false;
-        btn.textContent = '🔄';
+        checkAccountCard(btn.dataset.provider, btn);
       });
     });
   });
