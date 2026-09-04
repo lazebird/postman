@@ -1280,13 +1280,18 @@ async function runAllChecks(context = {}) {
 }
 
 /**
- * 检查新邮件并发送通知
+ * 检查是否有新邮件并发送桌面通知。
+ *
+ * 判定逻辑：以最近一次「全量检查」的未读数作为基准，
+ * 当当前未读数高于基准且账户已授权（authVerified）时，判定有新邮件到达。
+ * 新增数量 delta = 当前未读数 - 基准未读数（用于通知里提示"新邮件数目"）。
  */
 async function checkNewEmails(results) {
   try {
     const lastResults = await getCheckResults(10);
     if (!lastResults.length) return;
 
+    // 基准：最近一次全量检查（summary 含嵌套 results 数组）
     const lastSummary = lastResults.find((r) => r.results && Array.isArray(r.results));
     if (!lastSummary) return;
 
@@ -1299,13 +1304,15 @@ async function checkNewEmails(results) {
 
     for (const result of results) {
       if (!result.email || typeof result.unreadCount !== 'number') continue;
+      if (!result.authVerified) continue;
 
       const lastCount = lastByEmail[result.email] || 0;
       const newCount = result.unreadCount;
+      const delta = newCount - lastCount;
 
-      if (newCount > lastCount && result.authVerified) {
-        // 有新邮件，发送通知
-        await sendNewEmailNotification(result);
+      if (delta > 0) {
+        // 有新邮件到达，发送通知
+        await sendNewEmailNotification(result, delta);
       }
     }
   } catch (err) {
@@ -1314,14 +1321,39 @@ async function checkNewEmails(results) {
 }
 
 /**
- * 发送新邮件通知
+ * 提取该次探测能拿到的「最新邮件详情」列表（发件人 + 主题）。
+ * 不同提供商把详情放在不同字段，统一收敛在此处读取：
+ *   - Gmail：probe summary 顶层 newEmails 数组（[{from,subject}]）
+ *   - 其它提供商暂只返回未读数 → 返回空数组，通知退化为「提示新邮件数目」。
  */
-async function sendNewEmailNotification(result) {
+function extractLatestEmails(result) {
+  const candidates = [result.newEmails, result.detail?.newEmails];
+  for (const list of candidates) {
+    if (Array.isArray(list) && list.length > 0) {
+      return list
+        .map((m) => ({
+          subject: m?.subject || '',
+          from: m?.from || m?.sender || '',
+        }))
+        .filter((m) => m.subject || m.from);
+    }
+  }
+  return [];
+}
+
+/**
+ * 发送新邮件桌面通知。
+ *
+ * 优先规则（对应 ISSUE #56）：
+ *   1. 若接口能取到邮件「发件人 + 主题」，优先展示该类信息；
+ *   2. 否则提示「新增的邮件数目」（delta）。
+ *
+ * @param {Object} result - 账户级检查结果（含 email/provider/unreadCount/detail）
+ * @param {number} delta   - 自上次检查以来新增的邮件数（>0 才触发）
+ */
+async function sendNewEmailNotification(result, delta) {
   try {
     const provider = result.provider;
-    const unreadCount = result.unreadCount;
-
-    // 获取提供商名称
     const providerNames = {
       netease_163: '163邮箱',
       qq: 'QQ邮箱',
@@ -1330,22 +1362,33 @@ async function sendNewEmailNotification(result) {
     };
     const providerName = providerNames[provider] || provider;
 
-    // 构建通知内容
+    const latestEmails = extractLatestEmails(result);
+
+    let message;
+    if (latestEmails.length > 0) {
+      // 优先展示最新一封的发件人 + 主题（多封时叠加摘要）
+      const latest = latestEmails[0];
+      const subject = latest.subject || '(无主题)';
+      const from = latest.from ? `发件人：${latest.from}` : '发件人：未知';
+      message = `📧 新邮件：${subject}\n${from}`;
+      if (latestEmails.length > 1) {
+        message += `\n（还有 ${latestEmails.length - 1} 封新邮件）`;
+      }
+    } else {
+      // 接口取不到发件人/主题 → 退化为提示新邮件数目
+      const count = delta > 0 ? delta : result.unreadCount;
+      message = `您有 ${count} 封新邮件`;
+    }
+
     const notification = {
       type: 'basic',
       iconUrl: 'icons/icon-ok-48.png',
-      title: `📧 新邮件通知 - ${providerName}`,
-      message: `您有 ${unreadCount} 封未读邮件`,
+      title: `📧 新邮件通知 · ${providerName}`,
+      message,
     };
 
-    // 如果有最新邮件详情，显示详细信息
-    if (result.newEmails && result.newEmails.length > 0) {
-      const latest = result.newEmails[0];
-      notification.message = `新邮件: ${latest.subject}\n来自: ${latest.from}`;
-    }
-
     await chrome.notifications.create(`new-email-${Date.now()}`, notification);
-    logger.info(`已发送新邮件通知: ${providerName}, 未读数=${unreadCount}`);
+    logger.info(`已发送新邮件通知: ${providerName}, 新增=${delta}, 未读=${result.unreadCount}`);
   } catch (err) {
     logger.warn(`发送新邮件通知失败: ${err.message}`);
   }
