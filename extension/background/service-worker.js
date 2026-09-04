@@ -376,6 +376,7 @@ const PROVIDER_HOME = {
   netease_163: 'https://mail.163.com/',
   qq: 'https://mail.qq.com/',
   ustc: 'http://mail.ustc.edu.cn/',
+  gmail: 'https://mail.google.com/',
 };
 
 // 自动打开标签时使用的「登录后直达」URL：
@@ -383,6 +384,7 @@ const PROVIDER_OPEN_URL = {
   netease_163: 'https://mail.163.com/js6/main.jsp',
   qq: 'https://wx.mail.qq.com/',
   ustc: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp',
+  gmail: 'https://mail.google.com/mail/u/0/#inbox',
 };
 
 // QQ 页面中可识别的域名
