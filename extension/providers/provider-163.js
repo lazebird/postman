@@ -124,7 +124,7 @@ async function probeSingleEndpoint(endpoint, sid, _options) {
         const sep = url.includes('?') ? '&' : '?';
         url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
       }
-    } catch (e) {
+    } catch {
       // fallback
       if (sid) {
         url = url.replace(/\{sid\}/g, sid);
@@ -189,7 +189,7 @@ async function probeSingleEndpoint(endpoint, sid, _options) {
       logger_ep.warn('163 会话已失效，清除缓存的 sid');
       try {
         await clearSid('netease_163');
-      } catch (e) {}
+      } catch {}
     }
 
     const parseResult = parse163Response(text);
@@ -334,7 +334,7 @@ function parse163Response(text) {
     if (unreadCount > 0 || text.includes("'code':'S_OK'")) {
       return { hasResult: true, unreadCount: unreadCount };
     }
-  } catch (e) {
+  } catch {
     // 解析失败，继续尝试其他策略
   }
 
@@ -362,7 +362,7 @@ function parse163Response(text) {
     if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
-  } catch (e) {}
+  } catch {}
 
   // ===== 策略3: 正则提取 =====
   const regexes = [
@@ -400,7 +400,7 @@ function parse163Response(text) {
           const data = JSON.parse(atJsonMatch[1]);
           const unread = findUnreadCount(data);
           if (unread !== null) return { hasResult: true, unreadCount: unread };
-        } catch (e) {}
+        } catch {}
       }
       const atEqMatch = text.match(/var\s*@=\s*([\s\S]*?)(?:;|$)/);
       if (atEqMatch) {
@@ -408,13 +408,13 @@ function parse163Response(text) {
           const data = JSON.parse(atEqMatch[1]);
           const unread = findUnreadCount(data);
           if (unread !== null) return { hasResult: true, unreadCount: unread };
-        } catch (e) {}
+        } catch {}
       }
       const varMatch = text.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
       if (varMatch) return { hasResult: true, unreadCount: parseInt(varMatch[1], 10) };
       const countMatch2 = text.match(/count["']?\s*[:=]\s*["']?(\d+)/i);
       if (countMatch2) return { hasResult: true, unreadCount: parseInt(countMatch2[1], 10) };
-    } catch (e) {}
+    } catch {}
   }
 
   // ===== 策略7: t="..."/c="..." 编码 =====
@@ -425,7 +425,7 @@ function parse163Response(text) {
         const decoded = decodeURIComponent(tMatch[1]);
         const uMatch = decoded.match(/unread["']?\s*[:=]\s*["']?(\d+)/i);
         if (uMatch) return { hasResult: true, unreadCount: parseInt(uMatch[1], 10) };
-      } catch (e) {}
+      } catch {}
     }
   }
 
@@ -442,7 +442,7 @@ function parse163Response(text) {
           const data = JSON.parse(seg);
           const unread = findUnreadCount(data);
           if (unread !== null) return { hasResult: true, unreadCount: unread };
-        } catch (e) {}
+        } catch {}
       }
     }
   }

@@ -124,7 +124,7 @@ async function probeSingleEndpoint(endpoint, sid, _options) {
         const sep = url.includes('?') ? '&' : '?';
         url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
       }
-    } catch (e) {
+    } catch {
       if (sid) {
         url = url.replace(/\{sid\}/g, sid);
       } else {
@@ -199,7 +199,7 @@ async function probeSingleEndpoint(endpoint, sid, _options) {
         logger_ep.warn('QQ 会话已失效或未登录，清除缓存 sid');
         try {
           await clearSid('qq');
-        } catch (e) {}
+        } catch {}
       } else {
         logger_ep.debug(
           'mail.qq.com 域接口认证失败（sid 可能仍适用于 wx.mail.qq.com），不清除 sid'
@@ -278,12 +278,12 @@ async function decodeResponse(response) {
     if (isGB18030) {
       try {
         return new TextDecoder('gb18030').decode(arrayBuffer);
-      } catch (e) {
+      } catch {
         return new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
       }
     }
     return new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
-  } catch (e) {
+  } catch {
     return await response.text();
   }
 }
@@ -338,7 +338,7 @@ function parseQQResponse(text) {
     if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
-  } catch (e) {}
+  } catch {}
 
   // 策略1: JSON
   try {
@@ -347,7 +347,7 @@ function parseQQResponse(text) {
     if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
-  } catch (e) {}
+  } catch {}
 
   // 策略2: JSONP 去包裹
   try {
@@ -359,7 +359,7 @@ function parseQQResponse(text) {
         return { hasResult: true, unreadCount: unread };
       }
     }
-  } catch (e) {}
+  } catch {}
 
   // 策略3: QQ 特有格式 - "var xx = {...}" 等 JS 变量赋值格式
   const varPatterns = [

@@ -57,7 +57,7 @@
   let isTopFrame = false;
   try {
     isTopFrame = window === window.top;
-  } catch (e) {
+  } catch {
     isTopFrame = false;
   }
 
@@ -72,7 +72,7 @@
         })
         .catch(() => {});
     }
-  } catch (e) {
+  } catch {
     // 注入失败不阻塞主功能
   }
 
@@ -115,7 +115,7 @@
                   totalCaptured: apiCaptureCount,
                 })
                 .catch(() => {});
-            } catch (e) {}
+            } catch {}
           }
         }
       }, FLUSH_INTERVAL);
@@ -138,7 +138,7 @@
             host: HOST,
           })
           .catch(() => {});
-      } catch (e) {}
+      } catch {}
     }
   }, 5000);
   // 不阻止页面卸载清理
@@ -327,7 +327,7 @@
             (function () {
               try {
                 return new URL(referrer).hostname;
-              } catch (e) {
+              } catch {
                 return '';
               }
             })()
@@ -373,7 +373,7 @@
         if (typeof preBest.unread !== 'number') {
           return false;
         }
-      } catch (e) {
+      } catch {
         return false;
       }
     }
@@ -419,7 +419,7 @@
                 },
               })
               .catch(() => {});
-          } catch (e) {}
+          } catch {}
         }
 
         sendResponse({
@@ -469,7 +469,7 @@
             },
           })
           .catch(() => {});
-      } catch (e) {}
+      } catch {}
     })();
   }
 })();

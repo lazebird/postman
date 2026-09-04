@@ -32,7 +32,7 @@ function normalizeSid(text, knownSids) {
     result = result.split(sid).join('{sid}');
     try {
       result = result.split(encodeURIComponent(sid)).join('{sid}');
-    } catch (e) {}
+    } catch {}
   }
 
   // 2. 兜底：如果 URL/body 中还有看起来像 sid 的长字符串，替换为 {sid}

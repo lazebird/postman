@@ -17,7 +17,7 @@
       const parsed = new URL(u);
       const host = parsed.hostname;
       if (!/(^|\.)(163\.com|qq\.com|ustc\.edu\.cn)$/i.test(host)) return false;
-    } catch (e) {
+    } catch {
       return false;
     }
     if (/\.(css|js|png|jpe?g|gif|svg|ico|woff2?|ttf|eot|map)([?#]|$)/i.test(u)) return false;
@@ -33,7 +33,7 @@
   function reportCapture(capture) {
     try {
       window.postMessage({ source: '__mailApiCapture__', capture }, '*');
-    } catch (e) {}
+    } catch {}
   }
 
   function record(entry) {
@@ -59,7 +59,7 @@
         headers,
         timestamp: Date.now(),
       });
-    } catch (e) {}
+    } catch {}
   }
 
   // 拦截 fetch
@@ -80,10 +80,10 @@
                 headers[k] = v;
               });
             else if (typeof opts.headers === 'object') headers = { ...opts.headers };
-          } catch (e) {}
+          } catch {}
         }
         record({ type: 'fetch', url, method, body, headers });
-      } catch (e) {}
+      } catch {}
       return origFetch.apply(this, args);
     };
   }
@@ -94,7 +94,7 @@
   XMLHttpRequest.prototype.open = function (method, url) {
     try {
       this.__mailApiUrl = new URL(url, location.href).href;
-    } catch (e) {
+    } catch {
       this.__mailApiUrl = url;
     }
     this.__mailApiMethod = method || 'GET';
@@ -108,7 +108,7 @@
         method: this.__mailApiMethod || 'GET',
         body,
       });
-    } catch (e) {}
+    } catch {}
     return origSend.apply(this, arguments);
   };
 
@@ -118,7 +118,7 @@
     navigator.sendBeacon = function (url, data) {
       try {
         record({ type: 'beacon', url, method: 'POST', body: data && String(data) });
-      } catch (e) {}
+      } catch {}
       return origBeacon(url, data);
     };
   }
@@ -130,9 +130,9 @@
       window.EventSource = function (url, cfg) {
         try {
           record({ type: 'eventsource', url, method: 'GET', body: null });
-        } catch (e) {}
+        } catch {}
         return new OrigES(url, cfg);
       };
     }
-  } catch (e) {}
+  } catch {}
 })();

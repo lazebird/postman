@@ -275,7 +275,7 @@ async function handleMessage(message, sender) {
             .map((p) => `${p.method} ${p.url}`)
             .filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
           logger.debug(`[capture:${provider}] 本批捕获端点:\n${distinct.join('\n')}`);
-        } catch (e) {}
+        } catch {}
       }
       return { success: true };
     }
@@ -374,6 +374,7 @@ const PROVIDER_HOME = {
   netease_163: 'https://mail.163.com/',
   qq: 'https://mail.qq.com/',
   ustc: 'http://mail.ustc.edu.cn/',
+  gmail: 'https://mail.google.com/',
 };
 
 // 自动打开标签时使用的「登录后直达」URL：
@@ -381,6 +382,7 @@ const PROVIDER_OPEN_URL = {
   netease_163: 'https://mail.163.com/js6/main.jsp',
   qq: 'https://wx.mail.qq.com/',
   ustc: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp',
+  gmail: 'https://mail.google.com/mail/u/0/#inbox',
 };
 
 // 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
@@ -529,7 +531,7 @@ async function probeTabContent(provider, tabId, timeoutMs = 15000) {
       } else {
         result.tabUrl = tabUrl;
       }
-    } catch (e) {
+    } catch {
       /* 忽略 URL 读取失败 */
     }
   }
@@ -691,7 +693,7 @@ async function probeWithRetry(
           `[redirect-trace:${provider}] tabId=${tabId} 跳转落点 #${observedChain.length}: ${curUrl}`
         );
       }
-    } catch (e) {
+    } catch {
       /* 标签可能已关闭 */
     }
     // 成功读到未读数或已授权 → 退出轮询
@@ -1204,7 +1206,7 @@ async function autoRecoverSid(provider, { keepTabOpen = false } = {}) {
     if (!keepTabOpen) {
       try {
         await chrome.tabs.remove(tabId);
-      } catch (e) {
+      } catch {
         /* ignore */
       }
     }

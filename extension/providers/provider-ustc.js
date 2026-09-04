@@ -119,7 +119,7 @@ async function probeSingleEndpoint(endpoint, sid, _options) {
         const sep = url.includes('?') ? '&' : '?';
         url = `${url}${sep}sid=${encodeURIComponent(sid)}`;
       }
-    } catch (e) {
+    } catch {
       if (sid) {
         url = url.replace(/\{sid\}/g, sid);
       } else {
@@ -181,7 +181,7 @@ async function probeSingleEndpoint(endpoint, sid, _options) {
       logger_ep.warn('USTC 会话已失效，清除缓存的 sid');
       try {
         await clearSid('ustc');
-      } catch (e) {}
+      } catch {}
     }
 
     const parseResult = parseUSTCResponse(text);
@@ -270,7 +270,7 @@ function parseUSTCResponse(text) {
     if (unread !== null) {
       return { hasResult: true, unreadCount: unread };
     }
-  } catch (e) {
+  } catch {
     // 继续尝试其他策略
   }
 

@@ -252,7 +252,7 @@ async function clearDnrRule(ruleId) {
   if (!chrome.declarativeNetRequest || !ruleId) return;
   try {
     await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
-  } catch (e) {}
+  } catch {}
 }
 
 /**
@@ -356,10 +356,10 @@ async function probeEndpointWithStrategy(provider, endpoint, sid, strategy) {
       const enc = /gb18030|gbk|gb2312/i.test(ct) ? 'gb18030' : 'utf-8';
       try {
         text = new TextDecoder(enc, { fatal: false }).decode(ab);
-      } catch (e) {
+      } catch {
         text = new TextDecoder('utf-8', { fatal: false }).decode(ab);
       }
-    } catch (e) {
+    } catch {
       text = '';
     }
 

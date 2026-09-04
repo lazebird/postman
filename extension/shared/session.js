@@ -34,7 +34,7 @@ export function extractSidFromUrl(url) {
     const parsed = new URL(url);
     const sid = parsed.searchParams.get('sid');
     if (sid && sid.length > 4) return sid;
-  } catch (e) {
+  } catch {
     // URL 解析失败，尝试正则
   }
   const match = url.match(/[?&]sid=([^&]+)/);

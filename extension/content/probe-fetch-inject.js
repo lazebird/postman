@@ -20,7 +20,7 @@
       let text = '';
       try {
         text = await resp.text();
-      } catch (e) {}
+      } catch {}
       const cb = window[fnName];
       if (cb) cb({ ok: resp.ok, status: resp.status, text: text.substring(0, 4000) });
     })
