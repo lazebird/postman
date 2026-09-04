@@ -67,7 +67,9 @@ export async function probeGmail(_options = {}) {
     };
   } else {
     logger.warn(`Gmail 探测失败: ${result.error}`);
-    // 401/403 说明令牌失效，清掉缓存令牌，引导用户重新授权
+    // 仅当令牌确实失效（401 / 无效凭据 / scope 不足）时才清空缓存令牌并引导重授权。
+    // Gmail API 未启用 / 配额受限等 403 属项目配置问题，令牌仍有效，不清令牌也不弹授权，
+    // 避免「授权成功 → 又判失效 → 反复弹窗」的死循环。
     if (result.tokenInvalid) {
       await clearGmailToken();
     }
@@ -96,10 +98,24 @@ async function fetchGmailUnread(token) {
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        return { success: false, error: 'Gmail auth failed', unreadCount: 0, tokenInvalid: true };
+      const classify = await classifyGmailApiError(response);
+      if (classify.tokenInvalid) {
+        // 401 / 无效凭据：令牌本身失效，需重新授权
+        return {
+          success: false,
+          error: classify.message || 'Gmail 令牌已失效，需要重新授权',
+          unreadCount: 0,
+          tokenInvalid: true,
+        };
       }
-      return { success: false, error: `HTTP ${response.status}`, unreadCount: 0 };
+      // 其余（403 等）：令牌通常仍有效，是项目侧「Gmail API 未启用 / 配额 / 权限」问题。
+      // 不要清除令牌，避免「授权成功 → 又被判失效 → 反复弹授权窗」的死循环。
+      return {
+        success: false,
+        error: classify.message || `HTTP ${response.status}`,
+        unreadCount: 0,
+        tokenInvalid: false,
+      };
     }
 
     const data = await response.json();
@@ -118,6 +134,70 @@ async function fetchGmailUnread(token) {
     logger.error(`Gmail API fetch failed: ${err.message}`);
     return { success: false, error: err.message, unreadCount: 0 };
   }
+}
+
+/**
+ * 解析 Gmail API 的错误响应，区分「令牌失效（需重新授权）」与
+ * 「令牌有效但项目/API 配置问题（重授权无济于事）」，并返回可读错误消息。
+ *
+ * 背景：此前对 401/403 一律视为令牌失效并清空缓存令牌，导致在「Gmail API
+ * 未启用 / 配额受限」这类项目侧配置问题时，即便授权成功也会被判为需授权，
+ * 进而反复弹出授权窗口、无法真正完成授权（AGENTS 规则 2：体验优先）。
+ *
+ * @param {Response} response fetch 的非 2xx 响应
+ * @returns {Promise<{tokenInvalid: boolean, message: string|null}>}
+ */
+async function classifyGmailApiError(response) {
+  let status = response.status;
+  let message = null;
+  let reason = null;
+  try {
+    const body = await response.json();
+    const err = body?.error || {};
+    status = err.code || status;
+    message = err.message || message;
+    reason = err.errors?.[0]?.reason || null;
+  } catch {
+    // 响应体非 JSON（如部分 403 纯文本），保留原始 status
+  }
+
+  // 401：令牌/凭据本身失效，需重新授权
+  if (status === 401) {
+    return {
+      tokenInvalid: true,
+      message:
+        reason === 'invalid_grant'
+          ? 'Gmail 授权已过期或已撤销，需重新授权'
+          : message || 'Gmail 访问令牌无效，需重新授权',
+    };
+  }
+
+  // 403：区分「API 未启用 / 配额受限」这类重授权也无法解决的配置问题
+  const text = `${message || ''} ${reason || ''}`;
+  const configBlocked =
+    reason === 'accessNotConfigured' ||
+    reason === 'dailyLimitExceeded' ||
+    reason === 'userRateLimitExceeded' ||
+    reason === 'rateLimitExceeded' ||
+    /access not configured/i.test(text) ||
+    /has not been used in project/i.test(text) ||
+    /not been enabled/i.test(text) ||
+    /api is (?:not )?disabled/i.test(text);
+
+  if (configBlocked) {
+    return {
+      tokenInvalid: false,
+      message:
+        message ||
+        'Gmail API 访问受限：请在 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI 与账号权限配置',
+    };
+  }
+
+  // 其他 403（scope 不足 / 账号受限等）：令牌视为不可用，需重新授权
+  return {
+    tokenInvalid: true,
+    message: message || 'Gmail 访问被拒绝，请重新授权',
+  };
 }
 
 async function fetchGmailMessageDetail(token, messageId) {
