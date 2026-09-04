@@ -1,7 +1,7 @@
 # 浏览器邮箱插件（Edge Mail Notifier）
 
 - Microsoft Edge 浏览器插件（MV3）
-- 支持 163 / QQ / Gmail / USTC 等邮箱
+- 支持 163 / QQ / USTC / Gmail 等邮箱
 - 支持邮件检查、未读计数、桌面通知、快速跳转邮件
 - 混合方案：API 模式捕获学习 + SW 后台独立检查 + 内容脚本提取会话
 
@@ -11,22 +11,28 @@
 ├── AGENTS.md                    # ⚠️ 项目约束规则（最高优先级，禁止违反）
 
 ├── doc/
+│   ├── 整体方案与进度.md        # 当前方案与进度快照
 │   └── 技术选型文档.md          # 技术选型与方案设计
 ├── extension/                   # MV3 扩展
 │   ├── manifest.json
 │   ├── background/
-│   │   └── service-worker.js    # 定时任务 + 混合检查调度 + Cookie 诊断
+│   │   ├── service-worker.js    # 定时任务 + 混合检查调度 + Cookie 诊断
+│   │   └── possibility-tests.js # 全可能性 Cookie 测试
 │   ├── content/
-│   │   └── probe-content.js     # 内容脚本：提取 sid + in-origin 未读探测
+│   │   ├── probe-content.js     # 内容脚本：提取 sid + in-origin 未读探测
+│   │   ├── api-interceptor.js   # API 拦截器（独立文件，绕过 CSP）
+│   │   └── probe-fetch-inject.js # Fetch 注入器（绕过 CSP）
 │   ├── providers/
 │   │   ├── provider-163.js      # 163 SW 接口探测（使用缓存 sid）
-│   │   └── provider-qq.js       # QQ SW 接口探测（使用缓存 sid）
+│   │   ├── provider-qq.js       # QQ SW 接口探测（使用缓存 sid）
+│   │   └── provider-ustc.js     # USTC SW 接口探测（使用缓存 sid）
 │   ├── shared/
 │   │   ├── constants.js         # 提供商配置/接口端点/检查模式
 │   │   ├── debug.js             # 调试日志工具
 │   │   ├── session.js           # sid 工具函数
 │   │   ├── session-diagnose.js  # Cookie 会话诊断
-│   │   └── storage.js           # chrome.storage 分层封装
+│   │   ├── storage.js           # chrome.storage 分层封装
+│   │   └── api-patterns.js      # API 模式捕获与回放
 │   ├── popup/                   # Popup UI
 │   ├── options/                 # 设置页面
 │   └── debug/                   # 调试与验证指南
@@ -99,13 +105,14 @@
 - [x] **v0.7.0：后台自动检查不打开可见标签**（仅用户主动触发才开标签，sid 持久化 7 天）
 - [x] **v0.8.0：API 模式捕获与回放**（页面打开时学习真实 API，后台无页面时精确复现）
 - [x] **v0.9.0–0.9.2：『全可能性』后台无标签测试**（穷举 Cookie 附加策略，修正 Cookie 通道结论）
-- [x] **v0.9.3：拦截器提前至 document_start 打通 API 捕获链路**（当前版本）
-- [ ] 163：从真实页面抓取正确 RPC 签名，验证纯 SW 后台读未读
-- [ ] QQ：确认是否走 WebSocket，非 HTTP 则转内容脚本 DOM 兜底
+- [x] **v0.9.3：拦截器提前至 document_start 打通 API 捕获链路**
+- [x] **v0.9.4：添加 USTC 邮箱支持 + API 拦截器分离**（解决 CSP 限制）
+- [x] **163 SW API 打通**（实测 unread=11）
+- [x] **QQ SW API 打通**（实测 unread=7）
+- [x] **USTC SW API 打通**（实测 unread=2）
 - [ ] Gmail REST API 接入
 - [ ] 完整 UI 与生产功能
 - [ ] 多邮箱统一通知
-- [ ] 深度验证 163/QQ API 实际返回格式
 
 ## 数据持久化与存储分层
 

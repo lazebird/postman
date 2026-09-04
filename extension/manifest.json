@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Edge Mail Notifier",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "纯后台检查：Cookie+API 独立探测，API 模式自动捕获学习(含所有frame/sendBeacon/EventSource)；拦截器提前至 document_start 捕获 SPA 初始 API;含跳转链路落点日志(多级跳转→内容页)，绝不自动打开标签",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -18,8 +18,8 @@
     "https://*.163.com/*",
     "https://mail.qq.com/*",
     "https://*.qq.com/*",
-    "https://mail.ustc.edu.cn/*",
-    "https://*.ustc.edu.cn/*"
+    "http://mail.ustc.edu.cn/*",
+    "https://mail.ustc.edu.cn/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js",
@@ -32,9 +32,13 @@
         "https://*.mail.163.com/*",
         "https://mail.qq.com/*",
         "https://*.mail.qq.com/*",
-        "https://wx.mail.qq.com/*"
+        "https://wx.mail.qq.com/*",
+        "http://mail.ustc.edu.cn/*",
+        "https://mail.ustc.edu.cn/*"
       ],
       "js": [
+        "content/api-interceptor.js",
+        "content/probe-fetch-inject.js",
         "content/probe-content.js"
       ],
       "run_at": "document_start",

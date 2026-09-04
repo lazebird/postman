@@ -218,11 +218,40 @@ export const PROVIDER_CONFIG = {
   [PROVIDERS.USTC]: {
     name: '中科大邮箱',
     domain: 'mail.ustc.edu.cn',
-    homepage: 'https://mail.ustc.edu.cn/',
-    entryPoints: [],
+    homepage: 'http://mail.ustc.edu.cn/',
+    entryPoints: [
+      'http://mail.ustc.edu.cn/',
+      'http://mail.ustc.edu.cn/coremail/XT/index.jsp',
+    ],
     sessionEndpoints: [],
-    probeEndpoints: [],
-    contentDomains: [],
+    // USTC 使用 Coremail 系统，API 格式与 163 类似
+    probeEndpoints: [
+      {
+        name: 'ustc_getallfolders',
+        url: 'http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}',
+        method: 'GET',
+        headers: {
+          'Accept': 'text/javascript, application/json',
+          'Referer': 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
+        },
+        requiresSid: true,
+        description: '获取所有文件夹及未读数（返回 unreadMessageCount）',
+      },
+      {
+        name: 'ustc_getattrs',
+        url: 'http://mail.ustc.edu.cn/coremail/s/json?sid={sid}&func=user%3AgetAttrs',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'Accept': 'text/javascript, application/json',
+          'Referer': 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
+        },
+        requiresSid: true,
+        bodyTemplate: '',
+        description: '获取用户属性（可能包含未读数）',
+      },
+    ],
+    contentDomains: ['mail.ustc.edu.cn'],
   },
   [PROVIDERS.GMAIL]: {
     name: 'Gmail',
@@ -250,11 +279,12 @@ export const CHECK_INTERVALS = [
       logLevel: 'DEBUG',
       // 检查模式: 'hybrid'(优先SW API，回退内容脚本) / 'content-script'(仅内容脚本) / 'sw-api'(仅SW API)
       checkMode: 'hybrid',
-      // 每个提供商启用的探测接口名
-      enabledEndpoints: {
-        netease_163: ['js6_rpc_list'],
-        qq: ['wx_maillist'],
-      },
+  // 每个提供商启用的探测接口名
+  enabledEndpoints: {
+    netease_163: ['js6_rpc_list'],
+    qq: ['wx_maillist'],
+    ustc: ['ustc_getallfolders'],
+  },
     };
 
 // 存储键

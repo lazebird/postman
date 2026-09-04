@@ -31,6 +31,10 @@ const ENDPOINT_OPTIONS = {
     { name: 'cgi_mail_list', label: '旧版 · 收件箱列表' },
     { name: 'cgi_fr_show', label: '旧版 · 轻量未读' },
   ],
+  ustc: [
+    { name: 'ustc_getallfolders', label: '获取所有文件夹' },
+    { name: 'ustc_getattrs', label: '获取用户属性' },
+  ],
 };
 
 let currentAccounts = [];
@@ -532,9 +536,10 @@ async function runCookieDiag() {
 
 // SW 探测
 async function runSWProbe(provider) {
-  const btnMap = {
+  const btnIdMap = {
     'netease_163': 'btn-probe-163',
-    'qq': 'btn-probe-qq'
+    'qq': 'btn-probe-qq',
+    'ustc': 'btn-probe-ustc',
   };
   const btn = document.getElementById(btnMap[provider]);
   const origText = btn?.textContent;
@@ -831,6 +836,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 同步会话
   document.getElementById('btn-sync-163')?.addEventListener('click', () => syncSession('netease_163'));
   document.getElementById('btn-sync-qq')?.addEventListener('click', () => syncSession('qq'));
+  document.getElementById('btn-sync-ustc')?.addEventListener('click', () => syncSession('ustc'));
 
   // 全量检查
   document.getElementById('btn-full-check')?.addEventListener('click', runFullCheck);
@@ -841,6 +847,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 高级探测
   document.getElementById('btn-probe-163')?.addEventListener('click', () => runSWProbe('netease_163'));
   document.getElementById('btn-probe-qq')?.addEventListener('click', () => runSWProbe('qq'));
+  document.getElementById('btn-probe-ustc')?.addEventListener('click', () => runSWProbe('ustc'));
   document.getElementById('btn-check-bridge')?.addEventListener('click', runCheckBridge);
   document.getElementById('btn-refresh-session')?.addEventListener('click', runRefreshSession);
   document.getElementById('btn-possibility')?.addEventListener('click', runPossibilityTest);

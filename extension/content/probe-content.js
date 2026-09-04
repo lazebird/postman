@@ -40,6 +40,14 @@
   function waitForBody() { return bodyReady; }
   const isQQ = HOST.includes('qq.com');
   const is163 = HOST.includes('163.com');
+  const isUSTC = HOST.includes('ustc.edu.cn');
+  
+  // USTC 使用 http://，需要特殊处理 sid 提取
+  let sid = null;
+  if (isUSTC) {
+    const sidMatch = location.href.match(/[?&]sid=([a-zA-Z0-9_\-]+)/);
+    sid = sidMatch ? sidMatch[1] : null;
+  }
   // 判断当前 frame 是否为主（顶层）frame。
   let isTopFrame = false;
   try { isTopFrame = window === window.top; } catch (e) { isTopFrame = false; }
@@ -168,11 +176,14 @@
   `;
 
   // 在所有 frame 中注入拦截器（各 frame 各自捕获其内发出的 API 调用）
+  // 使用 chrome.scripting API 注入，绕过 CSP 限制
   try {
-    const s = document.createElement('script');
-    s.textContent = API_INTERCEPTOR_SCRIPT;
-    (document.head || document.documentElement).appendChild(s);
-    s.remove();
+    if (typeof chrome !== 'undefined' && chrome.scripting) {
+      chrome.scripting.executeScript({
+        target: { allFrames: true },
+        files: ['content/api-interceptor.js'],
+      }).catch(() => {});
+    }
   } catch (e) {
     // 注入失败不阻塞主功能
   }
@@ -203,7 +214,7 @@
         captureFlushTimer = null;
         if (captureQueue.length > 0) {
           const batch = captureQueue.splice(0, captureQueue.length);
-          const provider = isQQ ? 'qq' : is163 ? 'netease_163' : null;
+          const provider = isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null;
           if (provider) {
             try {
               chrome.runtime.sendMessage({
@@ -231,7 +242,7 @@
       try {
         chrome.runtime.sendMessage({
           type: 'apiCaptureCount',
-          provider: isQQ ? 'qq' : is163 ? 'netease_163' : null,
+          provider: isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null,
           count: apiCaptureCount,
           host: HOST,
         }).catch(() => {});
@@ -346,6 +357,31 @@
   function probeInPageFetch(url, options) {
     return new Promise((resolve) => {
       const fnName = '__mailProbeFetch_' + Date.now();
+      // 使用 chrome.scripting API 注入脚本，绕过 CSP
+      if (typeof chrome !== 'undefined' && chrome.scripting) {
+        chrome.scripting.executeScript({
+          target: { allFrames: false },
+          files: ['content/probe-fetch-inject.js'],
+          injectImmediately: true,
+          world: 'MAIN',
+        }).then(() => {
+          // 设置超时
+          const timer = setTimeout(() => {
+            delete window[fnName];
+            resolve({ ok: false, error: 'in-page fetch timeout', url });
+          }, 15000);
+          window[fnName] = (result) => {
+            clearTimeout(timer);
+            delete window[fnName];
+            resolve({ url, ...result });
+          };
+        }).catch(err => {
+          resolve({ ok: false, error: err.message, url });
+        });
+        return;
+      }
+      
+      // 降级方案：inline 注入（可能被 CSP 阻止）
       const script = document.createElement('script');
       script.textContent = `
         (function(){
@@ -480,7 +516,7 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message || (message.type !== 'probeContent163' && message.type !== 'probeContentQQ')) {
+    if (!message || (message.type !== 'probeContent163' && message.type !== 'probeContentQQ' && message.type !== 'probeContentUSTC')) {
       return false;
     }
 
@@ -507,7 +543,7 @@
 
         const nav = getNavContext(diag, best);
         const detail = {
-          provider: isQQ ? 'qq' : 'netease_163',
+          provider: isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null,
           host: HOST,
           documentReady: document.readyState,
           pageUrl: location.href,
@@ -516,6 +552,7 @@
           dom: diag,
           best,
           nav,
+          sid: isUSTC ? sid : (diag.sidFromUrl || diag.sidFromDom),
         };
 
         const loggedIn = !!sid || !!best.unread;
@@ -531,8 +568,8 @@
                 referrer: document.referrer || '',
                 navStage: nav.stage,
                 readyState: document.readyState,
-                sid,
-                provider: isQQ ? 'qq' : 'netease_163',
+                sid: isUSTC ? sid : (diag.sidFromUrl || diag.sidFromDom),
+                provider: isQQ ? 'qq' : is163 ? 'netease_163' : isUSTC ? 'ustc' : null,
               }
             }).catch(() => {});
           } catch (e) {}
@@ -579,7 +616,7 @@
             frameRole: nav.frameRole,
             pageType: cls.pageType,
             unreadCount: best.unread,
-            sid: diag.sidFromUrl || diag.sidFromDom,
+            sid: isUSTC ? sid : (diag.sidFromUrl || diag.sidFromDom),
             hasBody: !!(document.body && document.body.innerText),
           }
         }).catch(() => {});

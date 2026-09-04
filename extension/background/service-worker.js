@@ -20,6 +20,7 @@ import { getAccounts, getSettings, saveCheckResult, getCheckResults } from '../s
 import { PROVIDERS, API_PATTERN_KEYS } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
+import { probeUSTC } from '../providers/provider-ustc.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -121,8 +122,9 @@ async function handleMessage(message, sender) {
 
     // ===== 混合方案：内容脚本 in-origin 探测 =====
     case 'probeContent163':
-    case 'probeContentQQ': {
-      const provider = message.type === 'probeContent163' ? 'netease_163' : 'qq';
+    case 'probeContentQQ':
+    case 'probeContentUSTC': {
+      const provider = message.type === 'probeContentQQ' ? 'qq' : message.type === 'probeContentUSTC' ? 'ustc' : 'netease_163';
       const result = await runContentProbe(provider, { openTab: message.openTab !== false });
       // 内容脚本探测成功时，保存结果供 getStatus / badge 使用
       const p = result.probe;
@@ -333,21 +335,21 @@ async function handleMessage(message, sender) {
 const PROVIDER_HOME = {
   netease_163: 'https://mail.163.com/',
   qq: 'https://mail.qq.com/',
+  ustc: 'http://mail.ustc.edu.cn/',
 };
 
 // 自动打开标签时使用的「登录后直达」URL：
-// QQ 新版 webmail 在 wx.mail.qq.com；mail.qq.com 仅作登录入口。
 const PROVIDER_OPEN_URL = {
   netease_163: 'https://mail.163.com/js6/main.jsp',
-  // QQ 新版 webmail 在 wx.mail.qq.com；若未登录 mail.qq.com 会跳登录
   qq: 'https://wx.mail.qq.com/',
+  ustc: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp',
 };
 
 // QQ 页面中可识别的域名
 const QQ_MAIL_DOMAINS = ['mail.qq.com', 'wx.mail.qq.com', 'exmail.qq.com'];
 
 // 支持内容脚本探测的提供商（有 content_scripts 注入 + 邮箱主页）
-const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ]);
+const CONTENT_PROBE_PROVIDERS = new Set([PROVIDERS.NETEASE_163, PROVIDERS.QQ, PROVIDERS.USTC]);
 
 /**
  * QQ 邮箱主机判断：新网页版 QQ 邮箱运行在 wx.mail.qq.com 或 mail.qq.com
@@ -365,7 +367,17 @@ function isQQLoginUrl(url) {
  * 打开目标邮箱首页（用于注入内容脚本并获取真实登录态 + sid）
  */
 async function openMailboxTab(provider, opts = {}) {
-  const url = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+  let url = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+  
+  // USTC 需要 sid 参数，尝试从缓存读取
+  if (provider === 'ustc') {
+    const cachedSid = await getCachedSid('ustc');
+    if (cachedSid) {
+      const sep = url.includes('?') ? '&' : '?';
+      url = `${url}${sep}sid=${cachedSid}`;
+    }
+  }
+  
   if (!url) return { success: false, error: `Unknown provider: ${provider}` };
   // 默认后台打开（active:false）：避免当从 Popup 触发"获取未读数"时，因新建前台标签抢焦点
   // 而把 Popup 自动关闭，导致只打开了邮箱页面却看不到任何输出。
@@ -405,7 +417,7 @@ function providerNameForError(provider) {
  * 向已打开的邮箱标签内容脚本发送探测指令
  */
 async function probeTabContent(provider, tabId, timeoutMs = 15000) {
-  const type = provider === 'qq' ? 'probeContentQQ' : 'probeContent163';
+  const type = provider === 'qq' ? 'probeContentQQ' : provider === 'ustc' ? 'probeContentUSTC' : 'probeContent163';
 
   // 若未指定 tab，查找已打开的目标邮箱标签
   let targetTabId = tabId;
@@ -529,7 +541,15 @@ async function runContentProbe(provider, opts = {}) {
     } else if (tabId && (needsNav || probe.reason === 'connection')) {
       // 已有标签但连接失败或落在辅助页 → 导航到邮箱主应用刷新
       try {
-        const openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+        let openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+        // USTC 需要 sid 参数
+        if (provider === 'ustc') {
+          const cachedSid = await getCachedSid('ustc');
+          if (cachedSid) {
+            const sep = openUrl.includes('?') ? '&' : '?';
+            openUrl = `${openUrl}${sep}sid=${cachedSid}`;
+          }
+        }
         await chrome.tabs.update(tabId, { url: openUrl, active: false });
         logger.info(`导航 ${provider} 标签(tabId=${tabId})到主应用刷新`);
       } catch (e) {
@@ -975,6 +995,9 @@ async function runSWApiProbe(provider, settings) {
       case PROVIDERS.QQ:
         providerResult = await probeQQ(commonOpts);
         break;
+      case PROVIDERS.USTC:
+        providerResult = await probeUSTC(commonOpts);
+        break;
       default:
         return { success: false, error: `Unsupported provider: ${provider}` };
     }
@@ -1045,7 +1068,15 @@ async function autoRecoverSid(provider, { keepTabOpen = false } = {}) {
       }
       // 已有标签但未提取到 sid，尝试导航刷新
       try {
-        const openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+        let openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+        // USTC 需要 sid 参数
+        if (provider === 'ustc') {
+          const cachedSid = await getCachedSid('ustc');
+          if (cachedSid) {
+            const sep = openUrl.includes('?') ? '&' : '?';
+            openUrl = `${openUrl}${sep}sid=${cachedSid}`;
+          }
+        }
         await chrome.tabs.update(existingTab.id, {
           url: openUrl,
           active: false

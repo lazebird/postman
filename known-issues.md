@@ -1,49 +1,50 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-04 ｜ 当前版本：v0.9.3
+> 最后更新：2026-09-04 ｜ 当前版本：v0.9.4
 
 ---
 
-## 🔴 P0：API 捕获链路产出为零
+## ✅ 已完成功能（v0.9.4）
 
-### 问题描述
-- `apiCaptureCount` 恒等于 0
-- 内置默认端点数不变，无 `captured_*` 端点产出
-- 内容脚本拦截器已覆盖 `document_start` + 全 frame + sendBeacon/EventSource，但仍无法捕获
+### 163 邮箱
+- ✅ SW API 探测成功
+- ✅ 未读数：11 封
+- ✅ API：`POST https://mail.163.com/js6/s?func=mbox:listMessages`
+- ✅ Body：XML 编码的 var 参数（需 URL 编码）
+- ✅ Response：JSONP，统计 `flags.read=false` 的邮件数量
 
-### 已尝试的修复
-| 版本 | 修复内容 | 结果 |
-|------|---------|------|
-| v0.8.0 → v0.9.1 | 放宽 `isRelevant` 过滤条件 | ❌ 无效 |
-| v0.8.0 → v0.9.1 | 覆盖 sendBeacon/EventSource | ❌ 无效 |
-| v0.8.0 → v0.9.1 | 所有 frame 独立上报 | ❌ 无效 |
-| v0.9.3 | 拦截器提前至 `document_start` | ❌ 无效 |
+### QQ 邮箱
+- ✅ SW API 探测成功
+- ✅ 未读数：7 封
+- ✅ API：`GET https://wx.mail.qq.com/list/maillist?sid={sid}...`
+- ✅ Response：JSON，直接返回 `body.unread_num` 字段
+- ✅ 确认：QQ 使用 HTTP API（非 WebSocket）
 
-### 根因分析（推测）
-1. **163**：SPA 在 `document_start` 时还未发出业务 API 请求；或请求由已缓存的旧 sid 驱动，拦截时机错过
-2. **QQ**：新版 webmail 使用 WASM（`xmtls.wasm` 已加载），API 调用可能通过 WASM 内部实现，不走标准 fetch/XHR
+### USTC 邮箱
+- ✅ SW API 探测成功
+- ✅ 未读数：2 封
+- ✅ API：`GET http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}`
+- ✅ Response：JSON，包含各文件夹的 `unreadMessageCount` 字段
+- ⚠️ 需要用户在浏览器中先登录，然后点击「同步USTC」按钮
 
-### 验证数据
-- 163 登录页：`mail.163.com` → iframe 注入登录表单 → `frameJS6` 预加载
-- QQ 登录页：`wx.mail.qq.com` → 加载 `xmtls.wasm` + 登录 JS
-- 两者均无业务 API 请求（因未登录）
+---
+
+## 🔧 CSP 问题修复（v0.9.4）
+
+### 问题
+163 和 USTC 邮箱有严格的 CSP 策略，禁止 inline script，导致内容脚本注入失败。
 
 ### 解决方案
-**必须通过用户手动抓包获取真实 API 格式**：
-1. 用户在已登录浏览器中打开邮箱页面
-2. DevTools → Network 面板 → 刷新
-3. 找到包含 `func=` 或 `sid=` 的请求
-4. 复制 Request URL、Method、Headers、Body（注意 URL 编码）
+1. **分离 API 拦截器** - 将拦截器代码提取到独立文件 `api-interceptor.js`
+2. **使用 chrome.scripting API** - 通过 `chrome.scripting.executeScript` 注入，绕过 CSP
+3. **添加 probe-fetch-inject.js** - 用于在页面上下文中执行 fetch
 
-**代码回填位置**：`extension/shared/constants.js` → `PROVIDER_CONFIG[provider].probeEndpoints`
-
-**关键发现**：
-- 163 的 body 需要 URL 编码（`encodeURIComponent`）
-- 163 响应中的日期格式为 `new Date(...)` 非标准 JSON，需预处理后解析
-- 163 响应使用单引号而非双引号，且布尔值未加引号，JSON.parse 无法直接解析
-- **解决方案**：使用正则表达式直接解析响应，统计没有 `read:true` 的邮件数量
-- QQ 使用 HTTP API（非 WebSocket），响应直接包含 `body.unread_num` 字段
+### 修改文件
+- `extension/content/api-interceptor.js` - 新建，API 拦截器
+- `extension/content/probe-fetch-inject.js` - 新建，fetch 注入器
+- `extension/content/probe-content.js` - 修改，使用 chrome.scripting 注入
+- `extension/manifest.json` - 添加新的 content script 文件
 
 ---
 
@@ -111,23 +112,56 @@ WASM 文件已加载，确认 QQ 新版使用 WebAssembly 技术。
 
 ## 📋 下一步行动清单
 
-### 立即执行（本周）
-- [x] **手动抓包 163 真实 API**
-  - 打开已登录 163 邮箱
-  - DevTools → Network → 刷新
-  - 找到 `func=` 参数和 `var` body 格式
-  - 回填到 `constants.js`
-
-- [x] **确认 QQ WebSocket 假设**
-  - 在已登录 QQ 邮箱页面
-  - DevTools → Network → WS 面板
-  - 观察是否有 WebSocket 连接
-  - **结论**: QQ 使用 HTTP API（非 WebSocket），`unread_num` 字段直接返回未读数
-
-### 中期（方案 B 定性后）
+### 近期目标
+- [x] **163 SW API 打通**（已验证，unread=11）
+- [x] **QQ SW API 打通**（已验证，unread=7）
+- [x] **USTC SW API 打通**（已验证，unread=2）
 - [ ] Gmail REST API 接入（OAuth2 + `gmail.readonly` scope）
-- [ ] USTC 适配（需 Native Messaging 兜底）
 - [ ] 接口失效自愈 / 热更规则
+- [ ] UI 完善（多账户统一显示、通知策略）
+
+### 中期目标
+- [ ] API 模式捕获学习（当邮箱改版时自动学习新接口）
+- [ ] 检查频率优化（智能退避、差异检查）
+- [ ] 隐私增强（Cookie 清理、会话期限管理）
+
+---
+
+## 🔧 CSP 问题修复（v0.9.4）
+
+### 问题
+163 和 USTC 邮箱有严格的 CSP 策略，禁止 inline script，导致内容脚本注入失败。
+
+### 解决方案
+1. **分离 API 拦截器** - 将拦截器代码提取到独立文件 `api-interceptor.js`
+2. **使用 chrome.scripting API** - 通过 `chrome.scripting.executeScript` 注入，绕过 CSP
+3. **添加 probe-fetch-inject.js** - 用于在页面上下文中执行 fetch
+
+### 修改文件
+- `extension/content/api-interceptor.js` - 新建，API 拦截器
+- `extension/content/probe-fetch-inject.js` - 新建，fetch 注入器
+- `extension/content/probe-content.js` - 修改，使用 chrome.scripting 注入
+- `extension/manifest.json` - 添加新的 content script 文件
+
+---
+
+## ✅ USTC 邮箱使用须知
+
+### 登录要求
+USTC 邮箱需要使用 **Cookie + sid** 双重认证：
+1. 用户必须在浏览器中打开并登录 `http://mail.ustc.edu.cn/`
+2. 点击扩展 Popup → 「🔑同步USTC」按钮同步会话
+3. 扩展会缓存 sid 供后台 SW API 使用
+
+### 技术细节
+- USTC 使用 Coremail 系统，API 端点：`/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}`
+- 响应包含各文件夹的 `unreadMessageCount` 字段
+- 页面打开时需要 sid 参数，否则返回 500 错误
+
+### 当前状态
+- ✅ SW API 探测成功（已验证）
+- ✅ 内容脚本支持（需用户先登录）
+- ⚠️ 自动打开标签时需要带 sid 参数
 
 ---
 
