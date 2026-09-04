@@ -23,7 +23,7 @@ import {
   getCheckResults,
   getDebugLogs,
 } from '../shared/storage.js';
-import { PROVIDERS } from '../shared/constants.js';
+import { PROVIDERS, TRIGGER_SOURCE, isManualSource } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
@@ -43,12 +43,39 @@ const logger = createLogger('service-worker');
 // ===== 常量 =====
 // sid 缓存有效期(7天)统一由 shared/session-cache.js 管理
 
-// 判断检查是否为用户主动触发（只有用户主动触发时才允许自动开标签）
-// 用户主动触发来源：manual（Popup 全量检查）、manual-test（Popup/Options 单提供商测试）
-// 自动触发来源：alarm（后台定时检查）—— 此类检查绝不自动打开可见标签
+// ===== 触发来源（手动 vs 自动）=====
+// 手动（manual）→ Popup 按钮点击等用户显式操作：允许完整交互流程（开邮箱页、复用/新建
+//   后台标签读未读、弹出 Gmail OAuth 授权窗等）。符合 AGENTS 规则 1 的「用户主动显式触发」。
+// 自动（auto）→ chrome.alarms 定时、onInstalled/onStartup、内容脚本页面事件等周期/被动事件：
+//   **绝不**擅自打开可见标签、**绝不**自动弹出授权窗，仅标记「需手动同步」，交由用户显式处理。
+// context.source 沿用既有字符串值（manual / manual-test / alarm / content-probe / unknown）。
+function resolveTrigger(context) {
+  const src = (context && context.source) || TRIGGER_SOURCE.UNKNOWN;
+  return {
+    source: src,
+    // 归一化的手动/自动标识：auto=false 代表手动，auto=true 代表自动
+    auto: !isManualSource(src),
+  };
+}
+
+// 判断检查是否为用户主动触发（仅手动来源允许自动开标签 / 弹授权窗）。
 function isUserInitiated(context) {
-  const src = (context && context.source) || 'unknown';
-  return src === 'manual' || src === 'manual-test';
+  return isManualSource((context && context.source) || TRIGGER_SOURCE.UNKNOWN);
+}
+
+/**
+ * 根据「消息是否携带显式手动标识」推导触发来源。
+ *
+ * Popup 的 sendMessage 会给每条消息带上 trigger='manual'，表示该消息由用户
+ * 显式点击按钮发出 → 手动来源，允许完整交互（开标签 / 弹授权窗）。
+ * 自动来源（alarm / onInstalled / 内容脚本上报）不经 Popup 入口、不带该标识，
+ * 落回传入的 fallback 或按自动保守处理，从而杜绝「自动路径擅自弹窗/开标签」。
+ *
+ * @returns {'manual'|'auto'} 归一化的手动/自动类别
+ */
+function sourceFromMessage(message, fallback = TRIGGER_SOURCE.UNKNOWN) {
+  if (message && message.trigger === 'manual') return TRIGGER_SOURCE.MANUAL_SINGLE;
+  return fallback;
 }
 
 // ===== 事件监听 =====
@@ -80,7 +107,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'check-email') {
     logger.info(`定时检查触发: scheduledTime=${new Date(alarm.scheduledTime).toISOString()}`);
     try {
-      await runAllChecks({ source: 'alarm' });
+      await runAllChecks({ source: TRIGGER_SOURCE.AUTO_ALARM });
     } catch (err) {
       logger.error(`定时检查失败: ${err.message}`, { stack: err.stack });
     }
@@ -112,13 +139,25 @@ async function handleMessage(message, sender) {
 
   switch (message.type) {
     case 'runCheck':
-      return await runAllChecks({ source: 'manual' });
+      // 「🚀 全量检查」由 Popup 按钮显式点击触发（sendMessage 带 trigger='manual'）。
+      // 仅当消息确认手动来源才按手动处理（可完整交互 / 弹授权窗）；否则按自动保守执行。
+      if (sourceFromMessage(message) !== TRIGGER_SOURCE.MANUAL_SINGLE) {
+        // 理论上只有 Popup 会发 runCheck，这里作为兜底守卫，杜绝误发触发自动弹窗。
+        logger.warn('[guard] runCheck 未携带手动触发标识，按自动保守执行');
+        return await runAllChecks({ source: TRIGGER_SOURCE.AUTO_ALARM });
+      }
+      return await runAllChecks({ source: TRIGGER_SOURCE.MANUAL_FULL });
 
     case 'getStatus':
       return await getStatus();
 
     case 'testProvider': {
-      const result = await runSingleProvider(message.provider, { source: 'manual-test' });
+      // 单账户检查按钮（trigger='manual'）→ 手动；否则按自动保守（不开标签/不弹窗）。
+      const src =
+        sourceFromMessage(message) === TRIGGER_SOURCE.MANUAL_SINGLE
+          ? TRIGGER_SOURCE.MANUAL_SINGLE
+          : TRIGGER_SOURCE.AUTO_ALARM;
+      const result = await runSingleProvider(message.provider, { source: src });
       // 单提供商检查后更新 badge
       if (result.results?.length) {
         await updateBadgeFromLatest();
@@ -154,7 +193,14 @@ async function handleMessage(message, sender) {
           : message.type === 'probeContentUSTC'
             ? 'ustc'
             : 'netease_163';
-      const result = await runContentProbe(provider, { openTab: message.openTab !== false });
+      // openTab 需打开/复用邮箱标签页 → 仅允许手动（用户按钮）来源；
+      // 非手动来源一律不开标签，仅做无页面探测，避免自动路径擅自开页。
+      const manualMsg = sourceFromMessage(message) === TRIGGER_SOURCE.MANUAL_SINGLE;
+      const wantTab = message.openTab !== false && manualMsg;
+      if (message.openTab !== false && !manualMsg) {
+        logger.warn('[guard] 内容脚本探测非手动来源，禁止打开邮箱标签');
+      }
+      const result = await runContentProbe(provider, { openTab: wantTab });
       // 内容脚本探测成功时，保存结果供 getStatus / badge 使用
       const p = result.probe;
       if (p && p.success) {
@@ -184,8 +230,17 @@ async function handleMessage(message, sender) {
     }
 
     case 'gmailAuthorize': {
-      // Gmail OAuth2 授权流程（Chrome / Edge 通用，基于 launchWebAuthFlow）
-      // 仅由用户主动点击"同步 Gmail"触发，会弹出 Google 授权页。
+      // Gmail OAuth2 授权流程（Chrome / Edge 通用，基于 launchWebAuthFlow）。
+      // launchWebAuthFlow 会弹出 Google 授权页，**只允许**用户显式手动触发。
+      // 守卫：消息未带 trigger='manual'（即非 Popup 按钮发出）→ 拒绝执行，绝不自动弹窗。
+      if (sourceFromMessage(message) !== TRIGGER_SOURCE.MANUAL_SINGLE) {
+        logger.warn('[guard] gmailAuthorize 触发来源非手动，拒绝弹出授权窗');
+        return {
+          success: false,
+          error: 'Gmail 授权仅支持在界面手动触发（自动检查不会自动弹出授权窗）',
+          needsManual: true,
+        };
+      }
       const result = await authorizeGmailInteractive();
       if (result.success) {
         return { success: true, token: 'obtained' };
@@ -198,11 +253,12 @@ async function handleMessage(message, sender) {
     }
 
     case 'openMailboxTab':
-      // 显式"打开邮箱"用前台打开，便于用户操作；探测自开的后台标签不抢焦点
-      return await openMailboxTab(message.provider, { active: true });
-
     case 'openInbox':
-      // 从 Popup 状态页快速跳转到邮箱收件箱（前台打开）
+      // 「打开邮箱 / 跳到收件箱」会前台打开可见标签 → 仅允许用户手动触发。
+      if (sourceFromMessage(message) !== TRIGGER_SOURCE.MANUAL_SINGLE) {
+        logger.warn('[guard] openMailboxTab/openInbox 触发来源非手动，拒绝打开邮箱标签');
+        return { success: false, error: '打开邮箱仅支持在界面手动触发', needsManual: true };
+      }
       return await openMailboxTab(message.provider, { active: true });
 
     case 'contentPageReady': {
@@ -768,6 +824,9 @@ async function runCookieDiagnosis(provider) {
 async function checkSingleAccount(account, settings, context) {
   const logger_acc = createLogger(`account:${account.email}`);
   logger_acc.info(`开始检查账户 ${account.email} (provider=${account.provider})`);
+  // 触发来源显式归一化：auto=false=手动（用户按钮），auto=true=自动（alarm/页面事件等）。
+  // 自动来源绝不打开可见标签 / 弹出授权窗，仅标记「需手动同步」（AGENTS 规则 1）。
+  const trigger = resolveTrigger(context);
 
   const mode = settings.checkMode || 'hybrid';
   // 记录 API 探测的详细信息（含端点和错误），供最终诊断
@@ -997,7 +1056,8 @@ async function checkSingleAccount(account, settings, context) {
     // 区分「不支持提供商」与「未授权/无法读取」两种情况
     const unsupported = !CONTENT_PROBE_PROVIDERS.has(account.provider);
     const userTriggered = isUserInitiated(context);
-    const autoCheck = context.source === 'alarm';
+    // 是否自动触发（定时/被动事件）：自动来源不允许任何交互弹窗/开标签
+    const autoCheck = trigger.auto;
     const accountResult = {
       email: account.email,
       provider: account.provider,
@@ -1005,6 +1065,8 @@ async function checkSingleAccount(account, settings, context) {
       needsAuth: !unsupported,
       allFailed: true,
       source: context.source,
+      auto: trigger.auto,
+      manual: !trigger.auto,
       method: 'none',
       needsTab: unsupported ? false : true,
       error: unsupported
@@ -1231,8 +1293,10 @@ async function clearCachedSid(provider) {
  * 全量检查所有账户
  */
 async function runAllChecks(context = {}) {
-  const source = context.source || 'unknown';
-  logger.info(`开始全量检查, 触发源=${source}`);
+  // 触发来源显式归一化：manual → auto=false；alarm/页面事件 → auto=true。
+  const trigger = resolveTrigger(context);
+  const source = trigger.source;
+  logger.info(`开始全量检查, 触发源=${source}, auto=${trigger.auto}`);
 
   const accounts = await getAccounts();
   const settings = await getSettings();
@@ -1245,6 +1309,7 @@ async function runAllChecks(context = {}) {
       checkResults: [],
       accountCount: 0,
       source,
+      auto: trigger.auto,
     };
   }
 
@@ -1257,6 +1322,8 @@ async function runAllChecks(context = {}) {
   const summary = {
     success: true,
     source,
+    auto: trigger.auto,
+    manual: !trigger.auto,
     timestamp: new Date().toISOString(),
     accountCount: accounts.length,
     successfulChecks: allResults.filter((r) => r.authVerified).length,
@@ -1395,7 +1462,9 @@ async function sendNewEmailNotification(result, delta) {
 }
 
 async function runSingleProvider(provider, context = {}) {
-  logger.info(`手动运行提供商检查: provider=${provider}, source=${context.source || 'manual'}`);
+  logger.info(
+    `手动运行提供商检查: provider=${provider}, source=${context.source || TRIGGER_SOURCE.MANUAL_SINGLE}`
+  );
   const accounts = await getAccounts();
   const matchingAccounts = accounts.filter((a) => a.provider === provider);
 

@@ -1097,9 +1097,20 @@ async function clearLogs() {
 document.getElementById('btn-copy-logs')?.addEventListener('click', copyLogs);
 document.getElementById('btn-clear-logs')?.addEventListener('click', clearLogs);
 // ========== 公共工具 ==========
+/**
+ * 统一的 SW 消息发送入口。
+ *
+ * Popup 只能在用户主动打开（点击浏览器工具栏图标/按钮）时存在与交互，
+ * 因此凡是这里发出的消息都带一个**显式的手动触发标识** trigger='manual'：
+ *   - 手动来源允许走完整交互流程（打开邮箱页、复用标签、弹出 Gmail 授权窗）；
+ *   - 自动来源（后台定时 alarm、页面事件等）由 SW 端发起、不会经此入口，
+ *     故天然带不上 manual 标识，从而保证「自动绝不擅自弹窗/开标签」。
+ * 这个标识即 AGENTS 规则 1 里「用户主动显式触发」与「后台被动触发」的分界。
+ */
 function sendMessage(message) {
+  const payload = { ...message, trigger: 'manual' };
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
+    chrome.runtime.sendMessage(payload, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
       } else {
