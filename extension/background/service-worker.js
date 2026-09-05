@@ -1922,6 +1922,8 @@ async function updateBadge(summary) {
     // 整体运行状态 → 红(错误)/绿(正常)/灰(停用或不可用)
     const state = computeIconState(uniq);
     await applyToolbarIcon(state);
+    // 未读数字/状态标固定用白色字体，避免深色底上黑色文字对比度不足
+    await chrome.action.setBadgeTextColor({ color: '#FFFFFF' });
     await chrome.action.setBadgeBackgroundColor({ color: TOOLBAR_STATE_COLORS[state] });
   } catch (err) {
     logger.debug('工具栏状态更新失败: ' + err.message);
@@ -1955,6 +1957,7 @@ async function updateBadgeFromLatest() {
       // 无任何账户/检查记录 → 置为「停用/不可用」灰色图标
       await applyToolbarIcon('off');
       await chrome.action.setBadgeText({ text: '' });
+      await chrome.action.setBadgeTextColor({ color: '#FFFFFF' });
       await chrome.action.setBadgeBackgroundColor({ color: TOOLBAR_STATE_COLORS.off });
       return;
     }
