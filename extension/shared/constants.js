@@ -111,17 +111,17 @@ export const PROVIDER_CONFIG = {
     probeEndpoints: [
       {
         name: 'js6_rpc_list',
-        url: 'https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}&df=mail163_letter',
+        url: 'https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}',
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
           Accept: 'text/javascript',
-          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}&df=mail163_letter',
+          Referer: 'https://mail.163.com/js6/main.jsp?sid={sid}',
           Origin: 'https://mail.163.com',
         },
         requiresSid: true,
         bodyTemplate:
-          'var=<?xml version="1.0"?>><object><object name="filter"><string name="sentDate">2:</string></object><string name="order">date</string><boolean name="desc">true</boolean><array name="fids"><int>1</int><int>18</int><int>3685900</int></array><boolean name="skipLockedFolders">true</boolean><int name="limit">200</int><string name="mrcid">@null</string></object>',
+          'var=<object><object name="filter"></object><string name="order">date</string><boolean name="desc">true</boolean><array name="fids"><int>1</int><int>18</int><int>3685900</int></array><boolean name="skipLockedFolders">true</boolean><int name="limit">200</int><string name="mrcid">@null</string></object>',
         isUrlEncoded: true,
         description: 'RPC - 获取未读消息列表（真实格式，body 需 URL 编码）',
       },

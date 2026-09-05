@@ -1,7 +1,7 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-04 ｜ 当前版本：v0.9.6
+> 最后更新：2026-09-05 ｜ 当前版本：v0.9.7
 
 ---
 
@@ -9,10 +9,11 @@
 
 ### 163 邮箱
 - ✅ SW API 探测成功
-- ✅ 未读数：11 封
-- ✅ API：`POST https://mail.163.com/js6/s?func=mbox:listMessages`
-- ✅ Body：XML 编码的 var 参数（需 URL 编码）
-- ✅ Response：JSONP，统计 `flags.read=false` 的邮件数量
+- ✅ 未读数：11 封（页面显示）/ API 返回最近2天3封
+- ✅ API：`POST https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}`
+- ✅ Body：Coremail RPC 格式（无 XML 声明，var=<object>...）
+- ✅ Response：JSONP，统计没有 `read:true` 标志的邮件数量
+- ⚠️ **v0.9.7 修复**：163 服务端变更，请求 body 中不再接受 `<?xml version="1.0"?>` 声明，移除后恢复正常
 
 ### QQ 邮箱
 - ✅ SW API 探测成功
@@ -87,6 +88,45 @@
 - `extension/content/probe-fetch-inject.js` - 新建，fetch 注入器
 - `extension/content/probe-content.js` - 修改，使用 chrome.scripting 注入
 - `extension/manifest.json` - 添加新的 content script 文件
+
+---
+
+## 🟡 P1：163 API body 格式变更——XML 声明被拒绝（v0.9.7 修复）
+
+### 问题描述
+自动检查失败，API 返回 `FR_INVALID_REQUEST`。
+之前版本（v0.9.6 及更早）使用的 body 模板包含 `<?xml version="1.0"?>` 声明：
+```
+var=<?xml version="1.0"?>><object>...</object>
+```
+163 服务端已更新，拒绝包含 XML 声明的请求体，导致所有 POST 请求返回 `FR_INVALID_REQUEST`。
+
+### 根因
+163 邮箱服务端在 v0.9.6 之后更新了 RPC 接口解析逻辑，不再接受 body 中的 XML 声明前缀。
+这是一个服务端变更，与扩展代码无关，但导致此前工作的 API 探测全部失效。
+
+### 修复（v0.9.7）
+移除 body 模板中的 `<?xml version="1.0"?>` 声明：
+```
+# 修改前
+bodyTemplate: 'var=<?xml version="1.0"?>><object>...</object>'
+
+# 修改后
+bodyTemplate: 'var=<object>...</object>'
+```
+同时移除 URL 和 Referer 中的 `df=mail163_letter` 参数（页面已不再使用该参数）。
+
+### 验证结果
+- 修复前（带 XML 声明）：`FR_INVALID_REQUEST` ❌
+- 修复后（无 XML 声明）：`S_OK`，成功返回邮件列表 ✅
+- 未读数解析：正常（统计没有 `read:true` 标志的邮件）
+- ⚠️ **body 中 `sentDate=2:` 过滤器会遗漏旧未读邮件**（只查最近 2 天），已移除该过滤器以返回全部未读
+
+### 修改文件
+- `extension/shared/constants.js` — 更新 `js6_rpc_list` 端点的 `bodyTemplate`、`url` 和 `Referer`
+  - 移除 body 中的 `<?xml version="1.0"?>` 声明（163 服务端拒绝包含 XML 声明的请求）
+  - 移除 URL 和 Referer 中的 `df=mail163_letter` 参数（不再使用）
+  - 移除 body 中的 `<string name="sentDate">2:</string>` 过滤器（只查最近 2 天会遗漏旧未读邮件，移除后返回全部未读）
 
 ---
 
