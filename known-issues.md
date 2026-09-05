@@ -209,24 +209,6 @@ WASM 文件已加载，确认 QQ 新版使用 WebAssembly 技术。
 
 ---
 
-## 🔧 CSP 问题修复（v0.9.4）
-
-### 问题
-163 和 USTC 邮箱有严格的 CSP 策略，禁止 inline script，导致内容脚本注入失败。
-
-### 解决方案
-1. **分离 API 拦截器** - 将拦截器代码提取到独立文件 `api-interceptor.js`
-2. **使用 chrome.scripting API** - 通过 `chrome.scripting.executeScript` 注入，绕过 CSP
-3. **添加 probe-fetch-inject.js** - 用于在页面上下文中执行 fetch
-
-### 修改文件
-- `extension/content/api-interceptor.js` - 新建，API 拦截器
-- `extension/content/probe-fetch-inject.js` - 新建，fetch 注入器
-- `extension/content/probe-content.js` - 修改，使用 chrome.scripting 注入
-- `extension/manifest.json` - 添加新的 content script 文件
-
----
-
 ## ✅ USTC 邮箱使用须知
 
 ### 登录要求
@@ -293,22 +275,13 @@ console.log(logs);
 
 ---
 
-## ✅ 已获取的真实 API 格式（2026-09-04）
+## 📋 API 接口格式速查
 
-### 163 邮箱
-- **Sid**: `yMiYNuMVIdrFuhKUNueYdgXyypJsSdVZ`
-- **未读数**: 10 封
-- **API 端点**: `POST https://mail.163.com/js6/s`
-- **Func 参数**: `mbox:listMessages`
-- **Request Body**:
-  ```
-  var=%3C%3Fxml%20version%3D%221.0%22%3F%3E%3Cobject%3E%3Cobject%20name%3D%22filter%22%3E%3Cstring%20name%3D%22sentDate%22%3E2%3A%3C%2Fstring%3E%3C%2Fobject%3E%3Cstring%20name%3D%22order%22%3Edate%3C%2Fstring%3E%3Cboolean%20name%3D%22desc%22%3Etrue%3C%2Fboolean%3E%3Carray%20name%3D%22fids%22%3E%3Cint%3E1%3C%2Fint%3E%3Cint%3E18%3C%2Fint%3E%3Cint%3E3685900%3C%2Fint%3E%3C%2Farray%3E%3Cboolean%20name%3D%22skipLockedFolders%22%3Etrue%3C%2Fboolean%3E%3Cint%20name%3D%22limit%22%3E200%3C%2Fint%3E%3Cstring%20name%3D%22mrcid%22%3E7097b0f0d99a7b25206f1101c79a1bb8_v1%3C%2Fstring%3E%3C%2Fobject%3E
-  ```
-- **Response**: JSONP 格式，包含邮件列表和未读数
+完整接口规格见 [`extension/doc/api-reference.md`](../extension/doc/api-reference.md)。
 
-### QQ 邮箱
-- **Sid**: `zYhHToy0VDguOmNMABJTbgAA`
-- **未读数**: 7 封
-- **API 端点**: `GET https://wx.mail.qq.com/list/maillist`
-- **Query 参数**: `sid={sid}&dir=1&dirid=1&func=1&sort_type=1&sort_direction=1&page_now=0&page_size=50&enable_topmail=true`
-- **Response**: JSON 格式，包含 `unread_num: 7`
+| 邮箱 | 方法 | 端点 | 认证方式 | 状态 |
+|------|------|------|---------|------|
+| 163 | POST | `https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}` | Cookie + sid | ✅ v0.9.7 修复 |
+| QQ | GET | `https://wx.mail.qq.com/list/maillist?sid={sid}...` | Cookie + sid | ✅ |
+| USTC | GET | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | Cookie + sid | ✅ |
+| Gmail | GET | `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread` | OAuth2 Bearer token | ✅ |
