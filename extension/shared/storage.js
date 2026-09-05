@@ -137,6 +137,34 @@ export async function getCheckResults(limit = 20) {
 }
 
 /* ============================================================
+ * 界面语言偏好（chrome.storage.local，持久化）
+ * —— 语言选择属 UI 偏好，经本模块读写以保证存储层隔离
+ * ============================================================ */
+
+/**
+ * 读取界面语言偏好（auto/zh/en，缺省 auto）
+ * @returns {Promise<string>}
+ */
+export async function getLanguagePreference() {
+  try {
+    const { language } = await chrome.storage.local.get('language');
+    return language === 'zh' || language === 'en' || language === 'auto' ? language : 'auto';
+  } catch (e) {
+    console.error('[storage] getLanguagePreference failed:', e.message);
+    return 'auto';
+  }
+}
+
+/**
+ * 保存界面语言偏好（auto/zh/en）
+ * @param {string} lang
+ */
+export async function setLanguagePreference(lang) {
+  const v = lang === 'zh' || lang === 'en' || lang === 'auto' ? lang : 'auto';
+  await chrome.storage.local.set({ language: v });
+}
+
+/* ============================================================
  * 会话级数据（chrome.storage.session）
  * —— 浏览器重启/扩展更新会清空；属临时数据，丢失不影响功能
  * ============================================================ */

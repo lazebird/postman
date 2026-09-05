@@ -480,37 +480,37 @@
 </head>
 <body>
   <div class="header">
-    <h1>📧 Mail Notifier</h1>
+    <h1 data-i18n="headerTitle">📧 Mail Notifier</h1>
   </div>
 
   <!-- 全局 Loading Overlay -->
   <div id="global-loading" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.8);z-index:1000;justify-content:center;align-items:center;">
     <div style="text-align:center;">
       <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 8px;"></div>
-      <div style="font-size:12px;color:#6c757d;">处理中...</div>
+      <div style="font-size:12px;color:#6c757d;" data-i18n="processing">处理中...</div>
     </div>
   </div>
 
   <div class="content">
     <div class="tabs">
-      <div class="tab active" data-tab="overview">状态</div>
-      <div class="tab" data-tab="settings">设置</div>
-      <div class="tab" data-tab="stats">统计</div>
-      <div class="tab" data-tab="logs">日志</div>
-      <div class="tab" data-tab="debug">调试</div>
+      <div class="tab active" data-tab="overview" data-i18n="tabOverview">状态</div>
+      <div class="tab" data-tab="settings" data-i18n="tabSettings">设置</div>
+      <div class="tab" data-tab="stats" data-i18n="tabStats">统计</div>
+      <div class="tab" data-tab="logs" data-i18n="tabLogs">日志</div>
+      <div class="tab" data-tab="debug" data-i18n="tabDebug">调试</div>
     </div>
 
     <!-- ═══ Tab: 状态 ═══ -->
     <div class="tab-content active" id="tab-overview">
       <div id="accounts-list">
-        <div class="empty">加载中...</div>
+        <div class="empty" data-i18n="loading">加载中...</div>
       </div>
       <div id="status-no-account" style="display:none;">
-        <div class="empty">未配置邮箱账户<br><span style="font-size:11px;">请前往 <b>设置</b> 标签添加</span></div>
+        <div class="empty"><span data-i18n="noAccountTitle">未配置邮箱账户</span><br><span style="font-size:11px;" data-i18n="noAccountHint">请前往 设置 标签添加</span></div>
       </div>
       <!-- 全量检查按钮 -->
       <div class="section" style="margin-top:8px;">
-        <button id="btn-full-check-status" class="warning" style="width:100%;">🚀 全量检查</button>
+        <button id="btn-full-check-status" class="warning" style="width:100%;" data-i18n="fullCheck">🚀 全量检查</button>
       </div>
     </div>
 
@@ -518,49 +518,56 @@
     <div class="tab-content" id="tab-debug">
       <!-- 同步会话 -->
       <div class="section">
-        <div class="section-title">同步会话</div>
+        <div class="section-title" data-i18n="syncSessionTitle">同步会话</div>
         <div class="row">
             <button id="btn-sync-163" class="primary mini">🔑163</button>
             <button id="btn-sync-qq" class="primary mini">🔑QQ</button>
             <button id="btn-sync-ustc" class="primary mini">🔑USTC</button>
             <button id="btn-sync-gmail" class="primary mini">🔑Gmail</button>
           </div>
-        <div class="hint">打开邮箱页 → 提取会话令牌(sid) → 缓存供后台检查</div>
+        <div class="hint" data-i18n="syncHint">打开邮箱页 → 提取会话令牌(sid) → 缓存供后台检查</div>
       </div>
 
       <!-- 获取未读数 -->
       <div class="section">
-        <div class="section-title">获取未读数</div>
+        <div class="section-title" data-i18n="fetchUnreadTitle">获取未读数</div>
         <div class="row">
           <button id="btn-content-163" class="success mini">📥163</button>
           <button id="btn-content-qq" class="success mini">📥QQ</button>
           <button id="btn-content-ustc" class="success mini">📥USTC</button>
           <button id="btn-content-gmail" class="success mini">📥Gmail</button>
         </div>
-        <div class="hint">若未读为空：请在邮箱中打开「收件箱」后重试</div>
+        <div class="hint" data-i18n="fetchHint">若未读为空：请在邮箱中打开「收件箱」后重试</div>
       </div>
 
       <!-- 诊断 & 高级探测 -->
       <div class="section">
-        <div class="section-title">诊断与探测</div>
-        <button id="btn-diagnose-cookies" class="secondary" style="width:100%;margin-bottom:6px;">🍪 诊断会话 Cookie</button>
-        <button id="btn-toggle-advanced" class="collapse-btn">▸ 高级探测（SW 直调）</button>
+        <div class="section-title" data-i18n="diagTitle">诊断与探测</div>
+        <button id="btn-diagnose-cookies" class="secondary" style="width:100%;margin-bottom:6px;" data-i18n="diagCookies">🍪 诊断会话 Cookie</button>
+        <button id="btn-toggle-advanced" class="collapse-btn" data-i18n="advProbeToggle">▸ 高级探测（SW 直调）</button>
         <div class="collapsible-content" id="advanced-probe">
           <div class="divider"></div>
           <div class="row">
-            <button id="btn-probe-163" class="secondary mini">探测163</button>
-            <button id="btn-probe-qq" class="secondary mini">探测QQ</button>
-            <button id="btn-probe-ustc" class="secondary mini">探测USTC</button>
-            <button id="btn-probe-gmail" class="secondary mini">探测Gmail</button>
+            <button id="btn-probe-163" class="secondary mini"><span data-i18n="btnProbeWord">探测</span>163</button>
+            <button id="btn-probe-qq" class="secondary mini"><span data-i18n="btnProbeWord">探测</span>QQ</button>
+            <button id="btn-probe-ustc" class="secondary mini"><span data-i18n="btnProbeWord">探测</span>USTC</button>
+            <button id="btn-probe-gmail" class="secondary mini"><span data-i18n="btnProbeWord">探测</span>Gmail</button>
           </div>
           <div class="row" style="margin-top:4px;">
-            <button id="btn-check-bridge" class="secondary mini">检查认证</button>
-            <button id="btn-refresh-session" class="secondary mini">🔄刷新会话</button>
+            <button id="btn-check-bridge" class="secondary mini" data-i18n="btnCheckAuth">检查认证</button>
+            <button id="btn-refresh-session" class="secondary mini" data-i18n="btnRefreshSession">🔄刷新会话</button>
           </div>
           <div class="row" style="margin-top:4px;">
-            <button id="btn-possibility" class="secondary mini" style="width:100%;">🧪 全可能性后台测试</button>
+            <button id="btn-possibility" class="secondary mini" style="width:100%;" data-i18n="btnPossibility">🧪 全可能性后台测试</button>
           </div>
         </div>
+      </div>
+
+      <!-- 报告 Bug -->
+      <div class="section">
+        <div class="section-title" data-i18n="reportBugTitle">反馈问题</div>
+        <div class="hint" data-i18n="reportBugHint">若遇到异常，可一键将诊断信息+日志发送邮件至维护者 lazebird@gmail.com</div>
+        <button id="btn-report-bug" class="warning" style="width:100%;" data-i18n="reportBugBtn">📧 邮件反馈 Bug（附日志）</button>
       </div>
     </div>
 
@@ -578,17 +585,17 @@
       <!-- 账户管理 -->
       <div class="section">
         <div class="form-inline">
-          <input type="text" id="email-input" placeholder="输入邮箱地址，如 user@163.com" style="flex:1;min-width:0;padding:4px 8px;font-size:11px;border:1px solid #ced4da;border-radius:4px;" list="email-suggestions" autocomplete="off">
+          <input type="text" id="email-input" placeholder="输入邮箱地址，如 user@163.com" data-i18n-placeholder="addAccountPlaceholder" style="flex:1;min-width:0;padding:4px 8px;font-size:11px;border:1px solid #ced4da;border-radius:4px;" list="email-suggestions" autocomplete="off">
           <datalist id="email-suggestions">
-            <option value="@163.com" label="163邮箱">
-            <option value="@qq.com" label="QQ邮箱">
-            <option value="@ustc.edu.cn" label="中科大邮箱">
+            <option value="@163.com" label="163邮箱" data-i18n-label="hintNetease">
+            <option value="@qq.com" label="QQ邮箱" data-i18n-label="hintQq">
+            <option value="@ustc.edu.cn" label="中科大邮箱" data-i18n-label="hintUstc">
             <option value="@gmail.com" label="Gmail">
           </datalist>
-          <button id="btn-add-account" class="mini">添加</button>
+          <button id="btn-add-account" class="mini" data-i18n="btnAdd">添加</button>
         </div>
         <div id="settings-accounts-list" class="accounts-manage">
-          <div class="hint">暂无账户</div>
+          <div class="hint" data-i18n="noAccounts">暂无账户</div>
         </div>
       </div>
 
@@ -596,17 +603,17 @@
       <div class="section">
         <div class="row">
           <div>
-            <label class="compact-label">检查间隔</label>
+            <label class="compact-label" data-i18n="lblIntervalMin">检查间隔(分钟)</label>
             <select id="interval-select" style="width:100%;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
-              <option value="1">1分钟</option>
-              <option value="5" selected>5分钟</option>
-              <option value="10">10分钟</option>
-              <option value="15">15分钟</option>
-              <option value="30">30分钟</option>
+              <option value="1">1</option>
+              <option value="5" selected>5</option>
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
             </select>
           </div>
           <div>
-            <label class="compact-label">日志级别</label>
+            <label class="compact-label" data-i18n="lblLogLevel">日志级别</label>
             <select id="loglevel-select" style="width:100%;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
               <option value="DEBUG">DEBUG</option>
               <option value="INFO">INFO</option>
@@ -616,30 +623,38 @@
           </div>
         </div>
         <div>
-          <label class="compact-label">检查模式</label>
+          <label class="compact-label" data-i18n="lblCheckMode">检查模式</label>
           <select id="mode-select" style="width:100%;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
-            <option value="hybrid">混合模式（推荐）</option>
-            <option value="content-script">仅内容脚本</option>
-            <option value="sw-api">仅 SW API</option>
+            <option value="hybrid" data-i18n="modeHybridOption">混合模式（推荐）</option>
+            <option value="content-script" data-i18n="modeContentOption">仅内容脚本</option>
+            <option value="sw-api" data-i18n="modeSwOption">仅 SW API</option>
+          </select>
+        </div>
+        <div style="margin-top:6px;">
+          <label class="compact-label" data-i18n="lblLanguage">界面语言</label>
+          <select id="language-select" style="width:100%;padding:4px;font-size:11px;border-radius:4px;border:1px solid #ced4da;">
+            <option value="auto" data-i18n="langAuto">跟随系统语言（自动）</option>
+            <option value="zh" data-i18n="langZh">简体中文</option>
+            <option value="en" data-i18n="langEn">English</option>
           </select>
         </div>
         <div class="hint" style="margin-top:3px;">
-          <b>混合</b>：SW缓存sid直调，失效回退内容脚本。<br>
-          <b>仅内容脚本</b>：需常驻邮箱页。<b>仅SW API</b>：无需开页，定期同步。
+          <b data-i18n="modeHybrid">混合模式</b><span data-i18n="modeHintA">：SW缓存sid直调，失效回退内容脚本。</span><br>
+          <b data-i18n="modeContent">仅内容脚本</b><span data-i18n="modeHintB">：需常驻邮箱页。</span><b data-i18n="modeSw">仅SW API</b><span data-i18n="modeHintC">：无需开页，定期同步。</span>
         </div>
       </div>
 
       <!-- 探测接口配置（可折叠） -->
       <div class="section">
-        <button id="btn-toggle-endpoints" class="collapse-btn">▸ 探测接口配置</button>
+        <button id="btn-toggle-endpoints" class="collapse-btn" data-i18n="endpointToggle">▸ 探测接口配置</button>
         <div class="collapsible-content" id="endpoint-config" style="margin-top:4px;"></div>
       </div>
 
       <!-- 保存 / 重置 -->
       <div class="section" style="margin-bottom:4px;">
         <div class="row">
-          <button id="btn-save" style="flex:1;">💾 保存设置</button>
-          <button id="btn-reset" class="secondary" style="flex:1;">🔄 重置</button>
+          <button id="btn-save" style="flex:1;" data-i18n="btnSave">💾 保存设置</button>
+          <button id="btn-reset" class="secondary" style="flex:1;" data-i18n="btnReset">🔄 重置</button>
         </div>
         <div id="save-status" class="save-status"></div>
       </div>
@@ -651,7 +666,7 @@
       <!-- 会话授权状态 -->
       <div class="section">
         <div id="session-status">
-          <div class="hint">加载中...</div>
+          <div class="hint" data-i18n="loading">加载中...</div>
         </div>
       </div>
 
@@ -662,9 +677,9 @@
 
       <!-- 最近检查 -->
       <div class="section">
-        <div class="section-title">最近检查</div>
+        <div class="section-title" data-i18n="recentChecks">最近检查</div>
         <div id="recent-checks" class="recent-checks">
-          <div class="empty" style="padding:8px;">暂无数据</div>
+          <div class="empty" style="padding:8px;" data-i18n="noData">暂无数据</div>
         </div>
       </div>
     </div>
@@ -673,14 +688,14 @@
     <div class="tab-content" id="tab-logs">
       <div class="section">
         <div class="log-header">
-          <span class="log-title">调试日志</span>
+          <span class="log-title" data-i18n="debugLogs">调试日志</span>
           <div class="log-actions">
-            <button id="btn-copy-logs" class="btn-copy" title="复制全部日志">📋 复制</button>
-            <button id="btn-clear-logs" class="danger" title="清空日志">🗑 清除</button>
+            <button id="btn-copy-logs" class="btn-copy" title="复制全部日志" data-i18n="copyLogs">📋 复制</button>
+            <button id="btn-clear-logs" class="danger" title="清空日志" data-i18n="clearLogs">🗑 清除</button>
           </div>
         </div>
         <div id="logs-container" class="debug-log">
-          <div class="empty">加载中...</div>
+          <div class="empty" data-i18n="loading">加载中...</div>
         </div>
       </div>
     </div>
