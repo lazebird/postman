@@ -566,8 +566,10 @@
       <!-- 报告 Bug -->
       <div class="section">
         <div class="section-title" data-i18n="reportBugTitle">反馈问题</div>
-        <div class="hint" data-i18n="reportBugHint">若遇到异常，可一键将诊断信息+日志发送邮件至维护者 lazebird@gmail.com</div>
-        <button id="btn-report-bug" class="warning" style="width:100%;" data-i18n="reportBugBtn">📧 邮件反馈 Bug（附日志）</button>
+        <div class="hint" data-i18n="reportBugHint">若遇到异常，可将问题描述+诊断信息+日志反馈给维护者 lazebird@gmail.com</div>
+        <textarea id="bug-desc" rows="2" placeholder="" data-i18n-placeholder="reportDescPlaceholder" style="width:100%;box-sizing:border-box;resize:vertical;padding:6px;font-size:11px;border:1px solid #ced4da;border-radius:4px;margin-bottom:6px;"></textarea>
+        <button id="btn-copy-report" class="secondary" style="width:100%;margin-bottom:6px;" data-i18n="reportCopyBtn">📋 复制报告内容</button>
+        <button id="btn-report-bug" class="warning" style="width:100%;" data-i18n="reportSendBtn">📧 生成报告并打开邮件发送</button>
       </div>
     </div>
 
