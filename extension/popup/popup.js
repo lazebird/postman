@@ -9,7 +9,15 @@
  */
 
 // ========== 常量（收敛于 shared/ui-meta.js 单一事实源）==========
-import { PROVIDER_LABELS, ENDPOINT_OPTIONS } from '../shared/ui-meta.js';
+import { PROVIDER_LABELS, ENDPOINT_OPTIONS, endpointLabel } from '../shared/ui-meta.js';
+import {
+  t,
+  applyLanguage,
+  applyDomI18n,
+  getStoredLanguage,
+  setStoredLanguage,
+  LANGUAGES,
+} from '../shared/i18n.js';
 
 let currentAccounts = [];
 let currentSettings = {};
@@ -75,20 +83,29 @@ async function checkAccountCard(provider, btn) {
             await sendMessage({ type: 'testProvider', provider: 'gmail' });
           } else {
             // 授权未成功：把具体原因展示出来，避免状态页只停留在「需授权」却无任何线索
-            showProbeResult('Gmail 授权未完成', {
+            showProbeResult(t('Gmail 授权未完成', 'Gmail authorization incomplete'), {
               success: false,
-              message: 'Gmail 授权失败或已取消，请检查下方原因后重试',
-              error: auth?.error || '未知原因',
+              message: t(
+                'Gmail 授权失败或已取消，请检查下方原因后重试',
+                'Gmail authorization failed or cancelled. Check the details below and retry.'
+              ),
+              error: auth?.error || t('未知原因', 'unknown reason'),
               needsManual: auth?.needsManual === true,
             });
           }
         } else {
           // 已有有效令牌但仍未读到未读数：展示 API 返回的具体原因，不再重复弹授权
-          showProbeResult('Gmail 检查失败', {
+          showProbeResult(t('Gmail 检查失败', 'Gmail check failed'), {
             success: false,
-            message: '已持有 Gmail 授权令牌，但未能读取未读数',
-            error: acc?.error || '请检查下方原因后处理',
-            hint: '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。',
+            message: t(
+              '已持有 Gmail 授权令牌，但未能读取未读数',
+              'Has a Gmail token but could not read unread'
+            ),
+            error: acc?.error || t('请检查下方原因后处理', 'Check the reason below'),
+            hint: t(
+              '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。',
+              'If Gmail API access is restricted, enable Gmail API in the Google Cloud console and verify the OAuth redirect URI.'
+            ),
           });
         }
       }
@@ -135,15 +152,15 @@ function renderOverviewAccounts(status) {
 
     let statusBadge = '';
     if (st.needsInboxPage === true) {
-      statusBadge = '<span class="acc-status-badge acc-status-need">需打开收件箱</span>';
+      statusBadge = `<span class="acc-status-badge acc-status-need">${t('需打开收件箱', 'Open inbox needed')}</span>`;
     } else if (st.authVerified === true) {
-      statusBadge = '<span class="acc-status-badge acc-status-auth">已授权</span>';
+      statusBadge = `<span class="acc-status-badge acc-status-auth">${t('已授权', 'authorized')}</span>`;
     } else if (st.needsAuth === true) {
-      statusBadge = '<span class="acc-status-badge acc-status-need">需授权</span>';
+      statusBadge = `<span class="acc-status-badge acc-status-need">${t('需授权', 'needs auth')}</span>`;
     } else if (st.hasSid === true) {
-      statusBadge = '<span class="acc-status-badge acc-status-auth">sid缓存</span>';
+      statusBadge = `<span class="acc-status-badge acc-status-auth">sid cache</span>`;
     } else {
-      statusBadge = '<span class="acc-status-badge acc-status-err">未检查</span>';
+      statusBadge = `<span class="acc-status-badge acc-status-err">${t('未检查', 'unchecked')}</span>`;
     }
 
     // 明确的操作按钮：打开邮箱 / 检查该账户，避免整卡误触
@@ -153,9 +170,9 @@ function renderOverviewAccounts(status) {
     const actionsHtml = `
       <div class="acc-actions">
         <button class="acc-action-btn jump" data-action="open" data-provider="${acc.provider}"
-          title="打开邮箱收件箱" aria-label="打开 ${escapeHtml(acc.email)} 收件箱">↗</button>
+          title="${t('打开邮箱收件箱', 'Open mailbox inbox')}" aria-label="${t('打开', 'Open')} ${escapeHtml(acc.email)} ${t('收件箱', 'inbox')}">↗</button>
         <button class="acc-action-btn" data-action="refresh" data-provider="${acc.provider}"
-          title="检查该账户" aria-label="检查 ${escapeHtml(acc.email)}">🔄</button>
+          title="${t('检查该账户', 'Check this account')}" aria-label="${t('检查', 'Check')} ${escapeHtml(acc.email)}">🔄</button>
       </div>
     `;
 
@@ -197,7 +214,11 @@ function providerName(provider) {
 }
 
 function providerMode(mode) {
-  const modes = { hybrid: '混合', 'content-script': '内容脚本', 'sw-api': 'SW API' };
+  const modes = {
+    hybrid: t('混合', 'Hybrid'),
+    'content-script': t('内容脚本', 'Content script'),
+    'sw-api': 'SW API',
+  };
   return modes[mode] || mode;
 }
 
@@ -220,7 +241,7 @@ async function loadSettingsPanel() {
 function renderSettingsAccounts() {
   const container = document.getElementById('settings-accounts-list');
   if (!currentAccounts.length) {
-    container.innerHTML = '<div class="hint">暂无账户，请在上方添加</div>';
+    container.innerHTML = `<div class="hint">${t('暂无账户，请在上方添加', 'No accounts yet, add one above')}</div>`;
     return;
   }
   container.innerHTML = '';
@@ -235,7 +256,7 @@ function renderSettingsAccounts() {
     const delBtn = document.createElement('button');
     delBtn.className = 'mini secondary';
     delBtn.style.cssText = 'flex-shrink:0;';
-    delBtn.textContent = '删除';
+    delBtn.textContent = t('删除', 'Delete');
     delBtn.onclick = () => _removeAccount(idx);
 
     item.appendChild(emailSpan);
@@ -244,7 +265,7 @@ function renderSettingsAccounts() {
   });
 }
 
-function populateSettingsForm() {
+async function populateSettingsForm() {
   if (currentSettings.checkIntervalMinutes) {
     document.getElementById('interval-select').value = String(currentSettings.checkIntervalMinutes);
   }
@@ -254,6 +275,7 @@ function populateSettingsForm() {
   if (currentSettings.checkMode) {
     document.getElementById('mode-select').value = currentSettings.checkMode;
   }
+  await syncLanguageSelect();
 }
 
 function renderEndpoints() {
@@ -275,7 +297,7 @@ function renderEndpoints() {
           return `
         <div class="endpoint-checkbox">
           <input type="checkbox" id="ep-${provider}-${ep.name}" data-provider="${provider}" data-endpoint="${ep.name}" ${checked}>
-          <label for="ep-${provider}-${ep.name}">${escapeHtml(ep.label)}</label>
+          <label for="ep-${provider}-${ep.name}">${escapeHtml(endpointLabel(ep))}</label>
         </div>
       `;
         })
@@ -297,11 +319,11 @@ async function _addAccount() {
   const email = document.getElementById('email-input').value.trim();
 
   if (!email) {
-    showSaveStatus('请输入邮箱地址', 'error');
+    showSaveStatus(t('请输入邮箱地址', 'Please enter an email address'), 'error');
     return;
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    showSaveStatus('邮箱格式不正确', 'error');
+    showSaveStatus(t('邮箱格式不正确', 'Invalid email format'), 'error');
     return;
   }
 
@@ -319,7 +341,7 @@ async function _addAccount() {
   }
 
   if (currentAccounts.some((a) => a.email === email && a.provider === provider)) {
-    showSaveStatus('该账户已存在', 'error');
+    showSaveStatus(t('该账户已存在', 'This account already exists'), 'error');
     return;
   }
 
@@ -328,7 +350,7 @@ async function _addAccount() {
   renderSettingsAccounts();
   document.getElementById('email-input').value = '';
   notifyAccountsChanged();
-  showSaveStatus('账户已添加', 'success');
+  showSaveStatus(t('账户已添加', 'Account added'), 'success');
   refreshStatus();
 }
 
@@ -337,7 +359,7 @@ async function _removeAccount(index) {
   await chrome.storage.local.set({ accounts: currentAccounts });
   renderSettingsAccounts();
   notifyAccountsChanged();
-  showSaveStatus('账户已删除', 'success');
+  showSaveStatus(t('账户已删除', 'Account removed'), 'success');
   refreshStatus();
 }
 
@@ -372,16 +394,24 @@ async function _saveSettings() {
   try {
     chrome.runtime.sendMessage({ type: 'settingsChanged' });
   } catch {}
-  showSaveStatus('设置已保存', 'success');
+  showSaveStatus(t('设置已保存', 'Settings saved'), 'success');
 }
 
 async function _resetSettings() {
-  if (!confirm('确定要重置所有设置吗？所有账户和配置将被清除。')) return;
+  if (
+    !confirm(
+      t(
+        '确定要重置所有设置吗？所有账户和配置将被清除。',
+        'Reset all settings? All accounts and configuration will be cleared.'
+      )
+    )
+  )
+    return;
   await chrome.storage.local.clear();
   currentAccounts = [];
   currentSettings = {};
   await loadSettingsPanel();
-  showSaveStatus('已重置所有设置', 'success');
+  showSaveStatus(t('已重置所有设置', 'All settings reset'), 'success');
   refreshStatus();
 }
 
@@ -423,18 +453,18 @@ function renderSessionStatus(status) {
 
   const sids = status.cachedSids || {};
   const providers = [
-    { key: 'netease_163', label: '163邮箱' },
-    { key: 'qq', label: 'QQ邮箱' },
-    { key: 'ustc', label: '中科大' },
-    { key: 'gmail', label: 'Gmail' },
+    { key: 'netease_163', label: PROVIDER_LABELS['netease_163'] },
+    { key: 'qq', label: PROVIDER_LABELS['qq'] },
+    { key: 'ustc', label: PROVIDER_LABELS['ustc'] },
+    { key: 'gmail', label: PROVIDER_LABELS['gmail'] },
   ];
 
   const rows = providers
     .map((p) => {
       const hasSid = !!sids[p.key];
       const badge = hasSid
-        ? '<span class="sid-chip sid-ok">✅ 已授权</span>'
-        : '<span class="sid-chip sid-no">❌ 未授权</span>';
+        ? `<span class="sid-chip sid-ok">✅ ${t('已授权', 'authorized')}</span>`
+        : `<span class="sid-chip sid-no">❌ ${t('未授权', 'not authorized')}</span>`;
       return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
         <strong style="font-size:12px;">${p.label}</strong>${badge}
@@ -446,8 +476,8 @@ function renderSessionStatus(status) {
   container.innerHTML = `
     ${rows}
     <div class="hint" style="margin-top:6px;">
-      sid 约 7 天有效，过期需重新同步授权。<br>
-      在「调试」标签页点「同步」按钮即可授权。
+      ${t('sid 约 7 天有效，过期需重新同步授权。', 'sid is valid ~7 days; resync when expired.')}<br>
+      ${t('在「调试」标签页点「同步」按钮即可授权。', 'Tap Sync in the Debug tab to authorize.')}
     </div>
   `;
 }
@@ -467,19 +497,29 @@ function renderStatsGrid(status) {
   });
 
   const items = [
-    ['账户数', String(status.accountCount || 0)],
-    ['全部未读', hasAnyUnread ? `<span style="color:#dc3545;">${totalUnread} 封</span>` : '0 封'],
-    ['检查间隔', `${status.settings?.checkIntervalMinutes || 5} 分钟`],
-    ['检查模式', providerMode(status.settings?.checkMode || 'hybrid')],
-    ['163 API 模式', `${status.apiPatternCounts?.netease_163 || 0} 条`],
-    ['QQ API 模式', `${status.apiPatternCounts?.qq || 0} 条`],
-    ['USTC API 模式', `${status.apiPatternCounts?.ustc || 0} 条`],
-    ['Gmail API 模式', `${status.apiPatternCounts?.gmail || 0} 条`],
+    [t('账户数', 'Accounts'), String(status.accountCount || 0)],
     [
-      '定时闹钟',
-      status.alarmConfigured ? `✅ ${status.alarmInfo?.periodInMinutes || '?'}分/次` : '❌ 未配置',
+      t('全部未读', 'Total unread'),
+      hasAnyUnread
+        ? `<span style="color:#dc3545;">${totalUnread} ${t('封', 'msgs')}</span>`
+        : `0 ${t('封', 'msgs')}`,
     ],
-    ['日志级别', status.settings?.logLevel || 'WARN'],
+    [
+      t('检查间隔', 'Check interval'),
+      `${status.settings?.checkIntervalMinutes || 5} ${t('分钟', 'min')}`,
+    ],
+    [t('检查模式', 'Check mode'), providerMode(status.settings?.checkMode || 'hybrid')],
+    [t('163 API 模式', '163 API patterns'), `${status.apiPatternCounts?.netease_163 || 0}`],
+    [t('QQ API 模式', 'QQ API patterns'), `${status.apiPatternCounts?.qq || 0}`],
+    [t('USTC API 模式', 'USTC API patterns'), `${status.apiPatternCounts?.ustc || 0}`],
+    [t('Gmail API 模式', 'Gmail API patterns'), `${status.apiPatternCounts?.gmail || 0}`],
+    [
+      t('定时闹钟', 'Alarm'),
+      status.alarmConfigured
+        ? `✅ ${status.alarmInfo?.periodInMinutes || '?'}${t('分/次', 'min/cycle')}`
+        : `❌ ${t('未配置', 'not configured')}`,
+    ],
+    [t('日志级别', 'Log level'), status.settings?.logLevel || 'WARN'],
   ];
 
   grid.innerHTML = items
@@ -500,7 +540,7 @@ function renderRecentChecks(status) {
 
   const results = status.recentResults || [];
   if (!results.length) {
-    container.innerHTML = '<div class="empty" style="padding:8px;">暂无检查记录</div>';
+    container.innerHTML = `<div class="empty" style="padding:8px;">${t('暂无检查记录', 'No check records')}</div>`;
     return;
   }
 
@@ -517,7 +557,7 @@ function renderRecentChecks(status) {
     .slice(0, 10);
 
   if (!meaningful.length) {
-    container.innerHTML = '<div class="empty" style="padding:8px;">暂无检查记录</div>';
+    container.innerHTML = `<div class="empty" style="padding:8px;">${t('暂无检查记录', 'No check records')}</div>`;
     return;
   }
 
@@ -536,29 +576,29 @@ function renderRecentChecks(status) {
         const okCount = r.results.filter(
           (rr) => rr.authVerified || typeof rr.unreadCount === 'number'
         ).length;
-        statusText = `已检查 ${okCount}/${r.results.length} 个`;
+        statusText = `${t('已检查', 'Checked')} ${okCount}/${r.results.length} ${t('个', 'accounts')}`;
         statusCls = okCount > 0 ? 'status-ok' : 'status-fail';
       } else if (hasUnread) {
-        statusText = `未读 ${r.unreadCount} 封`;
+        statusText = `${t('未读', 'Unread')} ${r.unreadCount} ${t('封', 'msgs')}`;
         statusCls = r.unreadCount > 0 ? 'acc-unread-num' : 'acc-unread-zero';
       } else if (r.authVerified === true) {
-        statusText = '已授权';
+        statusText = t('已授权', 'authorized');
         statusCls = 'status-ok';
       } else if (r.needsAuth === true) {
-        statusText = '需授权';
+        statusText = t('需授权', 'needs auth');
         statusCls = 'status-fail';
       } else if (r.error) {
-        statusText = '失败';
+        statusText = t('失败', 'failed');
         statusCls = 'status-fail';
       } else {
-        statusText = '已检查';
+        statusText = t('已检查', 'checked');
         statusCls = 'status-idle';
       }
 
       return `
       <div class="recent-item">
         <span class="r-time">${time || '--'}</span>
-        <span class="r-provider">${email || provider || '全量'}</span>
+        <span class="r-provider">${email || provider || t('全量', 'all')}</span>
         <span class="r-status ${statusCls}" style="font-size:10px;">${statusText}</span>
       </div>
     `;
@@ -570,7 +610,9 @@ function renderRecentChecks(status) {
 // 同步会话
 async function syncSession(provider) {
   const providerLabel = PROVIDER_LABELS[provider] || provider;
-  showProbeResult(`同步 ${providerLabel}`, { message: '正在同步...' });
+  showProbeResult(`${t('同步', 'Sync')} ${providerLabel}`, {
+    message: t('正在同步...', 'Syncing...'),
+  });
 
   try {
     // 根据提供商选择正确的消息类型
@@ -583,24 +625,27 @@ async function syncSession(provider) {
 
     // Gmail 走 OAuth2 授权，返回扁平结果 { success, token }，无 probe 字段。
     if (provider === 'gmail' && r?.success) {
-      showProbeResult(`${providerLabel} 授权成功`, {
+      showProbeResult(`${providerLabel} ${t('授权成功', 'authorized')}`, {
         success: true,
-        message: 'Gmail 授权成功，正在读取未读数...',
+        message: t('Gmail 授权成功，正在读取未读数...', 'Gmail authorized, reading unread...'),
       });
       // 授权完成后触发一次后台探测，读取未读数
       const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
       const acc = probe?.results?.[0];
       const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
-      showProbeResult(`${providerLabel} 授权成功`, {
+      showProbeResult(`${providerLabel} ${t('授权成功', 'authorized')}`, {
         success: true,
         authVerified: acc?.authVerified === true,
         unreadCount: unread,
         message:
           unread != null
-            ? `授权成功，未读 ${unread} 封`
+            ? `${t('授权成功，未读', 'Authorized, unread')} ${unread} ${t('封', 'msgs')}`
             : acc?.needsAuth
-              ? '已授权但未能读取未读数，请稍后重试'
-              : 'Gmail 授权成功',
+              ? t(
+                  '已授权但未能读取未读数，请稍后重试',
+                  'Authorized but failed to read unread; retry later'
+                )
+              : t('Gmail 授权成功', 'Gmail authorized'),
         detail: acc?.error || null,
       });
       refreshStatus();
@@ -624,37 +669,43 @@ async function syncSession(provider) {
 
       if (sid) {
         if (typeof unread === 'number') {
-          showProbeResult(`${providerLabel} 授权成功`, {
+          showProbeResult(`${providerLabel} ${t('授权成功', 'authorized')}`, {
             ...result,
-            message: `授权成功，未读 ${unread} 封`,
+            message: `${t('授权成功，未读', 'Authorized, unread')} ${unread} ${t('封', 'msgs')}`,
           });
         } else if (needsInbox || pageType !== 'inbox') {
-          showProbeResult(`${providerLabel} 已授权`, {
+          showProbeResult(`${providerLabel} ${t('已授权', 'authorized')}`, {
             ...result,
-            message: '已授权，请在邮箱中打开「收件箱」后读取未读数',
+            message: t(
+              '已授权，请在邮箱中打开「收件箱」后读取未读数',
+              'Authorized. Open the Inbox in the mailbox to read unread.'
+            ),
           });
         } else {
-          showProbeResult(`${providerLabel} 授权成功`, { ...result });
+          showProbeResult(`${providerLabel} ${t('授权成功', 'authorized')}`, { ...result });
         }
       } else {
-        showProbeResult(`${providerLabel} 同步失败`, {
+        showProbeResult(`${providerLabel} ${t('同步失败', 'sync failed')}`, {
           ...r.probe,
-          message: '未检测到登录会话，请先登录邮箱',
+          message: t(
+            '未检测到登录会话，请先登录邮箱',
+            'No active login session detected. Please sign in first.'
+          ),
         });
       }
     } else {
-      showProbeResult(`${providerLabel} 同步失败`, r?.probe || r);
+      showProbeResult(`${providerLabel} ${t('同步失败', 'sync failed')}`, r?.probe || r);
     }
     refreshStatus();
   } catch (err) {
-    showProbeResult(`${providerLabel} 同步失败`, { error: err.message });
+    showProbeResult(`${providerLabel} ${t('同步失败', 'sync failed')}`, { error: err.message });
   }
 }
 
 // 内容脚本探测
 async function runPlanC(provider) {
   const pre = document.getElementById('probe-result-text');
-  if (pre) pre.textContent = '探测中...';
+  if (pre) pre.textContent = t('探测中...', 'Probing...');
   const providerLabel = PROVIDER_LABELS[provider] || provider;
 
   // 根据提供商选择正确的消息类型
@@ -670,7 +721,7 @@ async function runPlanC(provider) {
 
     // Gmail：先直接后台探测（读缓存令牌）；未授权/令牌失效时引导交互授权
     if (provider === 'gmail') {
-      if (pre) pre.textContent = '读取未读数中...';
+      if (pre) pre.textContent = t('读取未读数中...', 'Reading unread...');
       const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
       const acc = probe?.results?.[0];
       let unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
@@ -682,18 +733,22 @@ async function runPlanC(provider) {
 
       if (unread == null && !hasToken) {
         // 无有效令牌 → 弹交互授权（仅用户主动点击时）
-        showProbeResult(`获取未读数 · ${providerLabel}`, {
+        showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
           success: false,
-          message: 'Gmail 未授权，正在弹出授权窗口，请在弹出的 Google 页面中确认...',
+          message: t(
+            'Gmail 未授权，正在弹出授权窗口，请在弹出的 Google 页面中确认...',
+            'Gmail not authorized. Opening the authorization window; confirm on the Google page...'
+          ),
         });
         const auth = await sendMessage({ type: 'gmailAuthorize' });
         if (auth?.success) {
-          if (pre) pre.textContent = '授权成功，读取未读数中...';
+          if (pre)
+            pre.textContent = t('授权成功，读取未读数中...', 'Authorized, reading unread...');
           const probe2 = await sendMessage({ type: 'testProvider', provider: 'gmail' });
           const acc2 = probe2?.results?.[0];
           unread = acc2 && typeof acc2.unreadCount === 'number' ? acc2.unreadCount : null;
           if (pre) {
-            showProbeResult(`获取未读数 · ${providerLabel}`, {
+            showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
               success: unread != null,
               unreadCount: unread,
               authVerified: acc2?.authVerified === true,
@@ -702,9 +757,9 @@ async function runPlanC(provider) {
           }
         } else {
           if (pre)
-            showProbeResult(`获取未读数 · ${providerLabel}`, {
+            showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
               success: false,
-              message: 'Gmail 授权未完成或已取消',
+              message: t('Gmail 授权未完成或已取消', 'Gmail authorization incomplete or cancelled'),
               error: auth?.error || null,
             });
         }
@@ -713,7 +768,7 @@ async function runPlanC(provider) {
       }
 
       if (pre) {
-        showProbeResult(`获取未读数 · ${providerLabel}`, {
+        showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
           success: unread != null,
           unreadCount: unread,
           authVerified: acc?.authVerified === true,
@@ -721,12 +776,18 @@ async function runPlanC(provider) {
             unread != null
               ? undefined
               : hasToken
-                ? '已持有 Gmail 授权令牌，但未能读取未读数'
-                : 'Gmail 未读取到未读数',
+                ? t(
+                    '已持有 Gmail 授权令牌，但未能读取未读数',
+                    'Has a Gmail token but could not read unread'
+                  )
+                : t('Gmail 未读取到未读数', 'Gmail returned no unread'),
           detail: acc?.error || null,
           hint:
             unread == null && hasToken
-              ? '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。'
+              ? t(
+                  '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。',
+                  'If Gmail API access is restricted, enable Gmail API in the Google Cloud console and verify the OAuth redirect URI.'
+                )
               : undefined,
         });
       }
@@ -736,7 +797,7 @@ async function runPlanC(provider) {
 
     const success = r?.probe?.success;
     if (pre) {
-      showProbeResult(`获取未读数 · ${providerLabel}`, {
+      showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
         success,
         unreadCount: r?.probe?.unreadCount ?? null,
         authVerified: r?.probe?.authVerified === true,
@@ -745,18 +806,18 @@ async function runPlanC(provider) {
     }
     refreshStatus();
   } catch (err) {
-    if (pre) showProbeResult(`获取未读数失败`, { error: err.message });
+    if (pre) showProbeResult(t('获取未读数失败', 'Fetch unread failed'), { error: err.message });
   }
 }
 
 // Cookie 诊断
 async function runCookieDiag() {
-  showProbeResult('Cookie 诊断', { message: '诊断中...' });
+  showProbeResult('Cookie ' + t('诊断', 'Diagnosis'), { message: t('诊断中...', 'Diagnosing...') });
   try {
     const r = await sendMessage({ type: 'diagnoseCookies' });
-    showProbeResult('🍪 Cookie 诊断', r);
+    showProbeResult('🍪 Cookie ' + t('诊断', 'Diagnosis'), r);
   } catch (err) {
-    showProbeResult('Cookie 诊断失败', { error: err.message });
+    showProbeResult('Cookie ' + t('诊断失败', 'diagnosis failed'), { error: err.message });
   }
 }
 
@@ -772,14 +833,14 @@ async function runSWProbe(provider) {
   const origText = btn?.textContent;
   if (btn) {
     btn.disabled = true;
-    btn.textContent = '探测中...';
+    btn.textContent = t('探测中...', 'Probing...');
   }
   try {
     const result = await sendMessage({ type: 'testProvider', provider });
-    showProbeResult(`${PROVIDER_LABELS[provider]} 探测`, result);
+    showProbeResult(`${PROVIDER_LABELS[provider]} ${t('探测', 'probe')}`, result);
     refreshStatus();
   } catch (err) {
-    showProbeResult(`${PROVIDER_LABELS[provider]} 探测失败`, {
+    showProbeResult(`${PROVIDER_LABELS[provider]} ${t('探测失败', 'probe failed')}`, {
       success: false,
       error: err.message,
     });
@@ -793,24 +854,24 @@ async function runSWProbe(provider) {
 
 // 检查认证
 async function runCheckBridge() {
-  showProbeResult('检查认证', { message: '检查中...' });
+  showProbeResult(t('检查认证', 'Check auth'), { message: t('检查中...', 'Checking...') });
   try {
     const [r163, rQQ] = await Promise.all([
       sendMessage({ type: 'checkBridge', provider: 'netease_163' }),
       sendMessage({ type: 'checkBridge', provider: 'qq' }),
     ]);
-    showProbeResult('认证状态', {
+    showProbeResult(t('认证状态', 'Auth status'), {
       163: { authState: r163?.authState, loggedIn: r163?.loggedIn, needsAuth: r163?.needsAuth },
       QQ: { authState: rQQ?.authState, loggedIn: rQQ?.loggedIn, needsAuth: rQQ?.needsAuth },
     });
   } catch (err) {
-    showProbeResult('认证检查失败', { error: err.message });
+    showProbeResult(t('认证检查失败', 'Auth check failed'), { error: err.message });
   }
 }
 
 // 刷新会话
 async function runRefreshSession() {
-  showProbeResult('刷新会话', { message: '刷新中...' });
+  showProbeResult(t('刷新会话', 'Refresh session'), { message: t('刷新中...', 'Refreshing...') });
   try {
     const results = {};
     for (const provider of ['netease_163', 'qq']) {
@@ -823,10 +884,10 @@ async function runRefreshSession() {
         contentUnread: r.contentProbe?.probe?.unreadCount ?? null,
       };
     }
-    showProbeResult('会话刷新结果', results);
+    showProbeResult(t('会话刷新结果', 'Session refresh result'), results);
     refreshStatus();
   } catch (err) {
-    showProbeResult('会话刷新失败', { error: err.message });
+    showProbeResult(t('会话刷新失败', 'Session refresh failed'), { error: err.message });
   }
 }
 
@@ -848,12 +909,12 @@ async function runFullCheck() {
   const origText = btn?.textContent;
   if (btn) {
     btn.disabled = true;
-    btn.textContent = '⏳ 检查中...';
+    btn.textContent = t('⏳ 检查中...', '⏳ Checking...');
   }
   showLoading();
   try {
     const result = await sendMessage({ type: 'runCheck' });
-    showProbeResult('全量检查结果', result);
+    showProbeResult(t('全量检查结果', 'Full check result'), result);
 
     // 手动点击「全量检查」按钮同样属用户主动显式操作（AGENTS 规则 1 允许弹授权）。
     // 若任一 Gmail 账户需要授权（无有效令牌），应一并弹出 OAuth 授权窗，授权成功后
@@ -862,33 +923,40 @@ async function runFullCheck() {
       (r) => r.provider === 'gmail' && r.needsAuth === true
     );
     if (gmailNeedAuth) {
-      showProbeResult('全量检查', {
+      showProbeResult(t('全量检查', 'Full check'), {
         success: false,
         needsAuth: true,
-        message: `Gmail 账户 ${gmailNeedAuth.email || '（未授权）'} 需要授权，正在弹出 Google 授权窗口，请在弹出的页面中确认...`,
+        message: t(
+          'Gmail 账户 {email} 需要授权，正在弹出 Google 授权窗口，请在弹出的页面中确认...',
+          'Gmail account {email} needs authorization. Opening the Google authorization window; confirm on the page...',
+          { email: gmailNeedAuth.email || t('（未授权）', '(not authorized)') }
+        ),
       });
       const auth = await sendMessage({ type: 'gmailAuthorize' });
       if (auth?.success) {
         // 授权成功：重跑全量，让刚授权的 Gmail 也能读到未读数
         const result2 = await sendMessage({ type: 'runCheck' });
-        showProbeResult('全量检查结果', result2);
+        showProbeResult(t('全量检查结果', 'Full check result'), result2);
       } else {
-        showProbeResult('Gmail 授权未完成', {
+        showProbeResult(t('Gmail 授权未完成', 'Gmail authorization incomplete'), {
           success: false,
-          message: 'Gmail 授权失败或已取消，请检查下方原因后重试',
-          error: auth?.error || '未知原因',
+          message: t(
+            'Gmail 授权失败或已取消，请检查下方原因后重试',
+            'Gmail authorization failed or cancelled. Check the details below and retry.'
+          ),
+          error: auth?.error || t('未知原因', 'unknown reason'),
           needsManual: auth?.needsManual === true,
         });
       }
     }
     refreshStatus();
   } catch (err) {
-    showProbeResult('全量检查失败', { success: false, error: err.message });
+    showProbeResult(t('全量检查失败', 'Full check failed'), { success: false, error: err.message });
   } finally {
     hideLoading();
     if (btn) {
       btn.disabled = false;
-      btn.textContent = origText || '🚀 全量检查';
+      btn.textContent = origText || t('🚀 全量检查', '🚀 Full Check');
     }
   }
 }
@@ -899,20 +967,29 @@ async function runPossibilityTest() {
   const origText = btn?.textContent;
   if (btn) {
     btn.disabled = true;
-    btn.textContent = '⏳ 测试中（请耐心等待，涉及多接口）...';
+    btn.textContent = t(
+      '⏳ 测试中（请耐心等待，涉及多接口）...',
+      '⏳ Testing (please wait, involves many endpoints)...'
+    );
   }
-  showProbeResult('🧪 全可能性后台测试', {
-    message: '正在逐策略探测 163/QQ 各接口，结果将输出为日志，请稍候...',
+  showProbeResult('🧪 ' + t('全可能性后台测试', 'Possibility backend test'), {
+    message: t(
+      '正在逐策略探测 163/QQ 各接口，结果将输出为日志，请稍候...',
+      'Probing 163/QQ endpoints strategy by strategy; results will be logged. Please wait...'
+    ),
   });
   try {
     const result = await sendMessage({ type: 'possibilityTest', provider: 'all' });
-    showProbeResult('🧪 全可能性后台测试结果', result);
+    showProbeResult('🧪 ' + t('全可能性后台测试结果', 'Possibility backend test result'), result);
   } catch (err) {
-    showProbeResult('全可能性测试失败', { success: false, error: err.message });
+    showProbeResult(t('全可能性测试失败', 'Possibility test failed'), {
+      success: false,
+      error: err.message,
+    });
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = origText || '🧪 全可能性后台测试';
+      btn.textContent = origText || '🧪 ' + t('全可能性后台测试', 'Possibility backend test');
     }
   }
 }
@@ -991,7 +1068,7 @@ async function refreshLogs() {
     const container = document.getElementById('logs-container');
     if (!container) return;
     if (!debugLogs.length) {
-      container.innerHTML = '<div class="empty">暂无日志</div>';
+      container.innerHTML = `<div class="empty">${t('暂无日志', 'No logs')}</div>`;
       return;
     }
     container.innerHTML = debugLogs
@@ -1005,7 +1082,7 @@ async function refreshLogs() {
   } catch (err) {
     const container = document.getElementById('logs-container');
     if (container) {
-      container.innerHTML = `<div class="error">读取日志失败: ${escapeHtml(err.message)}</div>`;
+      container.innerHTML = `<div class="error">${t('读取日志失败', 'Failed to read logs')}: ${escapeHtml(err.message)}</div>`;
     }
   }
 }
@@ -1043,15 +1120,15 @@ async function copyLogs() {
   const logs = await fetchLogsFromStorage();
   const text = logsToPlainText(logs);
   if (!text) {
-    copyBtn.textContent = '❌ 无日志';
+    copyBtn.textContent = '❌ ' + t('无日志', 'no logs');
     setTimeout(() => {
-      copyBtn.textContent = '📋 复制';
+      copyBtn.textContent = '📋 ' + t('复制', 'Copy');
     }, 2000);
     return;
   }
   try {
     await navigator.clipboard.writeText(text);
-    copyBtn.textContent = '✅ 已复制';
+    copyBtn.textContent = '✅ ' + t('已复制', 'copied');
     copyBtn.classList.add('copied');
   } catch {
     // clipboard API 不可用时回退到 execCommand
@@ -1066,11 +1143,11 @@ async function copyLogs() {
     const ok = document.execCommand('copy');
     container.textContent = original;
     sel.removeAllRanges();
-    copyBtn.textContent = ok ? '✅ 已复制' : '❌ 复制失败';
+    copyBtn.textContent = ok ? '✅ ' + t('已复制', 'copied') : '❌ ' + t('复制失败', 'copy failed');
     copyBtn.classList.toggle('copied', ok);
   }
   setTimeout(() => {
-    copyBtn.textContent = '📋 复制';
+    copyBtn.textContent = '📋 ' + t('复制', 'Copy');
     copyBtn.classList.remove('copied');
   }, 2000);
 }
@@ -1080,15 +1157,16 @@ async function clearLogs() {
   if (!clearBtn) return;
   try {
     await chrome.storage.session.remove('debugLogs');
-    document.getElementById('logs-container').innerHTML = '<div class="empty">暂无日志</div>';
-    clearBtn.textContent = '✅ 已清除';
+    document.getElementById('logs-container').innerHTML =
+      `<div class="empty">${t('暂无日志', 'No logs')}</div>`;
+    clearBtn.textContent = '✅ ' + t('已清除', 'cleared');
     setTimeout(() => {
-      clearBtn.textContent = '🗑 清除';
+      clearBtn.textContent = '🗑 ' + t('清除', 'Clear');
     }, 2000);
   } catch {
-    clearBtn.textContent = '❌ 清除失败';
+    clearBtn.textContent = '❌ ' + t('清除失败', 'clear failed');
     setTimeout(() => {
-      clearBtn.textContent = '🗑 清除';
+      clearBtn.textContent = '🗑 ' + t('清除', 'Clear');
     }, 2000);
   }
 }
@@ -1144,8 +1222,85 @@ function setupCollapse(btnId, contentId) {
   });
 }
 
+// ========== 界面语言 ==========
+async function syncLanguageSelect() {
+  const sel = document.getElementById('language-select');
+  if (!sel) return;
+  const pref = await getStoredLanguage();
+  sel.value = pref === 'zh' || pref === 'en' ? pref : 'auto';
+}
+
+// ========== 报告 Bug（邮件发送至 lazebird@gmail.com）==========
+async function reportBugByEmail() {
+  try {
+    // 收集诊断信息：账户状态 + 最近日志 + 扩展版本
+    let statusText = '';
+    try {
+      const status = await sendMessage({ type: 'getStatus' });
+      statusText = JSON.stringify(
+        {
+          accounts: status?.accounts || [],
+          accountStatus: status?.accountStatus || [],
+          settings: status?.settings || {},
+        },
+        null,
+        2
+      );
+    } catch (e) {
+      statusText = 'getStatus failed: ' + e.message;
+    }
+
+    let logsText = '';
+    try {
+      logsText = await getLogsAPI(200);
+    } catch (e) {
+      logsText = 'getLogs failed: ' + e.message;
+    }
+
+    const body = [
+      t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''),
+      t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''),
+      '',
+      '--- ' + t('问题描述', 'Issue description') + ' ---',
+      '',
+      '--- ' + t('账户状态', 'Account status') + ' ---',
+      statusText,
+      '',
+      '--- ' + t('最近日志', 'Recent logs') + ' ---',
+      logsText,
+    ].join('\n');
+
+    const subject = encodeURIComponent(t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report'));
+    const mailto =
+      'mailto:lazebird@gmail.com?subject=' + subject + '&body=' + encodeURIComponent(body);
+    // 用户主动点击（符合 AGENTS 规则 1：允许打开页面/客户端）
+    const a = document.createElement('a');
+    a.href = mailto;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showProbeResult(t('邮件客户端已打开', 'Mail client opened'), {
+      success: true,
+      message: t(
+        '请发送邮件至 lazebird@gmail.com。若未弹出邮件应用，请复制下方信息手动发送。',
+        'Please send the email to lazebird@gmail.com. If no mail app opened, copy the info below and send it manually.'
+      ),
+    });
+  } catch (err) {
+    console.error('报告 Bug 失败:', err);
+    showSaveStatus(t('报告 Bug 失败: ', 'Failed to report bug: ') + err.message, 'error');
+  }
+}
+
 // ========== 初始化 ==========
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // 应用语言偏好（auto→浏览器语言；或用户在设置中显式选择）
+  await applyLanguage();
+  applyDomI18n();
+  await syncLanguageSelect();
+
   // 折叠面板
   setupCollapse('btn-toggle-advanced', 'advanced-probe');
   setupCollapse('btn-toggle-endpoints', 'endpoint-config');
@@ -1190,6 +1345,23 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('email-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') _addAccount();
   });
+
+  // 语言选择：立即切换并重绘当前可见页面
+  document.getElementById('language-select')?.addEventListener('change', async (e) => {
+    const pref = e.target.value || LANGUAGES.AUTO;
+    await setStoredLanguage(pref);
+    await applyLanguage();
+    applyDomI18n();
+    // 重绘动态渲染的可见标签页
+    if (isTabVisible('overview')) refreshStatus();
+    if (isTabVisible('settings')) loadSettingsPanel();
+    if (isTabVisible('stats')) refreshStatus();
+    if (isTabVisible('logs')) refreshLogs();
+    showSaveStatus(t('语言已切换', 'Language changed'), 'success');
+  });
+
+  // 报告 Bug：邮件反馈至 lazebird@gmail.com
+  document.getElementById('btn-report-bug')?.addEventListener('click', reportBugByEmail);
 
   // 初始化刷新状态
   refreshStatus();
