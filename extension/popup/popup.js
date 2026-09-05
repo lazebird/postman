@@ -1231,18 +1231,15 @@ async function syncLanguageSelect() {
 }
 
 // ========== 报告 Bug（反馈至 lazebird@gmail.com）==========
-// 说明：诊断内容（账户状态 + 日志）可能较长，若塞入 mailto 的 body 会超出 URL 长度
-// 限制而被邮件客户端拒绝（HTTP 400）。因此这里改用「复制完整报告到剪贴板 + 打开
-// 短正文 mailto」的组合：完整内容始终随剪贴板保留，用户粘贴到任意邮件即可发送；
-// 即使本机未配置邮件客户端，复制内容也能作为可靠兜底。
+// 用户点击「打开邮件报告 Bug」后，组装一份包含版本、账户状态、最近日志的诊断文本，
+// 经 background 用 chrome.tabs.create 打开 mailto（交给系统邮件客户端/浏览器处理），
+// 用户在邮件正文里补充描述后点发送即可。不再依赖剪贴板/多按钮，流程更直接。
+//
+// 说明：popup 内用 <a>.click() 触发 mailto 经常被静默忽略（点了没反应）；改为把 mailto
+// URL 交给 service worker 用 chrome.tabs.create 打开最稳定。该消息由用户点击按钮发出，
+// 带 trigger='manual'，符合 AGENTS 规则 1「用户主动操作允许开标签」。
 
-/** 读取用户填写的问题描述（可选） */
-function readBugDescription() {
-  const ta = document.getElementById('bug-desc');
-  return ta ? ta.value.trim() : '';
-}
-
-/** 收集诊断报告文本：问题描述 + 扩展版本 + 账户状态 + 最近日志 */
+/** 收集诊断报告文本：扩展版本 + 浏览器语言 + 账户状态 + 最近日志 */
 async function collectBugReport() {
   let statusText = '';
   try {
@@ -1262,19 +1259,15 @@ async function collectBugReport() {
 
   let logsText = '';
   try {
-    const logs = await getLogsAPI(200);
+    const logs = await getLogsAPI(120);
     logsText = logsToPlainText(logs) || t('（无日志）', '(no logs)');
   } catch (e) {
     logsText = 'getLogs failed: ' + e.message;
   }
 
-  const description = readBugDescription() || t('（未填写）', '(not provided)');
   return [
     t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''),
     t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''),
-    '',
-    '--- ' + t('问题描述', 'Issue description') + ' ---',
-    description,
     '',
     '--- ' + t('账户状态', 'Account status') + ' ---',
     statusText,
@@ -1284,100 +1277,44 @@ async function collectBugReport() {
   ].join('\n');
 }
 
-/** 复制文本到剪贴板；Clipboard API 不可用时回退 execCommand */
-async function copyTextToClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    let ok = false;
-    try {
-      ok = document.execCommand('copy');
-    } catch {
-      ok = false;
-    }
-    ta.remove();
-    return ok;
-  }
-}
-
-/** 打开一个短正文的 mailto，避免超长 body 触发 400 */
-function openMailToShort() {
-  const subject = t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report');
-  // body 仅作简短指引，完整诊断内容已写入剪贴板，用户在邮件正文粘贴即可
-  const body = t(
-    '完整诊断报告已复制到剪贴板，请直接粘贴到本邮件正文后发送。\n（若邮件应用未自动打开，可新建邮件并粘贴。）',
-    'Full diagnostics have been copied to your clipboard. Paste them into the body of this email and send.\n(If your mail app did not open, create a new email and paste.)'
-  );
-  const mailto =
+/** 组装 mailto 链接（正文含诊断信息，主题带版本号便于归类） */
+function buildMailtoUrl(report) {
+  const subject =
+    t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report') +
+    ' v' +
+    chrome.runtime.getManifest().version;
+  return (
     'mailto:lazebird@gmail.com?subject=' +
     encodeURIComponent(subject) +
     '&body=' +
-    encodeURIComponent(body);
-  // 用户主动点击（符合 AGENTS 规则 1：允许打开页面/客户端）
-  const a = document.createElement('a');
-  a.href = mailto;
-  a.rel = 'noopener noreferrer';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+    encodeURIComponent(report)
+  );
 }
 
-/** 复制完整报告到剪贴板（可靠后备，不依赖邮件客户端） */
-async function copyBugReport() {
-  const btn = document.getElementById('btn-copy-report');
+/** 报告 Bug：经 background 稳定唤起邮件客户端（用户手动点击） */
+async function reportBugByEmail() {
+  const btn = document.getElementById('btn-report-bug');
   if (btn) btn.disabled = true;
   try {
     const report = await collectBugReport();
-    const ok = await copyTextToClipboard(report);
-    if (ok) {
-      showSaveStatus(
-        t(
-          '✅ 完整诊断报告已复制，请粘贴到邮件中发送至 lazebird@gmail.com',
-          '✅ Full report copied. Paste it into an email to lazebird@gmail.com.'
-        ),
-        'success'
-      );
-    } else {
-      showSaveStatus(
-        t(
-          '❌ 复制失败，请改用下方“生成邮件”按钮',
-          '❌ Copy failed. Use the Compose button below instead.'
-        ),
-        'error'
-      );
+    const mailto = buildMailtoUrl(report);
+    const res = await sendMessage({ type: 'openReportEmail', url: mailto });
+    if (res?.success === false) {
+      showSaveStatus(t('打开邮件失败: ', 'Failed to open email: ') + (res.error || ''), 'error');
+      return;
     }
-  } catch (err) {
-    console.error('复制报告失败:', err);
-    showSaveStatus(t('复制报告失败: ', 'Failed to copy report: ') + err.message, 'error');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-/** 报告 Bug：复制完整报告到剪贴板并打开短正文邮件客户端 */
-async function reportBugByEmail() {
-  try {
-    const report = await collectBugReport();
-    await copyTextToClipboard(report);
-    openMailToShort();
-    showProbeResult(
-      t('报告已复制，请发送邮件', 'Report copied, please send email'),
+    showSaveStatus(
       t(
-        '✅ 完整诊断信息已复制到剪贴板。邮件客户端（若已配置）已打开，请把内容粘贴到正文后发送至 lazebird@gmail.com；若未弹出邮件应用，请新建邮件并粘贴复制内容发送。',
-        '✅ Full diagnostics copied to clipboard. Your mail client (if configured) should open; paste the content into the body and send to lazebird@gmail.com. If no mail app opened, create an email and paste the copied content.'
-      )
+        '✅ 邮件客户端已唤起，请在正文补充问题描述后点发送（收件人 lazebird@gmail.com）。若未弹出，请检查浏览器默认邮件应用。',
+        '✅ Mail app opened. Add a description and send (to lazebird@gmail.com). If nothing popped up, check your browser default mail app.'
+      ),
+      'success'
     );
   } catch (err) {
     console.error('报告 Bug 失败:', err);
     showSaveStatus(t('报告 Bug 失败: ', 'Failed to report bug: ') + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1447,9 +1384,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     showSaveStatus(t('语言已切换', 'Language changed'), 'success');
   });
 
-  // 报告 Bug：复制报告到剪贴板 / 打开邮件客户端发送至 lazebird@gmail.com
+  // 报告 Bug：用户手动点击 → 组装诊断并唤起邮件客户端发送至 lazebird@gmail.com
   document.getElementById('btn-report-bug')?.addEventListener('click', reportBugByEmail);
-  document.getElementById('btn-copy-report')?.addEventListener('click', copyBugReport);
 
   // 初始化刷新状态
   refreshStatus();

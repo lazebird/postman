@@ -270,6 +270,23 @@ async function handleMessage(message, sender) {
       }
       return await openMailboxTab(message.provider, { active: true });
 
+    case 'openReportEmail':
+      // 报告 Bug：在 Popup 手动点击「打开邮件报告 Bug」后触发，把诊断内容以 mailto 交给
+      // 浏览器/系统邮件客户端处理。mailto 会在用户默认邮件应用中新建草稿，非 `chrome.tabs`
+      // 常规网页标签。仅允许手动来源，绝不自动触发，符合 AGENTS 规则 1。
+      if (sourceFromMessage(message) !== TRIGGER_SOURCE.MANUAL_SINGLE) {
+        logger.warn('[guard] openReportEmail 触发来源非手动，拒绝唤起邮件');
+        return { success: false, error: '打开邮件仅支持在界面手动触发', needsManual: true };
+      }
+      if (!message.url || !/^mailto:/i.test(message.url || '')) {
+        return { success: false, error: 'invalid mailto url' };
+      }
+      {
+        const tab = await chrome.tabs.create({ url: message.url });
+        logger.info(`已唤起报告 Bug 邮件客户端, tabId=${tab?.id}`);
+        return { success: true };
+      }
+
     case 'contentPageReady': {
       // 内容脚本上报：如果有 sid，缓存下来供 SW 后续独立调用
       const sid = message.detail?.sid;
