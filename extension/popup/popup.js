@@ -1230,64 +1230,151 @@ async function syncLanguageSelect() {
   sel.value = pref === 'zh' || pref === 'en' ? pref : 'auto';
 }
 
-// ========== 报告 Bug（邮件发送至 lazebird@gmail.com）==========
+// ========== 报告 Bug（反馈至 lazebird@gmail.com）==========
+// 说明：诊断内容（账户状态 + 日志）可能较长，若塞入 mailto 的 body 会超出 URL 长度
+// 限制而被邮件客户端拒绝（HTTP 400）。因此这里改用「复制完整报告到剪贴板 + 打开
+// 短正文 mailto」的组合：完整内容始终随剪贴板保留，用户粘贴到任意邮件即可发送；
+// 即使本机未配置邮件客户端，复制内容也能作为可靠兜底。
+
+/** 读取用户填写的问题描述（可选） */
+function readBugDescription() {
+  const ta = document.getElementById('bug-desc');
+  return ta ? ta.value.trim() : '';
+}
+
+/** 收集诊断报告文本：问题描述 + 扩展版本 + 账户状态 + 最近日志 */
+async function collectBugReport() {
+  let statusText = '';
+  try {
+    const status = await sendMessage({ type: 'getStatus' });
+    statusText = JSON.stringify(
+      {
+        accounts: status?.accounts || [],
+        accountStatus: status?.accountStatus || [],
+        settings: status?.settings || {},
+      },
+      null,
+      2
+    );
+  } catch (e) {
+    statusText = 'getStatus failed: ' + e.message;
+  }
+
+  let logsText = '';
+  try {
+    const logs = await getLogsAPI(200);
+    logsText = logsToPlainText(logs) || t('（无日志）', '(no logs)');
+  } catch (e) {
+    logsText = 'getLogs failed: ' + e.message;
+  }
+
+  const description = readBugDescription() || t('（未填写）', '(not provided)');
+  return [
+    t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''),
+    t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''),
+    '',
+    '--- ' + t('问题描述', 'Issue description') + ' ---',
+    description,
+    '',
+    '--- ' + t('账户状态', 'Account status') + ' ---',
+    statusText,
+    '',
+    '--- ' + t('最近日志', 'Recent logs') + ' ---',
+    logsText,
+  ].join('\n');
+}
+
+/** 复制文本到剪贴板；Clipboard API 不可用时回退 execCommand */
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+}
+
+/** 打开一个短正文的 mailto，避免超长 body 触发 400 */
+function openMailToShort() {
+  const subject = t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report');
+  // body 仅作简短指引，完整诊断内容已写入剪贴板，用户在邮件正文粘贴即可
+  const body = t(
+    '完整诊断报告已复制到剪贴板，请直接粘贴到本邮件正文后发送。\n（若邮件应用未自动打开，可新建邮件并粘贴。）',
+    'Full diagnostics have been copied to your clipboard. Paste them into the body of this email and send.\n(If your mail app did not open, create a new email and paste.)'
+  );
+  const mailto =
+    'mailto:lazebird@gmail.com?subject=' +
+    encodeURIComponent(subject) +
+    '&body=' +
+    encodeURIComponent(body);
+  // 用户主动点击（符合 AGENTS 规则 1：允许打开页面/客户端）
+  const a = document.createElement('a');
+  a.href = mailto;
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/** 复制完整报告到剪贴板（可靠后备，不依赖邮件客户端） */
+async function copyBugReport() {
+  const btn = document.getElementById('btn-copy-report');
+  if (btn) btn.disabled = true;
+  try {
+    const report = await collectBugReport();
+    const ok = await copyTextToClipboard(report);
+    if (ok) {
+      showSaveStatus(
+        t(
+          '✅ 完整诊断报告已复制，请粘贴到邮件中发送至 lazebird@gmail.com',
+          '✅ Full report copied. Paste it into an email to lazebird@gmail.com.'
+        ),
+        'success'
+      );
+    } else {
+      showSaveStatus(
+        t(
+          '❌ 复制失败，请改用下方“生成邮件”按钮',
+          '❌ Copy failed. Use the Compose button below instead.'
+        ),
+        'error'
+      );
+    }
+  } catch (err) {
+    console.error('复制报告失败:', err);
+    showSaveStatus(t('复制报告失败: ', 'Failed to copy report: ') + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/** 报告 Bug：复制完整报告到剪贴板并打开短正文邮件客户端 */
 async function reportBugByEmail() {
   try {
-    // 收集诊断信息：账户状态 + 最近日志 + 扩展版本
-    let statusText = '';
-    try {
-      const status = await sendMessage({ type: 'getStatus' });
-      statusText = JSON.stringify(
-        {
-          accounts: status?.accounts || [],
-          accountStatus: status?.accountStatus || [],
-          settings: status?.settings || {},
-        },
-        null,
-        2
-      );
-    } catch (e) {
-      statusText = 'getStatus failed: ' + e.message;
-    }
-
-    let logsText = '';
-    try {
-      logsText = await getLogsAPI(200);
-    } catch (e) {
-      logsText = 'getLogs failed: ' + e.message;
-    }
-
-    const body = [
-      t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''),
-      t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''),
-      '',
-      '--- ' + t('问题描述', 'Issue description') + ' ---',
-      '',
-      '--- ' + t('账户状态', 'Account status') + ' ---',
-      statusText,
-      '',
-      '--- ' + t('最近日志', 'Recent logs') + ' ---',
-      logsText,
-    ].join('\n');
-
-    const subject = encodeURIComponent(t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report'));
-    const mailto =
-      'mailto:lazebird@gmail.com?subject=' + subject + '&body=' + encodeURIComponent(body);
-    // 用户主动点击（符合 AGENTS 规则 1：允许打开页面/客户端）
-    const a = document.createElement('a');
-    a.href = mailto;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    showProbeResult(t('邮件客户端已打开', 'Mail client opened'), {
-      success: true,
-      message: t(
-        '请发送邮件至 lazebird@gmail.com。若未弹出邮件应用，请复制下方信息手动发送。',
-        'Please send the email to lazebird@gmail.com. If no mail app opened, copy the info below and send it manually.'
-      ),
-    });
+    const report = await collectBugReport();
+    await copyTextToClipboard(report);
+    openMailToShort();
+    showProbeResult(
+      t('报告已复制，请发送邮件', 'Report copied, please send email'),
+      t(
+        '✅ 完整诊断信息已复制到剪贴板。邮件客户端（若已配置）已打开，请把内容粘贴到正文后发送至 lazebird@gmail.com；若未弹出邮件应用，请新建邮件并粘贴复制内容发送。',
+        '✅ Full diagnostics copied to clipboard. Your mail client (if configured) should open; paste the content into the body and send to lazebird@gmail.com. If no mail app opened, create an email and paste the copied content.'
+      )
+    );
   } catch (err) {
     console.error('报告 Bug 失败:', err);
     showSaveStatus(t('报告 Bug 失败: ', 'Failed to report bug: ') + err.message, 'error');
@@ -1360,8 +1447,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     showSaveStatus(t('语言已切换', 'Language changed'), 'success');
   });
 
-  // 报告 Bug：邮件反馈至 lazebird@gmail.com
+  // 报告 Bug：复制报告到剪贴板 / 打开邮件客户端发送至 lazebird@gmail.com
   document.getElementById('btn-report-bug')?.addEventListener('click', reportBugByEmail);
+  document.getElementById('btn-copy-report')?.addEventListener('click', copyBugReport);
 
   // 初始化刷新状态
   refreshStatus();

@@ -119,10 +119,18 @@ const DOM_MSGS = {
   btnPossibility: { zh: '🧪 全可能性后台测试', en: '🧪 Possibility Backend Test' },
   reportBugTitle: { zh: '反馈问题', en: 'Report an Issue' },
   reportBugHint: {
-    zh: '若遇到异常，可一键将诊断信息+日志发送邮件至维护者 lazebird@gmail.com',
-    en: 'Encounter an issue? Send diagnostics + logs to the maintainer lazebird@gmail.com in one click.',
+    zh: '遇到异常时，可填写问题描述并复制诊断信息+日志，通过邮件反馈给维护者 lazebird@gmail.com',
+    en: 'Describe the issue, copy diagnostics + logs, and report to the maintainer lazebird@gmail.com by email.',
   },
-  reportBugBtn: { zh: '📧 邮件反馈 Bug（附日志）', en: '📧 Report Bug by Email (with logs)' },
+  reportDescPlaceholder: {
+    zh: '问题描述（可选，便于定位）',
+    en: 'Issue description (optional)',
+  },
+  reportCopyBtn: { zh: '📋 复制报告内容', en: '📋 Copy report content' },
+  reportSendBtn: {
+    zh: '📧 生成报告并打开邮件发送',
+    en: '📧 Compose report & open mail to send',
+  },
 
   // 设置页
   addAccountPlaceholder: {
