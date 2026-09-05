@@ -88,19 +88,11 @@
     "description": "Mail Notifier UI text"
   },
   "reportBugHint": {
-    "message": "遇到异常时，可填写问题描述并复制诊断信息+日志，通过邮件反馈给维护者 lazebird@gmail.com",
-    "description": "Mail Notifier UI text"
-  },
-  "reportDescPlaceholder": {
-    "message": "问题描述（可选，便于定位）",
-    "description": "Mail Notifier UI text"
-  },
-  "reportCopyBtn": {
-    "message": "📋 复制报告内容",
+    "message": "点击下方按钮，浏览器会打开一封已带好诊断信息(版本/账户状态/日志)的邮件发送给 lazebird@gmail.com，补充问题描述后点发送即可。",
     "description": "Mail Notifier UI text"
   },
   "reportSendBtn": {
-    "message": "📧 生成报告并打开邮件发送",
+    "message": "📧 打开邮件报告 Bug",
     "description": "Mail Notifier UI text"
   },
   "addAccountPlaceholder": {

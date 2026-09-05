@@ -1231,153 +1231,125 @@ async function syncLanguageSelect() {
 }
 
 // ========== 报告 Bug（反馈至 lazebird@gmail.com）==========
-// 说明：诊断内容（账户状态 + 日志）可能较长，若塞入 mailto 的 body 会超出 URL 长度
-// 限制而被邮件客户端拒绝（HTTP 400）。因此这里改用「复制完整报告到剪贴板 + 打开
-// 短正文 mailto」的组合：完整内容始终随剪贴板保留，用户粘贴到任意邮件即可发送；
-// 即使本机未配置邮件客户端，复制内容也能作为可靠兜底。
+// 用户点击「打开邮件报告 Bug」后，组装一份精简诊断文本（版本 + 浏览器语言 + 各账户状态摘要 +
+// 最近少量日志），经 background 用 chrome.tabs.create 打开 mailto，交给系统邮件客户端处理。
+//
+// 【400 根因】mailto 携带过长正文（尤其全量 JSON 状态 + 上百条日志）会超过浏览器/邮件客户端对
+// mailto URL 的长度限制，被直接拒绝返回 Bad Request / Error 400。因此这里：
+//   1) 正文只取精简摘要（不整包 dump 全部状态/日志），逐账户一行；
+//   2) 对整体长度做硬性截断，保证编码后 mailto URL 远低于安全阈值。
+// 仍保持单按钮、手动触发；mailto 唤起由 background 的 chrome.tabs.create 完成，仅用户点击允许，
+// 符合 AGENTS 规则 1「用户主动操作允许开标签」。
 
-/** 读取用户填写的问题描述（可选） */
-function readBugDescription() {
-  const ta = document.getElementById('bug-desc');
-  return ta ? ta.value.trim() : '';
+// mailto URL 安全长度上限（保守取较低值，避开浏览器/邮件客户端限制）
+const MAILTO_SAFE_LENGTH = 1800;
+// 截断标记
+const MAILTO_TRUNCATED_MARK = '\n\n...[内容已截断]';
+
+/** 把一个账户的状态渲染为单行摘要 */
+function summarizeAccount(acc) {
+  const flags = [];
+  if (acc.authVerified === true) flags.push('OK');
+  if (acc.needsAuth === true) flags.push('需授权');
+  if (acc.needsInboxPage === true) flags.push('需打开收件箱');
+  if (typeof acc.unreadCount === 'number') flags.push('unread=' + acc.unreadCount);
+  if (acc.method) flags.push(acc.method);
+  const statusLine = flags.length ? flags.join(', ') : acc.error || '';
+  const err = acc.error ? ' | err=' + acc.error : '';
+  return '[' + (acc.provider || '?') + '] ' + (acc.email || '?') + ' :: ' + statusLine + err;
 }
 
-/** 收集诊断报告文本：问题描述 + 扩展版本 + 账户状态 + 最近日志 */
+/** 收集精简诊断文本：版本 + 浏览器语言 + 账户状态摘要 + 最近少量日志 */
 async function collectBugReport() {
-  let statusText = '';
+  const parts = [];
+  parts.push(t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''));
+  parts.push(t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''));
+  parts.push('');
+
   try {
     const status = await sendMessage({ type: 'getStatus' });
-    statusText = JSON.stringify(
-      {
-        accounts: status?.accounts || [],
-        accountStatus: status?.accountStatus || [],
-        settings: status?.settings || {},
-      },
-      null,
-      2
-    );
-  } catch (e) {
-    statusText = 'getStatus failed: ' + e.message;
-  }
-
-  let logsText = '';
-  try {
-    const logs = await getLogsAPI(200);
-    logsText = logsToPlainText(logs) || t('（无日志）', '(no logs)');
-  } catch (e) {
-    logsText = 'getLogs failed: ' + e.message;
-  }
-
-  const description = readBugDescription() || t('（未填写）', '(not provided)');
-  return [
-    t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''),
-    t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''),
-    '',
-    '--- ' + t('问题描述', 'Issue description') + ' ---',
-    description,
-    '',
-    '--- ' + t('账户状态', 'Account status') + ' ---',
-    statusText,
-    '',
-    '--- ' + t('最近日志', 'Recent logs') + ' ---',
-    logsText,
-  ].join('\n');
-}
-
-/** 复制文本到剪贴板；Clipboard API 不可用时回退 execCommand */
-async function copyTextToClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    let ok = false;
-    try {
-      ok = document.execCommand('copy');
-    } catch {
-      ok = false;
+    const accs = status?.accountStatus || [];
+    parts.push('--- ' + t('账户状态', 'Account status') + ' ---');
+    if (accs.length) {
+      accs.forEach((a) => parts.push(summarizeAccount(a)));
+    } else {
+      parts.push(t('（无账户）', '(no accounts)'));
     }
-    ta.remove();
-    return ok;
+  } catch (e) {
+    parts.push('getStatus failed: ' + e.message);
   }
+  parts.push('');
+
+  // 最近日志：只取少量且做单行精简，避免过长 detail 撑爆 mailto
+  try {
+    const logs = await getLogsAPI(40);
+    const lines = logsToPlainText(logs)
+      .split('\n')
+      .map((s) => s.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    parts.push('--- ' + t('最近日志', 'Recent logs') + ' ---');
+    parts.push(lines.length ? lines.slice(-30).join('\n') : t('（无日志）', '(no logs)'));
+  } catch (e) {
+    parts.push('getLogs failed: ' + e.message);
+  }
+  return parts.join('\n');
 }
 
-/** 打开一个短正文的 mailto，避免超长 body 触发 400 */
-function openMailToShort() {
-  const subject = t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report');
-  // body 仅作简短指引，完整诊断内容已写入剪贴板，用户在邮件正文粘贴即可
-  const body = t(
-    '完整诊断报告已复制到剪贴板，请直接粘贴到本邮件正文后发送。\n（若邮件应用未自动打开，可新建邮件并粘贴。）',
-    'Full diagnostics have been copied to your clipboard. Paste them into the body of this email and send.\n(If your mail app did not open, create a new email and paste.)'
-  );
-  const mailto =
-    'mailto:lazebird@gmail.com?subject=' +
-    encodeURIComponent(subject) +
-    '&body=' +
-    encodeURIComponent(body);
-  // 用户主动点击（符合 AGENTS 规则 1：允许打开页面/客户端）
-  const a = document.createElement('a');
-  a.href = mailto;
-  a.rel = 'noopener noreferrer';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+/** 组装 mailto：先构建正文，再对 URL 总长做安全截断（截掉旧内容并保留头尾标记） */
+function buildMailtoUrl(report) {
+  const subject =
+    t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report') +
+    ' v' +
+    chrome.runtime.getManifest().version;
+  const prefix = 'mailto:lazebird@gmail.com?subject=' + encodeURIComponent(subject) + '&body=';
+
+  // 若整体 URL 已超安全长度，则从正文尾部逐行移除（日志在末尾，先裁日志）
+  // 直至达标，并附加截断标记；仍超长时再做字符级硬截断。
+  let body = report;
+  let url = prefix + encodeURIComponent(body);
+  const lines = body.split('\n');
+  while (url.length > MAILTO_SAFE_LENGTH && lines.length > 1) {
+    lines.pop(); // 去掉最后一行（最旧/多余日志）
+    body = lines.join('\n');
+    url = prefix + encodeURIComponent(body + MAILTO_TRUNCATED_MARK);
+  }
+  if (url.length > MAILTO_SAFE_LENGTH) {
+    // 仍超长则做字符级硬截断（保留下半部分标志说明）
+    const tail = MAILTO_TRUNCATED_MARK;
+    let cut = body;
+    let remaining = MAILTO_SAFE_LENGTH - prefix.length - encodeURIComponent(tail).length;
+    while (remaining > 0 && encodeURIComponent(cut).length > remaining) {
+      cut = cut.slice(0, Math.max(0, cut.length - 16));
+    }
+    url = prefix + encodeURIComponent(cut + tail);
+  }
+  return url;
 }
 
-/** 复制完整报告到剪贴板（可靠后备，不依赖邮件客户端） */
-async function copyBugReport() {
-  const btn = document.getElementById('btn-copy-report');
+/** 报告 Bug：经 background 稳定唤起邮件客户端（用户手动点击） */
+async function reportBugByEmail() {
+  const btn = document.getElementById('btn-report-bug');
   if (btn) btn.disabled = true;
   try {
     const report = await collectBugReport();
-    const ok = await copyTextToClipboard(report);
-    if (ok) {
-      showSaveStatus(
-        t(
-          '✅ 完整诊断报告已复制，请粘贴到邮件中发送至 lazebird@gmail.com',
-          '✅ Full report copied. Paste it into an email to lazebird@gmail.com.'
-        ),
-        'success'
-      );
-    } else {
-      showSaveStatus(
-        t(
-          '❌ 复制失败，请改用下方“生成邮件”按钮',
-          '❌ Copy failed. Use the Compose button below instead.'
-        ),
-        'error'
-      );
+    const mailto = buildMailtoUrl(report);
+    const res = await sendMessage({ type: 'openReportEmail', url: mailto });
+    if (res?.success === false) {
+      showSaveStatus(t('打开邮件失败: ', 'Failed to open email: ') + (res.error || ''), 'error');
+      return;
     }
-  } catch (err) {
-    console.error('复制报告失败:', err);
-    showSaveStatus(t('复制报告失败: ', 'Failed to copy report: ') + err.message, 'error');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-/** 报告 Bug：复制完整报告到剪贴板并打开短正文邮件客户端 */
-async function reportBugByEmail() {
-  try {
-    const report = await collectBugReport();
-    await copyTextToClipboard(report);
-    openMailToShort();
-    showProbeResult(
-      t('报告已复制，请发送邮件', 'Report copied, please send email'),
+    showSaveStatus(
       t(
-        '✅ 完整诊断信息已复制到剪贴板。邮件客户端（若已配置）已打开，请把内容粘贴到正文后发送至 lazebird@gmail.com；若未弹出邮件应用，请新建邮件并粘贴复制内容发送。',
-        '✅ Full diagnostics copied to clipboard. Your mail client (if configured) should open; paste the content into the body and send to lazebird@gmail.com. If no mail app opened, create an email and paste the copied content.'
-      )
+        '✅ 邮件客户端已唤起，请在正文补充问题描述后点发送（收件人 lazebird@gmail.com）。若未弹出，请检查浏览器默认邮件应用。',
+        '✅ Mail app opened. Add a description and send (to lazebird@gmail.com). If nothing popped up, check your browser default mail app.'
+      ),
+      'success'
     );
   } catch (err) {
     console.error('报告 Bug 失败:', err);
     showSaveStatus(t('报告 Bug 失败: ', 'Failed to report bug: ') + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1447,9 +1419,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     showSaveStatus(t('语言已切换', 'Language changed'), 'success');
   });
 
-  // 报告 Bug：复制报告到剪贴板 / 打开邮件客户端发送至 lazebird@gmail.com
+  // 报告 Bug：用户手动点击 → 组装诊断并唤起邮件客户端发送至 lazebird@gmail.com
   document.getElementById('btn-report-bug')?.addEventListener('click', reportBugByEmail);
-  document.getElementById('btn-copy-report')?.addEventListener('click', copyBugReport);
 
   // 初始化刷新状态
   refreshStatus();

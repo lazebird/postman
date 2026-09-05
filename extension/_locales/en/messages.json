@@ -88,19 +88,11 @@
     "description": "Mail Notifier UI text"
   },
   "reportBugHint": {
-    "message": "Describe the issue, copy diagnostics + logs, and report to the maintainer lazebird@gmail.com by email.",
-    "description": "Mail Notifier UI text"
-  },
-  "reportDescPlaceholder": {
-    "message": "Issue description (optional)",
-    "description": "Mail Notifier UI text"
-  },
-  "reportCopyBtn": {
-    "message": "📋 Copy report content",
+    "message": "Click the button below to open an email pre-filled with diagnostics (version / account status / logs) to lazebird@gmail.com. Add a description and send.",
     "description": "Mail Notifier UI text"
   },
   "reportSendBtn": {
-    "message": "📧 Compose report & open mail to send",
+    "message": "📧 Open email to report a bug",
     "description": "Mail Notifier UI text"
   },
   "addAccountPlaceholder": {
