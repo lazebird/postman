@@ -1231,64 +1231,99 @@ async function syncLanguageSelect() {
 }
 
 // ========== 报告 Bug（反馈至 lazebird@gmail.com）==========
-// 用户点击「打开邮件报告 Bug」后，组装一份包含版本、账户状态、最近日志的诊断文本，
-// 经 background 用 chrome.tabs.create 打开 mailto（交给系统邮件客户端/浏览器处理），
-// 用户在邮件正文里补充描述后点发送即可。不再依赖剪贴板/多按钮，流程更直接。
+// 用户点击「打开邮件报告 Bug」后，组装一份精简诊断文本（版本 + 浏览器语言 + 各账户状态摘要 +
+// 最近少量日志），经 background 用 chrome.tabs.create 打开 mailto，交给系统邮件客户端处理。
 //
-// 说明：popup 内用 <a>.click() 触发 mailto 经常被静默忽略（点了没反应）；改为把 mailto
-// URL 交给 service worker 用 chrome.tabs.create 打开最稳定。该消息由用户点击按钮发出，
-// 带 trigger='manual'，符合 AGENTS 规则 1「用户主动操作允许开标签」。
+// 【400 根因】mailto 携带过长正文（尤其全量 JSON 状态 + 上百条日志）会超过浏览器/邮件客户端对
+// mailto URL 的长度限制，被直接拒绝返回 Bad Request / Error 400。因此这里：
+//   1) 正文只取精简摘要（不整包 dump 全部状态/日志），逐账户一行；
+//   2) 对整体长度做硬性截断，保证编码后 mailto URL 远低于安全阈值。
+// 仍保持单按钮、手动触发；mailto 唤起由 background 的 chrome.tabs.create 完成，仅用户点击允许，
+// 符合 AGENTS 规则 1「用户主动操作允许开标签」。
 
-/** 收集诊断报告文本：扩展版本 + 浏览器语言 + 账户状态 + 最近日志 */
-async function collectBugReport() {
-  let statusText = '';
-  try {
-    const status = await sendMessage({ type: 'getStatus' });
-    statusText = JSON.stringify(
-      {
-        accounts: status?.accounts || [],
-        accountStatus: status?.accountStatus || [],
-        settings: status?.settings || {},
-      },
-      null,
-      2
-    );
-  } catch (e) {
-    statusText = 'getStatus failed: ' + e.message;
-  }
+// mailto URL 安全长度上限（保守取较低值，避开浏览器/邮件客户端限制）
+const MAILTO_SAFE_LENGTH = 1800;
+// 截断标记
+const MAILTO_TRUNCATED_MARK = '\n\n...[内容已截断]';
 
-  let logsText = '';
-  try {
-    const logs = await getLogsAPI(120);
-    logsText = logsToPlainText(logs) || t('（无日志）', '(no logs)');
-  } catch (e) {
-    logsText = 'getLogs failed: ' + e.message;
-  }
-
-  return [
-    t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''),
-    t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''),
-    '',
-    '--- ' + t('账户状态', 'Account status') + ' ---',
-    statusText,
-    '',
-    '--- ' + t('最近日志', 'Recent logs') + ' ---',
-    logsText,
-  ].join('\n');
+/** 把一个账户的状态渲染为单行摘要 */
+function summarizeAccount(acc) {
+  const flags = [];
+  if (acc.authVerified === true) flags.push('OK');
+  if (acc.needsAuth === true) flags.push('需授权');
+  if (acc.needsInboxPage === true) flags.push('需打开收件箱');
+  if (typeof acc.unreadCount === 'number') flags.push('unread=' + acc.unreadCount);
+  if (acc.method) flags.push(acc.method);
+  const statusLine = flags.length ? flags.join(', ') : acc.error || '';
+  const err = acc.error ? ' | err=' + acc.error : '';
+  return '[' + (acc.provider || '?') + '] ' + (acc.email || '?') + ' :: ' + statusLine + err;
 }
 
-/** 组装 mailto 链接（正文含诊断信息，主题带版本号便于归类） */
+/** 收集精简诊断文本：版本 + 浏览器语言 + 账户状态摘要 + 最近少量日志 */
+async function collectBugReport() {
+  const parts = [];
+  parts.push(t('扩展版本: ', 'Extension version: ') + (chrome.runtime.getManifest().version || ''));
+  parts.push(t('浏览器语言: ', 'Browser language: ') + (navigator.language || ''));
+  parts.push('');
+
+  try {
+    const status = await sendMessage({ type: 'getStatus' });
+    const accs = status?.accountStatus || [];
+    parts.push('--- ' + t('账户状态', 'Account status') + ' ---');
+    if (accs.length) {
+      accs.forEach((a) => parts.push(summarizeAccount(a)));
+    } else {
+      parts.push(t('（无账户）', '(no accounts)'));
+    }
+  } catch (e) {
+    parts.push('getStatus failed: ' + e.message);
+  }
+  parts.push('');
+
+  // 最近日志：只取少量且做单行精简，避免过长 detail 撑爆 mailto
+  try {
+    const logs = await getLogsAPI(40);
+    const lines = logsToPlainText(logs)
+      .split('\n')
+      .map((s) => s.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    parts.push('--- ' + t('最近日志', 'Recent logs') + ' ---');
+    parts.push(lines.length ? lines.slice(-30).join('\n') : t('（无日志）', '(no logs)'));
+  } catch (e) {
+    parts.push('getLogs failed: ' + e.message);
+  }
+  return parts.join('\n');
+}
+
+/** 组装 mailto：先构建正文，再对 URL 总长做安全截断（截掉旧内容并保留头尾标记） */
 function buildMailtoUrl(report) {
   const subject =
     t('[Mail Notifier] Bug 反馈', '[Mail Notifier] Bug report') +
     ' v' +
     chrome.runtime.getManifest().version;
-  return (
-    'mailto:lazebird@gmail.com?subject=' +
-    encodeURIComponent(subject) +
-    '&body=' +
-    encodeURIComponent(report)
-  );
+  const prefix = 'mailto:lazebird@gmail.com?subject=' + encodeURIComponent(subject) + '&body=';
+
+  // 若整体 URL 已超安全长度，则从正文尾部逐行移除（日志在末尾，先裁日志）
+  // 直至达标，并附加截断标记；仍超长时再做字符级硬截断。
+  let body = report;
+  let url = prefix + encodeURIComponent(body);
+  const lines = body.split('\n');
+  while (url.length > MAILTO_SAFE_LENGTH && lines.length > 1) {
+    lines.pop(); // 去掉最后一行（最旧/多余日志）
+    body = lines.join('\n');
+    url = prefix + encodeURIComponent(body + MAILTO_TRUNCATED_MARK);
+  }
+  if (url.length > MAILTO_SAFE_LENGTH) {
+    // 仍超长则做字符级硬截断（保留下半部分标志说明）
+    const tail = MAILTO_TRUNCATED_MARK;
+    let cut = body;
+    let remaining = MAILTO_SAFE_LENGTH - prefix.length - encodeURIComponent(tail).length;
+    while (remaining > 0 && encodeURIComponent(cut).length > remaining) {
+      cut = cut.slice(0, Math.max(0, cut.length - 16));
+    }
+    url = prefix + encodeURIComponent(cut + tail);
+  }
+  return url;
 }
 
 /** 报告 Bug：经 background 稳定唤起邮件客户端（用户手动点击） */
