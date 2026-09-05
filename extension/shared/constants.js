@@ -352,3 +352,18 @@ export const DEBUG_FEATURE = {
   maxResponsePreviewBytes: 4096,
   verboseFetchErrors: true,
 };
+
+// 授权/会话状态监控的持久化存储键（chrome.storage.local）
+//  - LAST_OK_BY_EMAIL：每个账号最近一次「成功授权 / 正常读到未读」的时间戳（key=账号 email）。
+//    用于区分「授权过期/出错（曾工作过）」与「从未授权（新增账户尚未首次同步）」——
+//    只在账号曾工作过后发生授权失效时，才对其弹「授权需处理」的系统提醒，避免对
+//    刚新增、尚未首次授权的账号反复打扰。
+//  - LAST_AUTH_NOTIFY_BY_EMAIL：每个账号最近一次「授权需处理」提醒通知时间（key=账号 email），
+//    用于节流，防止每次 alarm 定时检查失败都弹一次骚扰用户（AGENTS 规则 2）。
+export const AUTH_ALERT_KEYS = {
+  LAST_OK_BY_EMAIL: 'auth_last_ok_by_email',
+  LAST_AUTH_NOTIFY_BY_EMAIL: 'auth_last_notify_by_email',
+};
+
+// 「授权需处理」系统提醒的最小间隔：同一账号在距离上次提醒不足该时长时不重复通知。
+export const AUTH_ALERT_NOTIFY_THROTTLE_MS = 6 * 60 * 60 * 1000; // 6 小时
