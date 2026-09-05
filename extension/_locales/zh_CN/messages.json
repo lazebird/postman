@@ -1,0 +1,266 @@
+{
+  "headerTitle": {
+    "message": "📧 Mail Notifier",
+    "description": "Mail Notifier UI text"
+  },
+  "tabOverview": {
+    "message": "状态",
+    "description": "Mail Notifier UI text"
+  },
+  "tabSettings": {
+    "message": "设置",
+    "description": "Mail Notifier UI text"
+  },
+  "tabStats": {
+    "message": "统计",
+    "description": "Mail Notifier UI text"
+  },
+  "tabLogs": {
+    "message": "日志",
+    "description": "Mail Notifier UI text"
+  },
+  "tabDebug": {
+    "message": "调试",
+    "description": "Mail Notifier UI text"
+  },
+  "loading": {
+    "message": "加载中...",
+    "description": "Mail Notifier UI text"
+  },
+  "processing": {
+    "message": "处理中...",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccountTitle": {
+    "message": "未配置邮箱账户",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccountHint": {
+    "message": "请前往 设置 标签添加",
+    "description": "Mail Notifier UI text"
+  },
+  "fullCheck": {
+    "message": "🚀 全量检查",
+    "description": "Mail Notifier UI text"
+  },
+  "syncSessionTitle": {
+    "message": "同步会话",
+    "description": "Mail Notifier UI text"
+  },
+  "syncHint": {
+    "message": "打开邮箱页 → 提取会话令牌(sid) → 缓存供后台检查",
+    "description": "Mail Notifier UI text"
+  },
+  "fetchUnreadTitle": {
+    "message": "获取未读数",
+    "description": "Mail Notifier UI text"
+  },
+  "fetchHint": {
+    "message": "若未读为空：请在邮箱中打开「收件箱」后重试",
+    "description": "Mail Notifier UI text"
+  },
+  "diagTitle": {
+    "message": "诊断与探测",
+    "description": "Mail Notifier UI text"
+  },
+  "diagCookies": {
+    "message": "🍪 诊断会话 Cookie",
+    "description": "Mail Notifier UI text"
+  },
+  "advProbeToggle": {
+    "message": "▸ 高级探测（SW 直调）",
+    "description": "Mail Notifier UI text"
+  },
+  "btnCheckAuth": {
+    "message": "检查认证",
+    "description": "Mail Notifier UI text"
+  },
+  "btnRefreshSession": {
+    "message": "🔄刷新会话",
+    "description": "Mail Notifier UI text"
+  },
+  "btnPossibility": {
+    "message": "🧪 全可能性后台测试",
+    "description": "Mail Notifier UI text"
+  },
+  "reportBugTitle": {
+    "message": "反馈问题",
+    "description": "Mail Notifier UI text"
+  },
+  "reportBugHint": {
+    "message": "遇到异常时，可填写问题描述并复制诊断信息+日志，通过邮件反馈给维护者 lazebird@gmail.com",
+    "description": "Mail Notifier UI text"
+  },
+  "reportDescPlaceholder": {
+    "message": "问题描述（可选，便于定位）",
+    "description": "Mail Notifier UI text"
+  },
+  "reportCopyBtn": {
+    "message": "📋 复制报告内容",
+    "description": "Mail Notifier UI text"
+  },
+  "reportSendBtn": {
+    "message": "📧 生成报告并打开邮件发送",
+    "description": "Mail Notifier UI text"
+  },
+  "addAccountPlaceholder": {
+    "message": "输入邮箱地址，如 user@163.com",
+    "description": "Mail Notifier UI text"
+  },
+  "btnAdd": {
+    "message": "添加",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccounts": {
+    "message": "暂无账户",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccountsHint": {
+    "message": "暂无账户，请在上方添加",
+    "description": "Mail Notifier UI text"
+  },
+  "lblInterval": {
+    "message": "检查间隔",
+    "description": "Mail Notifier UI text"
+  },
+  "lblIntervalMin": {
+    "message": "检查间隔(分钟)",
+    "description": "Mail Notifier UI text"
+  },
+  "lblLogLevel": {
+    "message": "日志级别",
+    "description": "Mail Notifier UI text"
+  },
+  "lblCheckMode": {
+    "message": "检查模式",
+    "description": "Mail Notifier UI text"
+  },
+  "lblLanguage": {
+    "message": "界面语言",
+    "description": "Mail Notifier UI text"
+  },
+  "langAuto": {
+    "message": "跟随系统语言（自动）",
+    "description": "Mail Notifier UI text"
+  },
+  "langZh": {
+    "message": "简体中文",
+    "description": "Mail Notifier UI text"
+  },
+  "langEn": {
+    "message": "English",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHybrid": {
+    "message": "混合模式",
+    "description": "Mail Notifier UI text"
+  },
+  "modeContent": {
+    "message": "仅内容脚本",
+    "description": "Mail Notifier UI text"
+  },
+  "modeSw": {
+    "message": "仅SW API",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHybridOption": {
+    "message": "混合模式（推荐）",
+    "description": "Mail Notifier UI text"
+  },
+  "modeContentOption": {
+    "message": "仅内容脚本",
+    "description": "Mail Notifier UI text"
+  },
+  "modeSwOption": {
+    "message": "仅 SW API",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHintA": {
+    "message": "：SW缓存sid直调，失效回退内容脚本。",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHintB": {
+    "message": "：需常驻邮箱页。",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHintC": {
+    "message": "：无需开页，定期同步。",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHint": {
+    "message": "混合：SW缓存sid直调，失效回退内容脚本。仅内容脚本：需常驻邮箱页。仅SW API：无需开页，定期同步。",
+    "description": "Mail Notifier UI text"
+  },
+  "endpointToggle": {
+    "message": "▸ 探测接口配置",
+    "description": "Mail Notifier UI text"
+  },
+  "btnSave": {
+    "message": "💾 保存设置",
+    "description": "Mail Notifier UI text"
+  },
+  "btnReset": {
+    "message": "🔄 重置",
+    "description": "Mail Notifier UI text"
+  },
+  "sessionStatus": {
+    "message": "会话授权状态",
+    "description": "Mail Notifier UI text"
+  },
+  "dataStats": {
+    "message": "数据统计",
+    "description": "Mail Notifier UI text"
+  },
+  "recentChecks": {
+    "message": "最近检查",
+    "description": "Mail Notifier UI text"
+  },
+  "noData": {
+    "message": "暂无数据",
+    "description": "Mail Notifier UI text"
+  },
+  "debugLogs": {
+    "message": "调试日志",
+    "description": "Mail Notifier UI text"
+  },
+  "copyLogs": {
+    "message": "📋 复制",
+    "description": "Mail Notifier UI text"
+  },
+  "clearLogs": {
+    "message": "🗑 清除",
+    "description": "Mail Notifier UI text"
+  },
+  "confirmReset": {
+    "message": "确定要重置所有设置吗？所有账户和配置将被清除。",
+    "description": "Mail Notifier UI text"
+  },
+  "btnProbeWord": {
+    "message": "探测",
+    "description": "Mail Notifier UI text"
+  },
+  "hintNetease": {
+    "message": "163邮箱",
+    "description": "Mail Notifier UI text"
+  },
+  "hintQq": {
+    "message": "QQ邮箱",
+    "description": "Mail Notifier UI text"
+  },
+  "hintUstc": {
+    "message": "中科大邮箱",
+    "description": "Mail Notifier UI text"
+  },
+  "extName": {
+    "message": "Mail Notifier",
+    "description": "扩展显示名称。"
+  },
+  "extDescription": {
+    "message": "纯后台邮箱未读提醒，支持 163/QQ/中科大(USTC)/Gmail。API 模式自动捕获学习；绝不自动打开或常驻任何邮箱标签页。",
+    "description": "扩展简介（manifest）。"
+  },
+  "extDefaultTitle": {
+    "message": "邮箱未读提醒",
+    "description": "工具栏图标提示。"
+  }
+}

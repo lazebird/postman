@@ -1,0 +1,266 @@
+{
+  "headerTitle": {
+    "message": "📧 Mail Notifier",
+    "description": "Mail Notifier UI text"
+  },
+  "tabOverview": {
+    "message": "Status",
+    "description": "Mail Notifier UI text"
+  },
+  "tabSettings": {
+    "message": "Settings",
+    "description": "Mail Notifier UI text"
+  },
+  "tabStats": {
+    "message": "Stats",
+    "description": "Mail Notifier UI text"
+  },
+  "tabLogs": {
+    "message": "Logs",
+    "description": "Mail Notifier UI text"
+  },
+  "tabDebug": {
+    "message": "Debug",
+    "description": "Mail Notifier UI text"
+  },
+  "loading": {
+    "message": "Loading...",
+    "description": "Mail Notifier UI text"
+  },
+  "processing": {
+    "message": "Processing...",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccountTitle": {
+    "message": "No mail account configured",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccountHint": {
+    "message": "Go to the Settings tab to add one",
+    "description": "Mail Notifier UI text"
+  },
+  "fullCheck": {
+    "message": "🚀 Full Check",
+    "description": "Mail Notifier UI text"
+  },
+  "syncSessionTitle": {
+    "message": "Sync Session",
+    "description": "Mail Notifier UI text"
+  },
+  "syncHint": {
+    "message": "Open mailbox → extract session token (sid) → cache for background checks",
+    "description": "Mail Notifier UI text"
+  },
+  "fetchUnreadTitle": {
+    "message": "Fetch Unread",
+    "description": "Mail Notifier UI text"
+  },
+  "fetchHint": {
+    "message": "If empty: open the Inbox in the mailbox and retry",
+    "description": "Mail Notifier UI text"
+  },
+  "diagTitle": {
+    "message": "Diagnose & Probe",
+    "description": "Mail Notifier UI text"
+  },
+  "diagCookies": {
+    "message": "🍪 Diagnose Session Cookie",
+    "description": "Mail Notifier UI text"
+  },
+  "advProbeToggle": {
+    "message": "▸ Advanced Probe (SW direct)",
+    "description": "Mail Notifier UI text"
+  },
+  "btnCheckAuth": {
+    "message": "Check Auth",
+    "description": "Mail Notifier UI text"
+  },
+  "btnRefreshSession": {
+    "message": "🔄 Refresh Session",
+    "description": "Mail Notifier UI text"
+  },
+  "btnPossibility": {
+    "message": "🧪 Possibility Backend Test",
+    "description": "Mail Notifier UI text"
+  },
+  "reportBugTitle": {
+    "message": "Report an Issue",
+    "description": "Mail Notifier UI text"
+  },
+  "reportBugHint": {
+    "message": "Describe the issue, copy diagnostics + logs, and report to the maintainer lazebird@gmail.com by email.",
+    "description": "Mail Notifier UI text"
+  },
+  "reportDescPlaceholder": {
+    "message": "Issue description (optional)",
+    "description": "Mail Notifier UI text"
+  },
+  "reportCopyBtn": {
+    "message": "📋 Copy report content",
+    "description": "Mail Notifier UI text"
+  },
+  "reportSendBtn": {
+    "message": "📧 Compose report & open mail to send",
+    "description": "Mail Notifier UI text"
+  },
+  "addAccountPlaceholder": {
+    "message": "Enter email address, e.g. user@163.com",
+    "description": "Mail Notifier UI text"
+  },
+  "btnAdd": {
+    "message": "Add",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccounts": {
+    "message": "No accounts yet",
+    "description": "Mail Notifier UI text"
+  },
+  "noAccountsHint": {
+    "message": "No accounts yet, add one above",
+    "description": "Mail Notifier UI text"
+  },
+  "lblInterval": {
+    "message": "Check Interval",
+    "description": "Mail Notifier UI text"
+  },
+  "lblIntervalMin": {
+    "message": "Check interval (min)",
+    "description": "Mail Notifier UI text"
+  },
+  "lblLogLevel": {
+    "message": "Log Level",
+    "description": "Mail Notifier UI text"
+  },
+  "lblCheckMode": {
+    "message": "Check Mode",
+    "description": "Mail Notifier UI text"
+  },
+  "lblLanguage": {
+    "message": "UI Language",
+    "description": "Mail Notifier UI text"
+  },
+  "langAuto": {
+    "message": "Follow system language (auto)",
+    "description": "Mail Notifier UI text"
+  },
+  "langZh": {
+    "message": "简体中文 (Chinese)",
+    "description": "Mail Notifier UI text"
+  },
+  "langEn": {
+    "message": "English",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHybrid": {
+    "message": "Hybrid mode",
+    "description": "Mail Notifier UI text"
+  },
+  "modeContent": {
+    "message": "Content script only",
+    "description": "Mail Notifier UI text"
+  },
+  "modeSw": {
+    "message": "SW API only",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHybridOption": {
+    "message": "Hybrid (recommended)",
+    "description": "Mail Notifier UI text"
+  },
+  "modeContentOption": {
+    "message": "Content script only",
+    "description": "Mail Notifier UI text"
+  },
+  "modeSwOption": {
+    "message": "SW API only",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHintA": {
+    "message": ": SW cached sid direct call, falls back to content script.",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHintB": {
+    "message": ": requires a resident mailbox page.",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHintC": {
+    "message": ": no page needed, syncs periodically.",
+    "description": "Mail Notifier UI text"
+  },
+  "modeHint": {
+    "message": "Hybrid: SW cached sid direct call, falls back to content script. Content script only: needs a resident mailbox page. SW API only: no page needed, syncs periodically.",
+    "description": "Mail Notifier UI text"
+  },
+  "endpointToggle": {
+    "message": "▸ Probe Endpoint Config",
+    "description": "Mail Notifier UI text"
+  },
+  "btnSave": {
+    "message": "💾 Save Settings",
+    "description": "Mail Notifier UI text"
+  },
+  "btnReset": {
+    "message": "🔄 Reset",
+    "description": "Mail Notifier UI text"
+  },
+  "sessionStatus": {
+    "message": "Session & Auth Status",
+    "description": "Mail Notifier UI text"
+  },
+  "dataStats": {
+    "message": "Data Stats",
+    "description": "Mail Notifier UI text"
+  },
+  "recentChecks": {
+    "message": "Recent Checks",
+    "description": "Mail Notifier UI text"
+  },
+  "noData": {
+    "message": "No data",
+    "description": "Mail Notifier UI text"
+  },
+  "debugLogs": {
+    "message": "Debug Logs",
+    "description": "Mail Notifier UI text"
+  },
+  "copyLogs": {
+    "message": "📋 Copy",
+    "description": "Mail Notifier UI text"
+  },
+  "clearLogs": {
+    "message": "🗑 Clear",
+    "description": "Mail Notifier UI text"
+  },
+  "confirmReset": {
+    "message": "Reset all settings? All accounts and configuration will be cleared.",
+    "description": "Mail Notifier UI text"
+  },
+  "btnProbeWord": {
+    "message": "Probe",
+    "description": "Mail Notifier UI text"
+  },
+  "hintNetease": {
+    "message": "163 Mail",
+    "description": "Mail Notifier UI text"
+  },
+  "hintQq": {
+    "message": "QQ Mail",
+    "description": "Mail Notifier UI text"
+  },
+  "hintUstc": {
+    "message": "USTC Mail",
+    "description": "Mail Notifier UI text"
+  },
+  "extName": {
+    "message": "Mail Notifier",
+    "description": "Extension display name."
+  },
+  "extDescription": {
+    "message": "Pure background unread check for 163/QQ/USTC/Gmail. API-mode auto capture & learning. Never auto-opens or keeps any mailbox tab.",
+    "description": "Short extension description."
+  },
+  "extDefaultTitle": {
+    "message": "Mail Notifier",
+    "description": "Toolbar icon tooltip."
+  }
+}
