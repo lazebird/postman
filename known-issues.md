@@ -1,7 +1,7 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-08 ｜ 当前版本：v0.9.7
+> 最后更新：2026-09-08 ｜ 当前版本：v1.0.1
 
 ---
 
@@ -13,7 +13,7 @@
 - ✅ API：`POST https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}`
 - ✅ Body：Coremail RPC 格式（无 XML 声明，var=<object>...）
 - ✅ Response：JSONP，统计没有 `read:true` 标志的邮件数量
-- ⚠️ **v0.9.7 修复**：163 服务端变更，请求 body 中不再接受 `<?xml version="1.0"?>` 声明，移除后恢复正常
+- ⚠️ **v1.0.1 修复**：163 服务端变更，请求 body 中不再接受 `<?xml version="1.0"?>` 声明，移除后恢复正常
 
 ### QQ 邮箱
 - ✅ SW API 探测成功
@@ -83,7 +83,7 @@
 - **降级为 DEBUG 日志**：不产生 ERROR 噪音，不影响工具栏图标状态
 - **自动恢复**：token 保留在缓存中，网络恢复后下次 alarm 自动重试即可正常读取
 
-### 修复（v0.9.7）
+### 修复（v1.0.1）
 移除 token 长度预检查和不必要的 catch 块 token 清除逻辑，网络错误统一降级为 DEBUG 日志，返回 `tokenInvalid: false` 保持 token 可用。
 
 ---
@@ -106,7 +106,7 @@
 
 ---
 
-## 🟡 P1：163 API body 格式变更——XML 声明被拒绝（v0.9.7 修复）
+## 🟡 P1：163 API body 格式变更——XML 声明被拒绝（v1.0.1 修复）
 
 ### 问题描述
 自动检查失败，API 返回 `FR_INVALID_REQUEST`。
@@ -120,7 +120,7 @@ var=<?xml version="1.0"?>><object>...</object>
 163 邮箱服务端在 v0.9.6 之后更新了 RPC 接口解析逻辑，不再接受 body 中的 XML 声明前缀。
 这是一个服务端变更，与扩展代码无关，但导致此前工作的 API 探测全部失效。
 
-### 修复（v0.9.7）
+### 修复（v1.0.1）
 移除 body 模板中的 `<?xml version="1.0"?>` 声明：
 ```
 # 修改前
@@ -145,7 +145,7 @@ bodyTemplate: 'var=<object>...</object>'
 
 ---
 
-## 🟡 P1：163 listMessages 响应解析 Bug——嵌套括号导致未读数虚高（v0.9.7 修复）
+## 🟡 P1：163 listMessages 响应解析 Bug——嵌套括号导致未读数虚高（v1.0.1 修复）
 
 ### 问题描述
 163 邮箱 API 返回的未读数始终比页面显示多 1 封，且持续存在。
@@ -167,7 +167,7 @@ jsonText.indexOf(']', emailMatch.index)
 
 结果：已读邮件被误判为未读，未读数虚高 1 封。
 
-### 修复（v0.9.7）
+### 修复（v1.0.1）
 改用**括号计数**找到匹配的 `}`，而非 `indexOf(']')`：
 ```javascript
 // 修复前
@@ -347,7 +347,7 @@ console.log(logs);
 
 | 邮箱 | 方法 | 端点 | 认证方式 | 状态 |
 |------|------|------|---------|------|
-| 163 | POST | `https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}` | Cookie + sid | ✅ v0.9.7 修复 |
+| 163 | POST | `https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}` | Cookie + sid | ✅ v1.0.1 修复 |
 | QQ | GET | `https://wx.mail.qq.com/list/maillist?sid={sid}...` | Cookie + sid | ✅ |
 | USTC | GET | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | Cookie + sid | ✅ |
 | Gmail | GET | `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread` | OAuth2 Bearer token | ✅ |

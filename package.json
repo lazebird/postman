@@ -1,6 +1,6 @@
 {
   "name": "postman-mail-notifier",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Browser mail notifier extension (MV3) + 静态审查与格式化工具（供 CI 与本地使用）",
   "engines": {

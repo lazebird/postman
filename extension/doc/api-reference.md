@@ -1,7 +1,7 @@
 # 邮箱 API 接口参考
 
 > 记录各邮箱提供商的实际可用接口格式，供开发者查阅与后续维护。
-> 最后更新：2026-09-05 ｜ 当前版本：v0.9.7
+> 最后更新：2026-09-08 ｜ 当前版本：v1.0.1
 
 ---
 
@@ -70,7 +70,7 @@ var=%3Cobject%3E%3Cobject%20name%3D%22filter%22%3E%3C%2Fobject%3E%3Cstring%20nam
 | `'code':'FA_INVALID_SESSION'` | 无效会话 | 清除 sid 缓存 |
 | `'code':'FR_INVALID_REQUEST'` | 请求格式错误（如 body 含 XML 声明） | **不清除 sid**，尝试其他端点 |
 
-### 1.2 已废弃的备选接口（v0.9.7 实测）
+### 1.2 已废弃的备选接口（v1.0.1 实测）
 
 以下接口在最新 163 版本中已返回 `FR_INVALID_REQUEST`（method 不存在），保留在配置中作为 fallback 但实际不会成功：
 
@@ -80,7 +80,7 @@ var=%3Cobject%3E%3Cobject%20name%3D%22filter%22%3E%3C%2Fobject%3E%3Cstring%20nam
 | `js6_rpc_getunread` | `...?func=mbox:getUnread&sid={sid}&df=mail163_letter` | ❌ 同左 |
 | `js6_sys_getfolder` | `...?func=global:getSessionInfo&sid={sid}&df=mail163_letter` | ❌ 同左 |
 
-> **v0.9.7 变更**：移除了 body 中的 `<string name="sentDate">2:</string>` 过滤器和 URL/Referer 中的 `&df=mail163_letter` 参数。之前 sentDate=2 只查最近 2 天的邮件，会遗漏旧未读邮件；移除后返回全部未读。
+> **v1.0.1 变更**：移除了 body 中的 `<string name="sentDate">2:</string>` 过滤器和 URL/Referer 中的 `&df=mail163_letter` 参数。之前 sentDate=2 只查最近 2 天的邮件，会遗漏旧未读邮件；移除后返回全部未读。
 
 ### 1.3 会话获取
 
@@ -290,9 +290,9 @@ GET https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageId}?format=m
 
 | 版本 | 变更内容 |
 |------|---------|
-| v0.9.7 | 163 body 移除 `<?xml version="1.0"?>` 声明（服务端拒绝包含 XML 声明的请求） |
-| v0.9.7 | 163 body 移除 `<string name="sentDate">2:</string>` 过滤器（遗漏旧未读邮件） |
-| v0.9.7 | 163 URL/Referer 移除 `&df=mail163_letter` 参数（页面已不再使用该参数） |
-| v0.9.7 | **修复** `parse163Response` 解析 Bug：改用括号计数替代 `indexOf(']')`，避免嵌套结构截断导致已读邮件误判为未读 |
+| v1.0.1 | 163 body 移除 `<?xml version="1.0"?>` 声明（服务端拒绝包含 XML 声明的请求） |
+| v1.0.1 | 163 body 移除 `<string name="sentDate">2:</string>` 过滤器（遗漏旧未读邮件） |
+| v1.0.1 | 163 URL/Referer 移除 `&df=mail163_letter` 参数（页面已不再使用该参数） |
+| v1.0.1 | **修复** `parse163Response` 解析 Bug：改用括号计数替代 `indexOf(']')`，避免嵌套结构截断导致已读邮件误判为未读 |
 | v0.9.6 | Gmail 迁移到 `launchWebAuthFlow` 替代 `getAuthToken`（Edge 兼容） |
 | v0.9.4 | CSP 问题修复，API 拦截器分离到独立文件 |
