@@ -30,6 +30,8 @@ Origin: https://mail.163.com
 var=<object><object name="filter"></object><string name="order">date</string><boolean name="desc">true</boolean><array name="fids"><int>1</int><int>18</int><int>3685900</int></array><boolean name="skipLockedFolders">true</boolean><int name="limit">200</int><string name="mrcid">@null</string></object>
 ```
 
+> **注意**：`fids` 包含 3 个文件夹（收件箱 fid=1、订阅邮件 fid=18、自定义文件夹 fid=3685900），确保不遗漏任何文件夹的未读邮件。
+
 编码后（`encodeURIComponent` 仅编码 `=` 右侧的 value 部分）：
 ```
 var=%3Cobject%3E%3Cobject%20name%3D%22filter%22%3E%3C%2Fobject%3E%3Cstring%20name%3D%22order%22%3Edate%3C%2Fstring%3E%3Cboolean%20name%3D%22desc%22%3Etrue%3C%2Fboolean%3E%3Carray%20name%3D%22fids%22%3E%3Cint%3E1%3C%2Fint%3E%3Cint%3E18%3C%2Fint%3E%3Cint%3E3685900%3C%2Fint%3E%3C%2Farray%3E%3Cboolean%20name%3D%22skipLockedFolders%22%3Etrue%3C%2Fboolean%3E%3Cint%20name%3D%22limit%22%3E200%3C%2Fint%3E%3Cstring%20name%3D%22mrcid%22%3E%40null%3C%2Fstring%3E%3C%2Fobject%3E
@@ -291,5 +293,6 @@ GET https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageId}?format=m
 | v0.9.7 | 163 body 移除 `<?xml version="1.0"?>` 声明（服务端拒绝包含 XML 声明的请求） |
 | v0.9.7 | 163 body 移除 `<string name="sentDate">2:</string>` 过滤器（遗漏旧未读邮件） |
 | v0.9.7 | 163 URL/Referer 移除 `&df=mail163_letter` 参数（页面已不再使用该参数） |
+| v0.9.7 | **修复** `parse163Response` 解析 Bug：改用括号计数替代 `indexOf(']')`，避免嵌套结构截断导致已读邮件误判为未读 |
 | v0.9.6 | Gmail 迁移到 `launchWebAuthFlow` 替代 `getAuthToken`（Edge 兼容） |
 | v0.9.4 | CSP 问题修复，API 拦截器分离到独立文件 |

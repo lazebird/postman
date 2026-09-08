@@ -1,7 +1,7 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-05 ｜ 当前版本：v0.9.7
+> 最后更新：2026-09-08 ｜ 当前版本：v0.9.7
 
 ---
 
@@ -9,7 +9,7 @@
 
 ### 163 邮箱
 - ✅ SW API 探测成功
-- ✅ 未读数：11 封（页面显示）/ API 返回最近2天3封
+- ✅ 未读数：与页面一致（parse163Response 已修复嵌套括号解析 Bug）
 - ✅ API：`POST https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}`
 - ✅ Body：Coremail RPC 格式（无 XML 声明，var=<object>...）
 - ✅ Response：JSONP，统计没有 `read:true` 标志的邮件数量
@@ -126,7 +126,58 @@ bodyTemplate: 'var=<object>...</object>'
 - `extension/shared/constants.js` — 更新 `js6_rpc_list` 端点的 `bodyTemplate`、`url` 和 `Referer`
   - 移除 body 中的 `<?xml version="1.0"?>` 声明（163 服务端拒绝包含 XML 声明的请求）
   - 移除 URL 和 Referer 中的 `df=mail163_letter` 参数（不再使用）
-  - 移除 body 中的 `<string name="sentDate">2:</string>` 过滤器（只查最近 2 天会遗漏旧未读邮件，移除后返回全部未读）
+   - 移除 body 中的 `<string name="sentDate">2:</string>` 过滤器（只查最近 2 天会遗漏旧未读邮件，移除后返回全部未读）
+
+---
+
+## 🟡 P1：163 listMessages 响应解析 Bug——嵌套括号导致未读数虚高（v0.9.7 修复）
+
+### 问题描述
+163 邮箱 API 返回的未读数始终比页面显示多 1 封，且持续存在。
+
+### 根因
+`provider-163.js` 的 `parse163Response` 函数中，解析最后一封邮件的结束位置时使用了：
+```javascript
+jsonText.indexOf(']', emailMatch.index)
+```
+这会在 **第一个 `]` 处截断**，但该 `]` 可能位于邮件对象的**嵌套结构内**（如 `flags` 对象后面的数组闭合）。
+
+例如一封已读邮件的完整结构：
+```
+{'id':'754:...','flags':{'read':true,'hasTag':true},...}
+                     ^^^^^^^^^^^^^^^^^^^^
+                     此处 ']' 先被 indexOf 命中
+                     导致 read:true 未被包含在 emailText 中
+```
+
+结果：已读邮件被误判为未读，未读数虚高 1 封。
+
+### 修复（v0.9.7）
+改用**括号计数**找到匹配的 `}`，而非 `indexOf(']')`：
+```javascript
+// 修复前
+: jsonText.indexOf(']', emailMatch.index);
+
+// 修复后
+let braceCount = 0;
+for (let i = emailMatch.index; i < jsonText.length; i++) {
+  if (jsonText[i] === '{') braceCount++;
+  else if (jsonText[i] === '}') {
+    braceCount--;
+    if (braceCount === 0) { emailEnd = i + 1; break; }
+  }
+}
+```
+
+### 验证
+| 解析方式 | 未读数 |
+|---------|--------|
+| 修复前（indexOf ']') | 1 ❌ |
+| 修复后（括号计数） | 0 ✅ |
+| 页面实际未读 | 0 ✅ |
+
+### 修改文件
+- `extension/providers/provider-163.js` — 修复 `parse163Response` 中最后一封邮件的边界计算
 
 ---
 

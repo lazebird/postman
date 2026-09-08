@@ -167,9 +167,25 @@ function parse163Response(text) {
 
     while ((emailMatch = emailRegex.exec(jsonText)) !== null) {
       const nextEmail = jsonText.substring(emailMatch.index + 1).match(/\{\s*'id'\s*:/);
-      const emailEnd = nextEmail
-        ? emailMatch.index + 1 + nextEmail.index
-        : jsonText.indexOf(']', emailMatch.index);
+      let emailEnd;
+      if (nextEmail) {
+        // 有下一封邮件：当前邮件到下一封的 '{' 之前结束
+        emailEnd = emailMatch.index + 1 + nextEmail.index;
+      } else {
+        // 最后一封邮件：用括号计数找到匹配的 '}'，而非 indexOf(']')
+        // indexOf(']') 会错误命中嵌套数组中的 ']'，导致截断过早
+        let braceCount = 0;
+        for (let i = emailMatch.index; i < jsonText.length; i++) {
+          if (jsonText[i] === '{') braceCount++;
+          else if (jsonText[i] === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              emailEnd = i + 1;
+              break;
+            }
+          }
+        }
+      }
       const emailText = jsonText.substring(emailMatch.index, emailEnd);
       const hasRead = /'read'\s*:\s*true/.test(emailText);
 
