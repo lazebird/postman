@@ -73,6 +73,21 @@
   属后续可选增强。
 ---
 
+## 🟡 P2：Gmail API "Failed to fetch" 网络层错误
+
+### 问题描述
+后台检查时出现 `Gmail API fetch failed: Failed to fetch`，属于 TypeError（网络层失败），非 HTTP 401/403。中国大陆用户频繁遇到此问题（Great Firewall 阻断 / VPN 不稳定）。
+
+### 处理原则
+- **绝不清除 token**：网络故障 ≠ 令牌失效，清除会导致用户每次网络恢复后都需重新授权
+- **降级为 DEBUG 日志**：不产生 ERROR 噪音，不影响工具栏图标状态
+- **自动恢复**：token 保留在缓存中，网络恢复后下次 alarm 自动重试即可正常读取
+
+### 修复（v0.9.7）
+移除 token 长度预检查和不必要的 catch 块 token 清除逻辑，网络错误统一降级为 DEBUG 日志，返回 `tokenInvalid: false` 保持 token 可用。
+
+---
+
 ## 🔧 CSP 问题修复（v0.9.4）
 
 ### 问题

@@ -143,8 +143,10 @@ async function fetchGmailUnread(token) {
 
     return { success: true, unreadCount, newEmails };
   } catch (err) {
-    logger.error(`Gmail API fetch failed: ${err.message}`);
-    return { success: false, error: err.message, unreadCount: 0 };
+    // 网络层错误（Failed to fetch）：常见于中国大陆网络不稳定
+    // 绝不清除 token——网络恢复后下次检查自动重试即可
+    logger.debug(`Gmail API 网络错误: ${err.message}`);
+    return { success: false, error: err.message, unreadCount: 0, tokenInvalid: false };
   }
 }
 
