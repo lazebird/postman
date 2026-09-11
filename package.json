@@ -9,8 +9,8 @@
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\"",
-    "format:check": "prettier --check \"extension/**/*.js\" \"scripts/**/*.js\" \"*.mjs\""
+    "format": "prettier --write \"extension/**/*.js\" \"scripts/**/*.js\" \"docs/**/*.js\" \"*.mjs\"",
+    "format:check": "prettier --check \"extension/**/*.js\" \"scripts/**/*.js\" \"docs/**/*.js\" \"*.mjs\""
   },
   "devDependencies": {
     "eslint": "9.39.5",

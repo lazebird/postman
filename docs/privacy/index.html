@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>隐私政策 — Mail Notifier</title>
+    <meta
+      name="description"
+      content="Mail Notifier 浏览器扩展隐私政策：纯本地处理、无服务器、不上传、不共享、不出售用户数据。"
+    />
+    <meta name="theme-color" content="#1a73e8" />
+    <link rel="icon" type="image/png" href="../mail-notifier/assets/icon.png" />
+    <link rel="canonical" href="./" />
+    <link rel="stylesheet" href="../mail-notifier/assets/style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../">
+          <img src="../mail-notifier/assets/icon.png" alt="Mail Notifier 图标" />
+          <span>Mail Notifier</span>
+        </a>
+        <nav class="nav" aria-label="站点导航">
+          <a href="../">首页</a>
+          <a href="./" aria-current="page">隐私政策</a>
+          <a href="../terms/">服务条款</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap">
+        <div class="doc-header">
+          <h1>隐私政策 · Privacy Policy</h1>
+          <p class="meta">
+            适用于浏览器扩展 <strong>Mail Notifier</strong>（MV3）· 生效日期：2025-01-01 · 最近更新：2025-01-01
+          </p>
+        </div>
+
+        <div class="lang-switch" role="group" aria-label="语言切换">
+          <button type="button" id="btn-zh" aria-pressed="true">中文</button>
+          <button type="button" id="btn-en" aria-pressed="false">English</button>
+        </div>
+
+        <!-- ============ 中文 ============ -->
+        <article class="prose" id="doc-zh">
+          <h2>1. 简介</h2>
+          <p>
+            Mail Notifier 是一款邮件未读提醒扩展，支持 <strong>163 / QQ / USTC / Gmail</strong> 邮箱。
+            其设计核心为<strong>纯本地处理、无服务器、自动运行完全静默</strong>：扩展在您的本机浏览器中完成所有邮件状态检查与提醒，
+            <strong>不上传您的邮箱数据到任何第三方服务器</strong>。
+          </p>
+
+          <h2>2. 我们收集哪些信息</h2>
+          <p>
+            扩展仅在您于<strong>本机浏览器</strong>登录上述邮箱并授权的情况下，读取完成邮件提醒所必需的<strong>最小数据</strong>：
+          </p>
+          <ul>
+            <li>
+              <strong>邮箱账户的会话状态（sid）与未读计数</strong
+              >：用于向 webmail 查询是否有新邮件并展示角标 / 发送桌面通知；
+            </li>
+            <li>
+              <strong>Gmail 账户数据</strong
+              >：经 Google 官方 REST API 以只读权限（<code>gmail.readonly</code>）读取未读邮件元数据；
+            </li>
+            <li>
+              <strong>浏览器 Cookies（会话 Cookie）</strong
+              >：仅用于向您已登录的 webmail 发出本机请求以获取未读数。
+            </li>
+          </ul>
+          <p>
+            我们<strong>不</strong>读取、收集、存储您的邮件正文内容用于任何分析；仅使用未读元数据。
+          </p>
+
+          <h2>3. 数据如何存储与使用</h2>
+          <ul>
+            <li>所有数据（sid、未读状态、API 模式等）仅保存在您的本机浏览器 <code>chrome.storage.local</code> 中；</li>
+            <li>检查逻辑全部在本机 Service Worker 内执行；</li>
+            <li>我们<strong>不拥有、不运营任何服务器</strong>，数据<strong>不传输、不共享、不出售、不用于广告或画像</strong>。</li>
+          </ul>
+
+          <h2>4. 自动运行与隐私</h2>
+          <ul>
+            <li>定时自动检查在后台静默执行，<strong>绝不自动打开新标签页、不常驻页面</strong>；</li>
+            <li>仅当您在 Popup / 设置页<strong>主动点击</strong>时，才可能打开邮箱页以同步会话；</li>
+            <li>若后台无法取得数据，只会提示「需手动同步」，不会越权访问您的其他数据。</li>
+          </ul>
+
+          <h2>5. 第三方（Google）数据处理</h2>
+          <p>
+            本扩展使用 Google 官方 OAuth2 流程与 Gmail REST API，仅申请 <code>gmail.readonly</code>（只读）权限。
+            Gmail 数据的使用遵循 <a
+              href="https://developers.google.com/terms/api-services-user-data-policy"
+              rel="noopener"
+              >Google API Services User Data Policy</a
+            >（含 Limited Use 有限使用要求）。
+          </p>
+          <ul>
+            <li>
+              <strong>仅用于提供用户可见功能</strong>：读取未读邮件数量与必要的元数据（发件人、主题、时间），
+              用于在工具栏角标与桌面通知中展示未读提醒；
+            </li>
+            <li>
+              <strong>不传输给第三方</strong>：数据仅在本机浏览器内使用，不会传输给任何第三方服务器、广告平台或数据经纪商；
+            </li>
+            <li>
+              <strong>不用于广告、画像或信用评估</strong>：不使用 Gmail 数据投放广告、建立用户画像或进行借贷/信用评估；
+            </li>
+            <li><strong>不用于训练 AI 模型</strong>：不使用您的 Gmail 数据训练或改进任何通用/第三方 AI 模型；</li>
+            <li>
+              <strong>人类不可读</strong>：我们不允许人工（开发者本人或第三方）读取您的 Gmail 数据，
+              除非您明确请求支持、为安全目的调查滥用，或法律要求；
+            </li>
+            <li>
+              <strong>数据保留与删除</strong>：Gmail 相关令牌与未读状态保存在本机
+              <code>chrome.storage.local</code>，可随时在扩展设置页清除；卸载扩展即全部删除。
+            </li>
+          </ul>
+
+          <h2>6. 数据共享与披露</h2>
+          <p>我们<strong>不会</strong>向任何第三方出售、出租或共享您的数据，<strong>除非</strong>：</p>
+          <ul>
+            <li>为遵守法律 / 监管 / 司法要求而必须披露；</li>
+            <li>为保护我们的权利或防止滥用。</li>
+          </ul>
+
+          <h2>7. 数据保留与删除</h2>
+          <ul>
+            <li>扩展卸载后，其存储在您本机浏览器中的数据即随之清除；</li>
+            <li>您也可以随时在扩展的 Popup / 设置页手动清除缓存的会话数据。</li>
+          </ul>
+
+          <h2>8. 权限用途说明</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>权限</th>
+                <th>用途</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>cookies</code></td>
+                <td>向您已登录的 webmail 附加会话 Cookie 以查询未读数（仅本机）</td>
+              </tr>
+              <tr>
+                <td><code>storage</code></td>
+                <td>本地保存 sid / 未读状态 / API 模式</td>
+              </tr>
+              <tr>
+                <td><code>alarms</code></td>
+                <td>定时后台静默检查新邮件</td>
+              </tr>
+              <tr>
+                <td><code>notifications</code></td>
+                <td>发送新邮件桌面通知</td>
+              </tr>
+              <tr>
+                <td><code>tabs</code></td>
+                <td>仅用于识别并复用您<strong>已打开</strong>的邮箱标签（绝不自动开标签）</td>
+              </tr>
+              <tr>
+                <td><code>identity</code></td>
+                <td>Gmail OAuth2 授权（只读）</td>
+              </tr>
+              <tr>
+                <td><code>scripting</code> / <code>declarativeNetRequest</code></td>
+                <td>注入脚本 / 网络规则以支撑混合检查</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2>9. 安全</h2>
+          <p>
+            扩展使用 <code>chrome.storage.local</code> 在受隔离的浏览器扩展沙箱中保存数据，并遵循 MV3 最小权限原则。
+            因数据始终保存在本机，安全风险主要来自您本机环境本身。
+          </p>
+
+          <h2>10. 政策更新</h2>
+          <p>本政策可能随功能演进更新。更新后将在扩展的商店列表说明中提示，重大变更会在新版本 release note 中说明。</p>
+
+          <h2>11. 联系我们</h2>
+          <p>如有隐私相关问题，请发送邮件至 <a href="mailto:lazebird@gmail.com">lazebird@gmail.com</a>，或在<a href="https://github.com/lazebird" rel="noopener">项目仓库</a>提交 Issue 与我们沟通。</p>
+        </article>
+
+        <!-- ============ English ============ -->
+        <article class="prose" id="doc-en" hidden>
+          <h2>1. Introduction</h2>
+          <p>
+            Mail Notifier is an unread-email notification extension supporting
+            <strong>163 / QQ / USTC / Gmail</strong> mailboxes. It is designed around
+            <strong>purely local processing, no servers, and fully silent automatic checks</strong>: all mailbox
+            status checks and notifications happen in your local browser, and
+            <strong>your mailbox data is never uploaded to any third-party server</strong>.
+          </p>
+
+          <h2>2. Information We Access</h2>
+          <p>
+            Only when you are signed in to the above mailboxes in <strong>your local browser</strong> and have granted
+            authorization does the extension read the <strong>minimum data</strong> required for notifications:
+          </p>
+          <ul>
+            <li>
+              <strong>Mailbox session state (sid) and unread counts</strong> — used to query webmail for new mail and to
+              render the badge / send desktop notifications;
+            </li>
+            <li>
+              <strong>Gmail account data</strong> — read-only unread message metadata via the official Google REST API
+              (<code>gmail.readonly</code>);
+            </li>
+            <li>
+              <strong>Browser cookies (session cookies)</strong> — used solely to send local requests to webmail sites
+              where you are already signed in.
+            </li>
+          </ul>
+          <p>
+            We do <strong>not</strong> read, collect, or store your email message bodies for any analysis; only unread
+            metadata is used.
+          </p>
+
+          <h2>3. How Data Is Stored and Used</h2>
+          <ul>
+            <li>
+              All data (sid, unread state, API patterns, etc.) is stored only in your local browser's
+              <code>chrome.storage.local</code>;
+            </li>
+            <li>All checking logic runs inside the local Service Worker;</li>
+            <li>
+              We <strong>do not own or operate any server</strong>. Data is
+              <strong>never transmitted, shared, sold, or used for advertising or profiling</strong>.
+            </li>
+          </ul>
+
+          <h2>4. Automatic Operation and Privacy</h2>
+          <ul>
+            <li>
+              Scheduled background checks run silently and <strong>never open a new tab or keep a page resident</strong>;
+            </li>
+            <li>
+              Only when you <strong>explicitly click</strong> in the Popup / Settings page may a mailbox page be opened
+              to sync the session;
+            </li>
+            <li>
+              If background checks cannot obtain data, the extension only shows a "manual sync required" hint and never
+              accesses other data beyond its scope.
+            </li>
+          </ul>
+
+          <h2>5. Third-Party (Google) Data Processing</h2>
+          <p>
+            The Extension uses the official Google OAuth2 flow and the Gmail REST API, requesting only the
+            <code>gmail.readonly</code> scope. Use of Gmail data complies with the <a
+              href="https://developers.google.com/terms/api-services-user-data-policy"
+              rel="noopener"
+              >Google API Services User Data Policy</a
+            >, including the Limited Use requirements.
+          </p>
+          <ul>
+            <li>
+              <strong>User-facing functionality only</strong>: unread counts and minimal metadata (sender,
+              subject, time) are used solely to show badges and desktop notifications;
+            </li>
+            <li>
+              <strong>No transfer to third parties</strong>: data stays in your local browser and is never sent to
+              third-party servers, ad platforms or data brokers;
+            </li>
+            <li>
+              <strong>No ads, profiling or credit assessment</strong>: Gmail data is not used for advertising,
+              profiling, or lending/credit decisions;
+            </li>
+            <li><strong>No AI model training</strong>: your Gmail data is never used to train or improve AI models;</li>
+            <li>
+              <strong>No human reading</strong>: no humans (developers or third parties) read your Gmail data except
+              with your explicit request for support, for security investigations, or as required by law;
+            </li>
+            <li>
+              <strong>Retention and deletion</strong>: Gmail tokens and unread state are stored locally in
+              <code>chrome.storage.local</code>, can be cleared from the extension settings at any time, and are
+              removed when the Extension is uninstalled.
+            </li>
+          </ul>
+            <li>
+              Gmail data handling follows the <strong>Google APIs Terms of Service</strong> and the
+              <strong>Google Privacy Policy</strong>;
+            </li>
+            <li>Gmail data is never used for purposes beyond Google's limited-use requirements.</li>
+          </ul>
+
+          <h2>6. Data Sharing and Disclosure</h2>
+          <p>
+            We do <strong>not</strong> sell, rent, or share your data with any third party, <strong>except</strong>:
+          </p>
+          <ul>
+            <li>when disclosure is required to comply with legal, regulatory, or judicial requirements;</li>
+            <li>to protect our rights or prevent abuse.</li>
+          </ul>
+
+          <h2>7. Data Retention and Deletion</h2>
+          <ul>
+            <li>Uninstalling the extension removes the data stored in your local browser;</li>
+            <li>You may also clear cached session data at any time from the extension's Popup / Settings page.</li>
+          </ul>
+
+          <h2>8. Permission Usage</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Permission</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>cookies</code></td>
+                <td>Attach session cookies to local webmail requests to read unread counts</td>
+              </tr>
+              <tr>
+                <td><code>storage</code></td>
+                <td>Store sid / unread state / API patterns locally</td>
+              </tr>
+              <tr>
+                <td><code>alarms</code></td>
+                <td>Schedule silent background new-mail checks</td>
+              </tr>
+              <tr>
+                <td><code>notifications</code></td>
+                <td>Show desktop notifications for new mail</td>
+              </tr>
+              <tr>
+                <td><code>tabs</code></td>
+                <td>
+                  Only to detect and reuse mailbox tabs you <strong>already have open</strong> (never opens tabs
+                  automatically)
+                </td>
+              </tr>
+              <tr>
+                <td><code>identity</code></td>
+                <td>Gmail OAuth2 authorization (read-only)</td>
+              </tr>
+              <tr>
+                <td><code>scripting</code> / <code>declarativeNetRequest</code></td>
+                <td>Inject scripts / network rules that support the hybrid checking strategy</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2>9. Security</h2>
+          <p>
+            The extension stores data in the isolated browser extension sandbox via
+            <code>chrome.storage.local</code> and follows MV3 least-privilege principles. Because data always stays on
+            your device, security risks mainly come from your local environment.
+          </p>
+
+          <h2>10. Policy Updates</h2>
+          <p>
+            This policy may be updated as the product evolves. Updates are noted in the store listing, and material
+            changes are described in the release notes.
+          </p>
+
+          <h2>11. Contact</h2>
+          <p>For privacy questions, please email <a href="mailto:lazebird@gmail.com">lazebird@gmail.com</a> or open an issue in the <a href="https://github.com/lazebird" rel="noopener">project repository</a>.</p>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>© <span id="year">2025</span> Mail Notifier · 本项目开源维护</span>
+        <nav aria-label="页脚导航">
+          <a href="../">首页</a>
+          <a href="./">隐私政策</a>
+          <a href="../terms/">服务条款</a>
+        </nav>
+      </div>
+    </footer>
+    <script src="../mail-notifier/assets/lang.js"></script>
+  </body>
+</html>

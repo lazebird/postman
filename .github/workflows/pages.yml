@@ -1,0 +1,54 @@
+# 将 docs/ 目录发布到 GitHub Pages
+#
+# 站点入口（项目页面，基于仓库名 /mail-notifier/）：
+#   https://<owner>.github.io/mail-notifier/          首页
+#   https://<owner>.github.io/mail-notifier/privacy/  隐私政策
+#   https://<owner>.github.io/mail-notifier/terms/    服务条款
+#
+# 首次启用：仓库 Settings → Pages → Build and deployment → Source 选择
+# 「GitHub Actions」，然后手动运行一次本工作流（Actions → Deploy GitHub Pages → Run workflow）。
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只保留一次部署，取消进行中的旧任务（不打断已开始的发布）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
