@@ -11,6 +11,22 @@ main:
           script: npm ci --no-audit --no-fund
         - name: lint
           script: ./scripts/lint.sh
+    - name: sync-to-github
+      runner:
+        cpus: 1
+      imports:
+        - https://cnb.cool/lazebird/postman_secrets/-/blob/main/github-sync.yml
+      stages:
+        - name: sync to github
+          image: tencentcom/git-sync
+          settings:
+            target_url: https://github.com/lazebird/postman.git
+            auth_type: https
+            username: $GIT_USERNAME
+            password: $GIT_ACCESS_TOKEN
+            branch: main
+            sync_mode: push
+            force: 'false'
   pull_request:
     - name: lint
       docker:
@@ -45,7 +61,7 @@ main:
       runner:
         cpus: 1
       imports:
-        - https://cnb.cool/<your-secret-repo-slug>/-/blob/main/github-sync.yml
+        - https://cnb.cool/lazebird/postman_secrets/-/blob/main/github-sync.yml
       stages:
         - name: sync to github
           image: tencentcom/git-sync
