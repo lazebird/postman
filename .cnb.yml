@@ -20,3 +20,40 @@ main:
           script: npm ci --no-audit --no-fund
         - name: lint
           script: ./scripts/lint.sh
+
+# ---------------------------------------------------------------------------
+# 同步站点源码到 GitHub（可选，仅需推送 docs/ 相关提交）
+#
+# 背景：Google OAuth「品牌验证 / 隐私政策 URL / 服务条款 URL」只需要一个公开可访问的
+# 静态站点，不需要把整个项目源码同步到 GitHub。本流水线只推送 docs/ 站点内容。
+#
+# 前提：在 CNB「密钥仓库」中创建文件（如 github-sync.yml）并声明允许范围：
+#
+#   GIT_USERNAME: <你的 GitHub 用户名>
+#   GIT_ACCESS_TOKEN: <具有 repo 权限的 GitHub PAT>
+#   allow_slugs: lazebird/postman
+#   allow_events: push, crontab.*
+#   allow_branches: main
+#
+# 然后在下方 imports 中填入该密钥仓库文件的 raw 地址。
+# 未配置密钥时，本任务会因变量缺失而失败，属预期行为（请先按上方说明创建密钥仓库文件）。
+# ---------------------------------------------------------------------------
+
+  # 定时同步：每 6 小时把 main 分支推送到 GitHub（密钥未配置前请忽略失败）
+  "crontab: 0 */6 * * *":
+    - name: sync-docs-to-github
+      runner:
+        cpus: 1
+      imports:
+        - https://cnb.cool/<your-secret-repo-slug>/-/blob/main/github-sync.yml
+      stages:
+        - name: sync to github
+          image: tencentcom/git-sync
+          settings:
+            target_url: https://github.com/lazebird/postman.git
+            auth_type: https
+            username: $GIT_USERNAME
+            password: $GIT_ACCESS_TOKEN
+            branch: main
+            sync_mode: push
+            force: 'false'
