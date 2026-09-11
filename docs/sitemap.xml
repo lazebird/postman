@@ -1,9 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://lazebird.github.io/postman/</loc><priority>1.0</priority></url>
-  <url><loc>https://lazebird.github.io/postman/privacy/</loc><priority>0.8</priority></url>
-  <url><loc>https://lazebird.github.io/postman/terms/</loc><priority>0.8</priority></url>
-  <url><loc>https://lazebird.github.io/postman/mail-notifier/</loc><priority>0.9</priority></url>
-  <url><loc>https://lazebird.github.io/postman/mail-notifier/privacy/</loc><priority>0.8</priority></url>
-  <url><loc>https://lazebird.github.io/postman/mail-notifier/terms/</loc><priority>0.8</priority></url>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url><loc>https://lazebird.github.io/postman/</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://lazebird.github.io/postman/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://lazebird.github.io/postman/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://lazebird.github.io/postman/"/><priority>1.0</priority></url>
+  <url><loc>https://lazebird.github.io/postman/privacy/</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://lazebird.github.io/postman/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://lazebird.github.io/postman/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://lazebird.github.io/postman/privacy/"/><priority>0.8</priority></url>
+  <url><loc>https://lazebird.github.io/postman/terms/</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://lazebird.github.io/postman/terms/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://lazebird.github.io/postman/terms/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://lazebird.github.io/postman/terms/"/><priority>0.8</priority></url>
+  <url><loc>https://lazebird.github.io/postman/mail-notifier/</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://lazebird.github.io/postman/mail-notifier/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://lazebird.github.io/postman/mail-notifier/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://lazebird.github.io/postman/mail-notifier/"/><priority>0.9</priority></url>
+  <url><loc>https://lazebird.github.io/postman/mail-notifier/privacy/</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://lazebird.github.io/postman/mail-notifier/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://lazebird.github.io/postman/mail-notifier/privacy/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://lazebird.github.io/postman/mail-notifier/privacy/"/><priority>0.8</priority></url>
+  <url><loc>https://lazebird.github.io/postman/mail-notifier/terms/</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://lazebird.github.io/postman/mail-notifier/terms/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://lazebird.github.io/postman/mail-notifier/terms/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://lazebird.github.io/postman/mail-notifier/terms/"/><priority>0.8</priority></url>
 </urlset>
