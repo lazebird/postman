@@ -10,6 +10,8 @@
 ```
 ├── AGENTS.md                    # ⚠️ 项目约束规则（最高优先级，禁止违反）
 
+├── .github/workflows/pages.yml  # GitHub Pages 自动部署（发布 docs/）
+├── docs/                        # GitHub Pages 站点源码（首页/隐私政策/服务条款）
 ├── doc/
 │   ├── 整体方案与进度.md        # 当前方案与进度快照
 │   └── 技术选型文档.md          # 技术选型与方案设计
@@ -131,6 +133,22 @@
 > 📋 **当前整体方案与进度**见 [`doc/整体方案与进度.md`](doc/整体方案与进度.md)；
 > 📜 历史选型论证与逐版本演进见 [`doc/技术选型文档.md`](doc/技术选型文档.md)
 
+
+## GitHub Pages 站点与商城隐私政策
+
+项目内置一个纯静态站点，用于扩展商店（Chrome Web Store / Microsoft Edge Add-ons）所需的
+**隐私政策 URL** 与产品落地页，源文件位于仓库 `docs/` 目录，由 GitHub Actions 自动发布。
+
+| 页面 | 路径 | 源文件 |
+|------|------|--------|
+| 首页 | `/mail-notifier/` | `docs/mail-notifier/index.html` |
+| 隐私政策 | `/mail-notifier/privacy/` | `docs/mail-notifier/privacy/index.html` |
+| 服务条款 | `/mail-notifier/terms/` | `docs/mail-notifier/terms/index.html` |
+
+- 发布工作流：`.github/workflows/pages.yml`（push `docs/**` 或手动 `workflow_dispatch` 触发）；
+- 站点为纯静态站点，无构建步骤、无外部依赖，支持深色模式与中英双语切换；
+- 首次使用需在 GitHub 仓库 **Settings → Pages → Source 选择「GitHub Actions」**，随后运行一次工作流；
+- 详细说明见 [`docs/README.md`](docs/README.md)。
 
 ## 代码规范与静态检查
 

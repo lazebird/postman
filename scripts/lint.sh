@@ -29,7 +29,7 @@ if [[ ! -d node_modules ]] && [[ -f package.json ]]; then
   npm install --no-audit --no-fund
 fi
 
-PRETTIER_FILES=( "extension/**/*.js" "scripts/**/*.js" "*.mjs" )
+PRETTIER_FILES=( "extension/**/*.js" "scripts/**/*.js" "docs/**/*.js" "*.mjs" )
 
 echo "[lint] 运行 Prettier..."
 if [[ "$CHECK_ONLY" -eq 1 ]]; then

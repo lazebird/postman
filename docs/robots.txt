@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://lazebird.github.io/mail-notifier/sitemap.xml

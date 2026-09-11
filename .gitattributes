@@ -21,3 +21,9 @@
 *.ico    binary
 *.woff   binary
 *.woff2  binary
+
+# PNG 仅用于发布（图标位图），全仓库统一按文本处理会破坏二进制，这里明确排除站点图标
+docs/mail-notifier/assets/icon.png binary
+
+# GitHub Pages 关闭 Jekyll 处理的标记文件（必须保持 0 字节，不可被换行转换）
+docs/.nojekyll -text
