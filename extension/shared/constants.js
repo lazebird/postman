@@ -39,9 +39,13 @@ export const GMAIL_RENEWAL_KEYS = {
 };
 
 // 已捕获 API 模式的存储键
+// 各 provider 独立存储，互不串键。CAPTURED_USTC / CAPTURED_GMAIL 为显式对称预留
+//（USTC 走 Coremail 捕获回放；Gmail 走 Atom feed 公开端点、不需捕获回放，键仅作完整映射占位）。
 export const API_PATTERN_KEYS = {
   CAPTURED_163: 'api_patterns_163',
   CAPTURED_QQ: 'api_patterns_qq',
+  CAPTURED_USTC: 'api_patterns_ustc',
+  CAPTURED_GMAIL: 'api_patterns_gmail',
   CAPTURED_TIME: 'api_patterns_time',
 };
 
@@ -302,7 +306,25 @@ export const PROVIDER_CONFIG = {
     homepage: 'https://mail.google.com/',
     entryPoints: [],
     sessionEndpoints: [],
-    probeEndpoints: [],
+    // Gmail 未读检查候选接口
+    // v0.11.0 新增：Atom feed（隐藏端点，session cookie 认证，零 token、无需 OAuth 商业授权）。
+    //   端点固定 + Cookie 鉴权，不依赖 {sid} 占位符（requiresSid:false，回放时无 sid 也放行）；
+    //   响应为 Atom XML，未读数在 <fullcount> 标签，由 provider-gmail.js 专用解析器处理，
+    //   不走通用 JSON 解析。
+    // 风控约束：端点由 Google 非官方维护、可能随时 403/废弃，故与 OAuth2 路径互为 fallback；
+    //   且轮询复用现有 alarm 间隔（≥60s），不为此单独加密（避免触发 abuse detection）。
+    probeEndpoints: [
+      {
+        name: 'atom_feed',
+        url: 'https://mail.google.com/mail/u/0/feed/atom',
+        method: 'GET',
+        headers: {
+          Accept: 'application/atom+xml, application/xml',
+        },
+        requiresSid: false,
+        description: '隐藏 Atom feed - 收件箱未读计数（session cookie，返回 <fullcount>）',
+      },
+    ],
     contentDomains: ['mail.google.com'],
     // Gmail OAuth2 配置
     oauth2: {
@@ -332,7 +354,9 @@ export const DEFAULT_SETTINGS = {
     netease_163: ['js6_rpc_list'],
     qq: ['wx_maillist'],
     ustc: ['ustc_getallfolders'],
-    gmail: ['gmail_api'],
+    // atom_feed 优先（cookie 路径，零 token）；gmail_api（OAuth2）为 fallback，
+    // 与 provider-gmail.js 的「先 atom 后 OAuth」探测顺序一致。
+    gmail: ['atom_feed', 'gmail_api'],
   },
 };
 

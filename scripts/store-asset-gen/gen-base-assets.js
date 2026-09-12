@@ -37,7 +37,8 @@ function roundRect(ctx, x, y, w, h, r) {
 // ====== logo 128x128 (colored rounded square + white envelope + green status dot) ======
 function drawEnvelope(ctx, cx, cy, w, h) {
   // white envelope on status-color bg
-  const x0 = cx - w / 2, y0 = cy - h / 2;
+  const x0 = cx - w / 2,
+    y0 = cy - h / 2;
   ctx.save();
   roundRect(ctx, x0, y0, w, h, w * 0.08);
   ctx.fillStyle = '#ffffff';
@@ -87,7 +88,8 @@ drawLogo(512, BLUE, BLUE, 'extension-logo-512.png');
 
 // ====== Small promo tile 440x280 ======
 function drawSmallPromoTile() {
-  const W = 440, H = 280;
+  const W = 440,
+    H = 280;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   // bg gradient
@@ -100,7 +102,10 @@ function drawSmallPromoTile() {
   ctx.globalAlpha = 0.12;
   ctx.fillStyle = '#fff';
   for (let i = 0; i < 5; i++) {
-    const sx = 18 + i * 92, sy = 34, sw = 26, sh = 19;
+    const sx = 18 + i * 92,
+      sy = 34,
+      sw = 26,
+      sh = 19;
     roundRect(ctx, sx, sy, sw, sh, 3);
     ctx.fill();
   }
@@ -139,7 +144,8 @@ drawSmallPromoTile();
 
 // ====== Large promo tile (Marquee) 1400x560 ======
 function drawLargePromoTile() {
-  const W = 1400, H = 560;
+  const W = 1400,
+    H = 560;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   const g = ctx.createLinearGradient(0, 0, W, H);
@@ -151,8 +157,18 @@ function drawLargePromoTile() {
   // subtle grid/decoration
   ctx.strokeStyle = 'rgba(255,255,255,0.06)';
   ctx.lineWidth = 1;
-  for (let x = 0; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  for (let y = 0; y < H; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let x = 0; x < W; x += 60) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 60) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
 
   // left: logo + headline + features
   ctx.save();
@@ -207,7 +223,8 @@ function drawLargePromoTile() {
     ctx.font = 'bold 22px "DejaVu Sans"';
     ctx.fillText(card.name, 1080, cy + 42);
     // unread circle
-    const cx = 1282, cyy = cy + 36;
+    const cx = 1282,
+      cyy = cy + 36;
     ctx.beginPath();
     ctx.arc(cx, cyy, 17, 0, Math.PI * 2);
     ctx.fillStyle = RED;

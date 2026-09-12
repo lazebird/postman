@@ -1,16 +1,18 @@
 /**
  * provider-gmail.js - Gmail 邮箱未读接口探测实现
  *
- * 使用 Gmail REST API + OAuth2 认证
+ * v0.11.0：双路径探测
+ *   1. Atom feed（cookie）：通过 SW 跨源 fetch + credentials:'include' 附带浏览器
+ *      登录态 Cookie 直调 Google 隐藏 Atom feed（<fullcount> 即全邮箱精确未读数），
+ *      零 token、无需 OAuth 商业授权。用户浏览器登录过 Gmail 即可用。
+ *   2. Gmail REST API + OAuth2（fallback）：Atom feed 被 Google 风控/废弃时（401/403），
+ *      回退到原有 OAuth2 路径（静默续期令牌 → REST 读未读），避免单点失效。
  *
- * v0.10.0 跨浏览器兼容：
- *   - 令牌获取统一迁移到 shared/gmail-oauth.js（基于 chrome.identity.launchWebAuthFlow，
- *     同时兼容 Chrome 与 Microsoft Edge）。
- *   - 移除对 chrome.identity.getAuthToken 的依赖——该 API 在 Edge 上不被支持，
- *     导致 Gmail 在 Edge 里始终无法检查。
- *   - 后台定时检查优先读取持久化的缓存令牌（chrome.storage.local），令牌过期时
- *     先尝试**静默续期**（interactive=false + prompt=none，绝不开标签、不弹授权页，
- *     符合 AGENTS 规则 1/2）；仅当静默续期也失败时返回 needsAuth，交由上层引导用户手动同步授权。
+ * 历史：v0.10.0 跨浏览器兼容，令牌获取统一迁移到 shared/gmail-oauth.js
+ *   （基于 chrome.identity.launchWebAuthFlow，兼容 Chrome 与 Microsoft Edge），
+ *   移除对 Edge 不受支持的 chrome.identity.getAuthToken 依赖；
+ *   后台定时检查优先读取持久化缓存令牌，过期时先尝试静默续期（interactive=false
+ *   + prompt=none，绝不开标签、不弹授权窗，符合 AGENTS 规则 1/2）。
  */
 
 import { createLogger } from '../shared/debug.js';
@@ -19,79 +21,176 @@ import { resolveGmailToken, clearGmailToken } from '../shared/gmail-oauth.js';
 
 const logger = createLogger('provider-gmail');
 
-export async function probeGmail(_options = {}) {
+export async function probeGmail(options = {}) {
   const config = PROVIDER_CONFIG['gmail'];
 
   logger.info('开始探测 Gmail 未读接口');
 
-  // 1. 获取有效 OAuth2 访问令牌。后台安全路径：缓存有效则直用；缓存过期/缺失且曾
-  //    授权过时先尝试**静默续期**（interactive=false + prompt=none），全程不开标签、
-  //    不弹授权窗（AGENTS 规则 1/2）。仅当续期也失败时才返回 needsAuth 引导手动授权。
-  const resolved = await resolveGmailToken({ allowSilentRenew: true });
-  const token = resolved.token;
-  if (!token) {
-    logger.warn('Gmail 无有效令牌，静默续期失败，需用户手动同步授权');
-    return {
-      provider: 'gmail',
-      providerName: config.name,
-      timestamp: new Date().toISOString(),
-      authVerified: false,
-      needsAuth: true,
-      allFailed: true,
-      session: { sidObtained: false, loggedIn: false, source: 'oauth2' },
-      results: [],
-      error: 'Gmail not authorized (静默续期失败，需手动同步授权一次)',
-      needsManualAuth: true,
-      renewalAttempted: !!resolved.renewalAttempted,
-      renewalFailed: !!resolved.renewalFailed,
-      renewalReason: resolved.reason || null,
-      hadToken: !!resolved.hadToken,
-    };
+  // 按用户启用的端点顺序逐个探测：atom_feed（cookie 路径，无需令牌）与 gmail_api
+  // （OAuth2 REST）互为独立候选，前者被风控/废弃时自动落到后者。
+  const enabledNames = options.endpointNames?.length
+    ? options.endpointNames
+    : config.probeEndpoints?.map((e) => e.name) || ['atom_feed', 'gmail_api'];
+  const atomFirst = enabledNames.includes('atom_feed')
+    ? ['atom_feed', ...enabledNames.filter((n) => n !== 'atom_feed')]
+    : enabledNames;
+
+  for (const epName of atomFirst) {
+    if (epName === 'atom_feed') {
+      const atomResult = await probeGmailAtomFeed();
+      if (atomResult.success) {
+        logger.info(`Gmail Atom feed 探测成功: unread=${atomResult.unreadCount}`);
+        return {
+          provider: 'gmail',
+          providerName: config.name,
+          timestamp: new Date().toISOString(),
+          authVerified: true,
+          needsAuth: false,
+          allFailed: false,
+          session: { sidObtained: true, loggedIn: true, source: 'cookie' },
+          results: [
+            {
+              endpointName: 'atom_feed',
+              success: true,
+              unreadCount: atomResult.unreadCount,
+              httpStatus: 200,
+            },
+          ],
+          unreadCount: atomResult.unreadCount,
+          newEmails: [],
+        };
+      }
+      logger.info('Gmail Atom feed 不可用，尝试下一候选端点');
+      continue;
+    }
+
+    if (epName === 'gmail_api') {
+      // OAuth2 路径：后台安全——缓存有效则直用，过期时先**静默续期**（interactive=false
+      // + prompt=none，绝不开标签、不弹授权窗，AGENTS 规则 1/2），仅续期也失败才
+      // 返回 needsAuth 引导手动授权。
+      const resolved = await resolveGmailToken({ allowSilentRenew: true });
+      const token = resolved.token;
+      if (!token) {
+        logger.warn('Gmail 无有效令牌，静默续期失败，需用户手动同步授权');
+        return {
+          provider: 'gmail',
+          providerName: config.name,
+          timestamp: new Date().toISOString(),
+          authVerified: false,
+          needsAuth: true,
+          allFailed: true,
+          session: { sidObtained: false, loggedIn: false, source: 'oauth2' },
+          results: [],
+          error: 'Gmail not authorized (OAuth 静默续期失败，需手动同步授权一次)',
+          needsManualAuth: true,
+          renewalAttempted: !!resolved.renewalAttempted,
+          renewalFailed: !!resolved.renewalFailed,
+          renewalReason: resolved.reason || null,
+          hadToken: !!resolved.hadToken,
+        };
+      }
+
+      const result = await fetchGmailUnread(token);
+      if (result.success) {
+        logger.info(`Gmail 探测成功: unread=${result.unreadCount}`);
+        return {
+          provider: 'gmail',
+          providerName: config.name,
+          timestamp: new Date().toISOString(),
+          authVerified: true,
+          needsAuth: false,
+          allFailed: false,
+          session: { sidObtained: true, loggedIn: true, source: 'oauth2' },
+          results: [
+            {
+              endpointName: 'gmail_api',
+              success: true,
+              unreadCount: result.unreadCount,
+              httpStatus: 200,
+            },
+          ],
+          unreadCount: result.unreadCount,
+          newEmails: result.newEmails || [],
+        };
+      }
+
+      logger.warn(`Gmail 探测失败: ${result.error}`);
+      // 仅当令牌确实失效（401 / 无效凭据 / scope 不足）时才清空缓存令牌并引导重授权。
+      // Gmail API 未启用 / 配额受限等 403 属项目配置问题，令牌仍有效，不清令牌也不弹授权，
+      // 避免「授权成功 → 又判失效 → 反复弹窗」的死循环。
+      if (result.tokenInvalid) {
+        await clearGmailToken();
+      }
+      return {
+        provider: 'gmail',
+        providerName: config.name,
+        timestamp: new Date().toISOString(),
+        authVerified: false,
+        needsAuth: result.error?.includes('auth') || result.tokenInvalid || false,
+        allFailed: true,
+        session: { sidObtained: true, loggedIn: true, source: 'oauth2' },
+        results: [],
+        error: result.error,
+      };
+    }
+
+    logger.warn(`Gmail 未知端点名: ${epName}，跳过`);
   }
 
-  // 2. 调用 Gmail API 获取未读数
-  const result = await fetchGmailUnread(token);
+  // 用户启用了端点但均无匹配项（如只勾了未知名字）
+  return {
+    provider: 'gmail',
+    providerName: config.name,
+    timestamp: new Date().toISOString(),
+    authVerified: false,
+    needsAuth: false,
+    allFailed: true,
+    session: { sidObtained: false, loggedIn: false, source: 'cookie' },
+    results: [],
+    error: 'Gmail 无可用探测端点',
+  };
+}
 
-  if (result.success) {
-    logger.info(`Gmail 探测成功: unread=${result.unreadCount}`);
-    return {
-      provider: 'gmail',
-      providerName: config.name,
-      timestamp: new Date().toISOString(),
-      authVerified: true,
-      needsAuth: false,
-      allFailed: false,
-      session: { sidObtained: true, loggedIn: true, source: 'oauth2' },
-      results: [
-        {
-          endpointName: 'gmail_api',
-          success: true,
-          unreadCount: result.unreadCount,
-          httpStatus: 200,
-        },
-      ],
-      unreadCount: result.unreadCount,
-      newEmails: result.newEmails || [],
-    };
-  } else {
-    logger.warn(`Gmail 探测失败: ${result.error}`);
-    // 仅当令牌确实失效（401 / 无效凭据 / scope 不足）时才清空缓存令牌并引导重授权。
-    // Gmail API 未启用 / 配额受限等 403 属项目配置问题，令牌仍有效，不清令牌也不弹授权，
-    // 避免「授权成功 → 又判失效 → 反复弹窗」的死循环。
-    if (result.tokenInvalid) {
-      await clearGmailToken();
+/**
+ * Atom feed 探测（cookie 路径）。
+ * 直接 fetch Google 隐藏 Atom feed，浏览器登录态 Cookie 自动附带（credentials:'include'），
+ * 无需任何 token。响应 XML 的 <fullcount> 标签即全邮箱精确未读数（非仅返回的 ~20 条 entry）。
+ *
+ * 端点 URL 取自 PROVIDER_CONFIG.gmail.probeEndpoints 中 name='atom_feed' 的条目，
+ * 保持与 163/QQ/USTC 一致的「配置驱动」风格；若配置缺失则回退到内置默认 URL。
+ *
+ * @returns {Promise<{success: boolean, unreadCount: number|null, error?: string}>}
+ */
+async function probeGmailAtomFeed() {
+  const config = PROVIDER_CONFIG['gmail'];
+  const atomEp = (config.probeEndpoints || []).find((e) => e.name === 'atom_feed');
+  const url = atomEp?.url || 'https://mail.google.com/mail/u/0/feed/atom';
+  try {
+    const response = await fetch(url, {
+      method: atomEp?.method || 'GET',
+      credentials: 'include',
+      headers: atomEp?.headers || { Accept: 'application/atom+xml, application/xml' },
+    });
+
+    if (!response.ok) {
+      // 401/403：Google 风控或端点已废弃（或用户浏览器无有效 Gmail 登录态）
+      logger.debug(`Atom feed 返回 ${response.status}，回退 OAuth2`);
+      return { success: false, unreadCount: null, error: `atom feed HTTP ${response.status}` };
     }
-    return {
-      provider: 'gmail',
-      providerName: config.name,
-      timestamp: new Date().toISOString(),
-      authVerified: false,
-      needsAuth: result.error?.includes('auth') || result.tokenInvalid || false,
-      allFailed: true,
-      session: { sidObtained: true, loggedIn: true, source: 'oauth2' },
-      results: [],
-      error: result.error,
-    };
+
+    const text = await response.text();
+    const m = text.match(/<fullcount>(\d+)<\/fullcount>/);
+    if (!m) {
+      // 200 但无 fullcount 标签（端点响应结构变更）→ 视为不可用，回退 OAuth2
+      logger.debug('Atom feed 响应缺少 <fullcount>，回退 OAuth2');
+      return { success: false, unreadCount: null, error: 'atom feed 缺少 fullcount' };
+    }
+
+    return { success: true, unreadCount: parseInt(m[1], 10) };
+  } catch (err) {
+    // 网络层错误（中国大陆网络 / 未登录）：不清令牌，下次检查自动重试
+    logger.debug(`Atom feed 网络错误: ${err.message}`);
+    return { success: false, unreadCount: null, error: err.message };
   }
 }
 

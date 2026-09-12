@@ -1,7 +1,7 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-08 ｜ 当前版本：v1.0.1
+> 最后更新：2026-09-12 ｜ 当前版本：v1.0.1
 
 ---
 
@@ -350,4 +350,67 @@ console.log(logs);
 | 163 | POST | `https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}` | Cookie + sid | ✅ v1.0.1 修复 |
 | QQ | GET | `https://wx.mail.qq.com/list/maillist?sid={sid}...` | Cookie + sid | ✅ |
 | USTC | GET | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | Cookie + sid | ✅ |
-| Gmail | GET | `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread` | OAuth2 Bearer token | ✅ |
+| Gmail | GET | `https://mail.google.com/mail/u/0/feed/atom` | session Cookie（零 token） | ✅ 新增 |
+| Gmail | GET | `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread` | OAuth2 Bearer token | ✅ fallback |
+
+---
+
+## 🟢 P1：Gmail Atom feed 网页逆向——绕过 Google API 商业授权（v0.11.0 新增）
+
+### 背景
+Gmail 官方 REST API 需 Google Cloud 项目商业授权（Gmail API enablement），审批麻烦。
+改用「网页逆向」思路：用户浏览器登录过 Gmail 后，直接调 Google 隐藏 Atom feed，
+靠 session Cookie 认证，零 token、零 API key。
+
+### 实证结果（2026-09-12）
+- **服务端存活探测**（无 cookie）：`/mail/u/0/feed/atom` 与 `/mail/feed/atom` 均返回
+  `HTTP 401 + www-authenticate: BASIC realm="mail.google.com"`（而非 404），
+  证明端点路由仍存在于 Google 边缘（GSE），只是要求认证。
+- **浏览器登录态探测**（用户 Chrome Console 实测）：
+  `fetch('https://mail.google.com/mail/u/0/feed/atom', {credentials:'include'})`
+  → `status 200`，响应 `<?xml ...?><feed version="0.3" ...><title>Gmail - Inbox for
+  lazebird@gmail.com</title>...<fullcount>0</fullcount>`。
+  即 **Atom feed 在 2026 年当前仍可用**，`<fullcount>` 为全邮箱精确未读数。
+
+### 实现
+`provider-gmail.js` 改造为双路径探测：
+1. **路径 1（优先）Atom feed + Cookie**：`probeGmailAtomFeed()` 直接 fetch 隐藏端点，
+   浏览器登录态 Cookie 自动附带（credentials:'include'），解析 XML 的 `<fullcount>`。
+   端点 URL 由 `PROVIDER_CONFIG.gmail.probeEndpoints` 中 `name='atom_feed'` 的条目驱动
+   （配置缺失时回退内置默认 URL）。
+2. **路径 2（fallback）OAuth2 REST**：Atom feed 返回 401/403（风控/废弃）或 200 但缺
+   `<fullcount>`（结构变更）时，自动落到原有 `resolveGmailToken` 静默续期 +
+   `fetchGmailUnread` 路径，避免隐藏端点单点失效。
+
+### 修改文件
+- `extension/providers/provider-gmail.js` — 新增 `probeGmailAtomFeed()`；
+  `probeGmail()` 改为按 `enabledEndpoints` 顺序逐个探测（atom_feed 优先、gmail_api fallback），
+  保留 OAuth2 全套逻辑与错误分类（tokenInvalid 判定不变）
+- `extension/shared/constants.js` — `PROVIDER_CONFIG.gmail.probeEndpoints` 填入
+  `atom_feed` 端点；`DEFAULT_SETTINGS.enabledEndpoints.gmail` 改为 `['atom_feed','gmail_api']`；
+  `API_PATTERN_KEYS` 新增 `CAPTURED_USTC`/`CAPTURED_GMAIL`（见下条）
+- `extension/shared/api-patterns.js` — 存储键从「qq/非qq 二分」改为
+  `PROVIDER_PATTERN_KEYS` 显式 provider→key 映射，未映射的 provider 不读不写
+- `extension/shared/ui-meta.js` — `ENDPOINT_OPTIONS.gmail` 增加 `atom_feed` 勾选项
+- `extension/manifest.json` — `host_permissions` 加 `https://mail.google.com/*`
+  （SW 跨源 fetch 附带 mail.google.com Cookie 所必需）
+
+### 隔离性（不影响其他邮箱）
+- 163/QQ/USTC 的捕获/回放链路零改动：`PROVIDER_PATTERN_KEYS` 显式映射下，
+  `netease_163`→`CAPTURED_163`、`qq`→`CAPTURED_QQ` 行为与旧二分一致；
+  **USTC 从与 163 共享 `CAPTURED_163` 键改为独立 `CAPTURED_USTC` 键**（修遗留 bug，
+  各邮箱捕获模式不再串键，且 USTC 的 Coremail 格式本就独立，行为更正确）
+- Gmail 走独立固定端点（atom feed），**不进入捕获/回放链路**，与 sid/Cookie 模型解耦
+- `service-worker.js` 的 `runSWApiProbe` switch 未改动，`probeGmail` 内部完成双路径
+
+### 风险与降级
+- **非官方端点**：Google 随时可能 403/废弃 Atom feed（2026-01 有文章称 2023-12 已弃用
+  公共 feed，但 2026-08 实测仍可用，状态有争议）——atom feed 失败自动落 OAuth2，不会中断
+- **风控**：轮询复用现有 alarm 间隔（≥60s），不单独加密；失效时标记「需手动同步」
+  引导用户打开 Gmail（符合 AGENTS 规则 1）
+- **中国大陆网络**：atom feed 与 OAuth2 同样受 GFW 影响，网络错误不清 token、下次自动重试
+
+### 验证
+- [x] 服务端端点存活（401 非 404）
+- [x] 浏览器登录态 fetch 返回 200 + `<fullcount>`
+- [ ] 扩展加载后 SW 侧 atom feed 直调（需在浏览器里跑一次 Gmail 检查确认）

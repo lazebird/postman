@@ -22,7 +22,8 @@
     "https://mail.qq.com/*",
     "https://*.qq.com/*",
     "http://mail.ustc.edu.cn/*",
-    "https://mail.ustc.edu.cn/*"
+    "https://mail.ustc.edu.cn/*",
+    "https://mail.google.com/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

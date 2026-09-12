@@ -49,15 +49,34 @@ function normalizeSid(text, knownSids) {
   return result;
 }
 
+// provider → 存储键 显式映射（各邮箱的捕获 API 模式独立存储，互不串键）。
+// netease_163 / qq / ustc 依赖「内容脚本捕获 + {sid} 占位符回放」；
+// gmail 走公开 Atom feed（固定 URL + Cookie 鉴权），无需捕获回放，键仅为完整对称而预留。
+const PROVIDER_PATTERN_KEYS = {
+  netease_163: API_PATTERN_KEYS.CAPTURED_163,
+  qq: API_PATTERN_KEYS.CAPTURED_QQ,
+  ustc: API_PATTERN_KEYS.CAPTURED_USTC,
+  gmail: API_PATTERN_KEYS.CAPTURED_GMAIL,
+};
+
+/** 取 provider 对应的 API 模式存储键（未映射的 provider 返回 null，不读不写） */
+function patternKeyFor(provider) {
+  return PROVIDER_PATTERN_KEYS[provider] || null;
+}
+
 /**
  * 保存捕获的 API 模式
- * @param {string} provider - 'netease_163' 或 'qq'
+ * @param {string} provider - 'netease_163' | 'qq' | 'ustc' | 'gmail'
  * @param {Array<Object>} patterns - 捕获的请求模式数组
  */
 export async function saveApiPatterns(provider, patterns) {
   if (!provider || !patterns || !patterns.length) return false;
 
-  const key = provider === 'qq' ? API_PATTERN_KEYS.CAPTURED_QQ : API_PATTERN_KEYS.CAPTURED_163;
+  const key = patternKeyFor(provider);
+  if (!key) {
+    logger.warn(`provider ${provider} 无 API 模式存储键，跳过保存`);
+    return false;
+  }
 
   try {
     // 读取当前已知的 sid 用于替换（统一走 session-cache）
@@ -105,9 +124,11 @@ export async function saveApiPatterns(provider, patterns) {
 
 /**
  * 读取已捕获的 API 模式
+ * 未映射的 provider（如未来的新邮箱）返回空数组，不读不写。
  */
 export async function getApiPatterns(provider) {
-  const key = provider === 'qq' ? API_PATTERN_KEYS.CAPTURED_QQ : API_PATTERN_KEYS.CAPTURED_163;
+  const key = patternKeyFor(provider);
+  if (!key) return [];
   try {
     const data = await chrome.storage.local.get(key);
     return Array.isArray(data[key]) ? data[key] : [];
@@ -119,9 +140,11 @@ export async function getApiPatterns(provider) {
 
 /**
  * 清除已捕获的 API 模式
+ * 未映射的 provider 返回 false（无键可清）。
  */
 export async function clearApiPatterns(provider) {
-  const key = provider === 'qq' ? API_PATTERN_KEYS.CAPTURED_QQ : API_PATTERN_KEYS.CAPTURED_163;
+  const key = patternKeyFor(provider);
+  if (!key) return false;
   try {
     await chrome.storage.local.remove(key);
     return true;

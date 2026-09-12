@@ -60,7 +60,14 @@ export const ENDPOINT_OPTIONS = {
     { name: 'ustc_getallfolders', zh: '获取所有文件夹', en: 'Get all folders' },
     { name: 'ustc_getattrs', zh: '获取用户属性', en: 'Get user attributes' },
   ],
-  gmail: [{ name: 'gmail_api', zh: 'Gmail REST API', en: 'Gmail REST API' }],
+  gmail: [
+    {
+      name: 'atom_feed',
+      zh: 'Gmail Atom Feed（Cookie）',
+      en: 'Gmail Atom Feed (Cookie)',
+    },
+    { name: 'gmail_api', zh: 'Gmail REST API', en: 'Gmail REST API' },
+  ],
 };
 
 /** 端点 label 本地化：兼容旧 `ep.label` 用法 */
