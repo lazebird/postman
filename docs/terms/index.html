@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-lang="zh" data-title-zh="服务条款 — Mail Notifier" data-title-en="Terms of Service — Mail Notifier">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -14,13 +14,17 @@
     <header class="site-header">
       <div class="wrap">
         <a class="brand" href="../">
-          <img src="../mail-notifier/assets/icon.png" alt="Mail Notifier 图标" />
+          <img src="../mail-notifier/assets/icon.png" alt="Mail Notifier" />
           <span>Mail Notifier</span>
         </a>
-        <nav class="nav" aria-label="站点导航">
-          <a href="../">首页</a>
-          <a href="../privacy/">隐私政策</a>
-          <a href="./" aria-current="page">服务条款</a>
+        <div class="lang-switch" role="group" data-aria-label-zh="语言切换" data-aria-label-en="Language switch" aria-label="语言切换">
+          <button type="button" id="btn-zh" aria-pressed="true">中文</button>
+          <button type="button" id="btn-en" aria-pressed="false">English</button>
+        </div>
+        <nav class="nav" data-aria-label-zh="站点导航" data-aria-label-en="Site navigation" aria-label="站点导航">
+          <a href="../" data-zh="首页" data-en="Home">首页</a>
+          <a href="../privacy/" data-zh="隐私政策" data-en="Privacy Policy">隐私政策</a>
+          <a href="./" aria-current="page" data-zh="服务条款" data-en="Terms of Service">服务条款</a>
         </nav>
       </div>
     </header>
@@ -28,15 +32,14 @@
     <main>
       <div class="wrap">
         <div class="doc-header">
-          <h1>服务条款 · Terms of Service</h1>
+          <h1 data-zh="服务条款" data-en="Terms of Service">服务条款</h1>
           <p class="meta">
-            适用于浏览器扩展 <strong>Mail Notifier</strong>（MV3）· 生效日期：2025-01-01 · 最近更新：2025-01-01
+            <span
+              data-zh="适用于浏览器扩展 Mail Notifier（MV3）· 生效日期：2025-01-01 · 最近更新：2025-01-01"
+              data-en="For the Mail Notifier browser extension (MV3) · Effective: 2025-01-01 · Last updated: 2025-01-01"
+              >适用于浏览器扩展 <strong>Mail Notifier</strong>（MV3）· 生效日期：2025-01-01 · 最近更新：2025-01-01</span
+            >
           </p>
-        </div>
-
-        <div class="lang-switch" role="group" aria-label="语言切换">
-          <button type="button" id="btn-zh" aria-pressed="true">中文</button>
-          <button type="button" id="btn-en" aria-pressed="false">English</button>
         </div>
 
         <!-- ============ 中文 ============ -->
@@ -77,7 +80,7 @@
 
           <h2>6. 隐私</h2>
           <p>
-            本扩展的数据处理方式详见 <a href="../privacy/">隐私政策</a>。核心原则为：所有数据仅保存在您本机，
+            本扩展的数据处理方式详见 <a href="../privacy/" data-zh="隐私政策" data-en="Privacy Policy">隐私政策</a>。核心原则为：所有数据仅保存在您本机，
             不上传、不共享、不出售。
           </p>
 
@@ -211,11 +214,11 @@
 
     <footer class="site-footer">
       <div class="wrap">
-        <span>© <span id="year">2025</span> Mail Notifier · 本项目开源维护</span>
-        <nav aria-label="页脚导航">
-          <a href="../">首页</a>
-          <a href="../privacy/">隐私政策</a>
-          <a href="./">服务条款</a>
+        <span>© <span id="year">2025</span> Mail Notifier · <span data-zh="本项目开源维护" data-en="Open source project">本项目开源维护</span></span>
+        <nav data-aria-label-zh="页脚导航" data-aria-label-en="Footer navigation" aria-label="页脚导航">
+          <a href="../" data-zh="首页" data-en="Home">首页</a>
+          <a href="../privacy/" data-zh="隐私政策" data-en="Privacy Policy">隐私政策</a>
+          <a href="./" data-zh="服务条款" data-en="Terms of Service">服务条款</a>
         </nav>
       </div>
     </footer>

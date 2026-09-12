@@ -146,7 +146,10 @@
 | 服务条款 | `/terms/`、`/mail-notifier/terms/` | `docs/terms/index.html`、`docs/mail-notifier/terms/index.html` |
 
 - 发布工作流：`.github/workflows/pages.yml`（push `docs/**` 或手动 `workflow_dispatch` 触发）；
-- 站点为纯静态站点，无构建步骤、无外部依赖，支持深色模式与中英双语切换；
+- 站点为纯静态站点，无构建步骤、无外部依赖，支持深色模式与**全站中英双语切换**
+  （首次按浏览器语言自动选择，切换结果记忆在 `localStorage`，无 JS 时默认渲染中文）；
+- 页面文案通过 `data-zh` / `data-en` 属性声明，隐私政策与服务条款为两套完整正文
+  （`#doc-zh` / `#doc-en`），统一由 `docs/assets/lang.js` 切换，写法见 [`docs/README.md`](docs/README.md)；
 - 首次使用需在 GitHub 仓库 **Settings → Pages → Source 选择「GitHub Actions」**，随后运行一次工作流；
 - 站点为 GitHub 项目页面，路径前缀是**仓库名**，即
   `https://<owner>.github.io/postman/`、`https://<owner>.github.io/postman/privacy/`；
