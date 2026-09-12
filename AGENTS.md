@@ -143,7 +143,7 @@
 此策略避免了「猜测接口格式」的不确定性，利用页面打开时的真实 API 调用来
 「学习」正确格式，实现后台无感检查。
 
-### Gmail（Atom feed + 会话 Cookie，v0.11.0 起）
+### Gmail（Atom feed + 会话 Cookie，v1.0.2 起）
 
 Gmail **不走**上述捕获/回放链路，也不依赖 OAuth / Google Cloud 商业授权：
 

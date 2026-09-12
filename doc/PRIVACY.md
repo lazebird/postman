@@ -58,7 +58,7 @@ Mail Notifier 是一款邮件未读提醒扩展，支持 **163 / QQ / USTC / Gma
 | `alarms` | 定时后台静默检查新邮件 |
 | `notifications` | 发送新邮件桌面通知 |
 | `tabs` | 仅用于识别并复用您**已打开**的邮箱标签（绝不自动开标签） |
-| ~~`identity`~~ | ~~Gmail OAuth2 授权（只读）~~ —— **已废弃，v0.11.0 移除**（Gmail 改走隐藏 Atom feed + 会话 Cookie，不再申请该权限） |
+| ~~`identity`~~ | ~~Gmail OAuth2 授权（只读）~~ —— **已废弃，v1.0.2 移除**（Gmail 改走隐藏 Atom feed + 会话 Cookie，不再申请该权限） |
 | `scripting` / `declarativeNetRequest` | 注入脚本 / 网络规则以支撑混合检查（详见说明） |
 
 ## 9. 安全

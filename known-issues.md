@@ -1,7 +1,7 @@
 # Known Issues & Solutions
 
 > 本文档记录项目已知问题、根因分析及解决方案。
-> 最后更新：2026-09-12 ｜ 当前版本：v1.0.1
+> 最后更新：2026-09-12 ｜ 当前版本：v1.0.2
 
 ---
 
@@ -30,7 +30,7 @@
 - ⚠️ 需要用户在浏览器中先登录，然后点击「同步USTC」按钮
 
 ### Gmail 邮箱
-- ✅ Atom feed + 浏览器 Cookie 直调（v0.11.0 起，零 token、无需 Google Cloud 商业授权）
+- ✅ Atom feed + 浏览器 Cookie 直调（v1.0.2 起，零 token、无需 Google Cloud 商业授权）
 - ✅ 端点：`GET https://mail.google.com/mail/u/0/feed/atom`（`<fullcount>` 即全邮箱未读数）
 - ⚠️ 需要浏览器已登录 Gmail（mail.google.com）；未登录时标记「需手动同步」
 - 📌 原 OAuth2 / gmail.googleapis.com REST 路径已彻底移除（2026-09-12）
@@ -38,7 +38,7 @@
 ---
 
 
-## 🟡 P2：（已随 v0.11.0 OAuth2 移除而失效，历史存档）Gmail API "Failed to fetch" 网络层错误
+## 🟡 P2：（已随 v1.0.2 OAuth2 移除而失效，历史存档）Gmail API "Failed to fetch" 网络层错误
 
 ### 问题描述
 后台检查时出现 `Gmail API fetch failed: Failed to fetch`，属于 TypeError（网络层失败），非 HTTP 401/403。中国大陆用户频繁遇到此问题（Great Firewall 阻断 / VPN 不稳定）。
@@ -229,8 +229,8 @@ WASM 文件已加载，确认 QQ 新版使用 WebAssembly 技术。
 - [x] **163 SW API 打通**（已验证，unread=11）
 - [x] **QQ SW API 打通**（已验证，unread=7）
 - [x] **USTC SW API 打通**（已验证，unread=2）
-- [x] **Gmail Atom feed 接入**（v0.11.0，Cookie 直调，无需 OAuth 商业授权）
-- ~~Gmail REST API 接入（OAuth2）~~（v0.11.0 已移除，由 Atom feed 替代）
+- [x] **Gmail Atom feed 接入**（v1.0.2，Cookie 直调，无需 OAuth 商业授权）
+- ~~Gmail REST API 接入（OAuth2）~~（v1.0.2 已移除，由 Atom feed 替代）
 - [ ] 接口失效自愈 / 热更规则
 - [ ] UI 完善（多账户统一显示、通知策略）
 
@@ -316,11 +316,11 @@ console.log(logs);
 | 163 | POST | `https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}` | Cookie + sid | ✅ v1.0.1 修复 |
 | QQ | GET | `https://wx.mail.qq.com/list/maillist?sid={sid}...` | Cookie + sid | ✅ |
 | USTC | GET | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | Cookie + sid | ✅ |
-| Gmail | GET | `https://mail.google.com/mail/u/0/feed/atom` | session Cookie（零 token） | ✅ v0.11.0 |
+| Gmail | GET | `https://mail.google.com/mail/u/0/feed/atom` | session Cookie（零 token） | ✅ v1.0.2 |
 
 ---
 
-## 🟢 P1：Gmail Atom feed 网页逆向——绕过 Google API 商业授权（v0.11.0 新增）
+## 🟢 P1：Gmail Atom feed 网页逆向——绕过 Google API 商业授权（v1.0.2 新增）
 
 ### 背景
 Gmail 官方 REST API 需 Google Cloud 项目商业授权（Gmail API enablement），审批麻烦。

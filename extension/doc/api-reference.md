@@ -214,7 +214,7 @@ sid 从 URL 参数中提取：`http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid
 
 ## 4. Gmail（gmail）
 
-> v0.11.0 起改为 Atom feed + 浏览器 Cookie 直调，原 OAuth2 / gmail.googleapis.com REST
+> v1.0.2 起改为 Atom feed + 浏览器 Cookie 直调，原 OAuth2 / gmail.googleapis.com REST
 > 路径已彻底移除（无需 Google Cloud 商业授权）。
 
 ### 4.1 认证方式
@@ -280,5 +280,5 @@ sid 从 URL 参数中提取：`http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid
 | v1.0.1 | 163 body 移除 `<string name="sentDate">2:</string>` 过滤器（遗漏旧未读邮件） |
 | v1.0.1 | 163 URL/Referer 移除 `&df=mail163_letter` 参数（页面已不再使用该参数） |
 | v1.0.1 | **修复** `parse163Response` 解析 Bug：改用括号计数替代 `indexOf(']')`，避免嵌套结构截断导致已读邮件误判为未读 |
-| v0.11.0 | Gmail 改为 Atom feed + Cookie 直调（`mail.google.com/mail/u/0/feed/atom`），彻底移除 OAuth2 / REST 路径 |
+| v1.0.2 | Gmail 改为 Atom feed + Cookie 直调（`mail.google.com/mail/u/0/feed/atom`），彻底移除 OAuth2 / REST 路径 |
 | v0.9.4 | CSP 问题修复，API 拦截器分离到独立文件 |

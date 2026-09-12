@@ -65,7 +65,7 @@ Cookie 附加，保证后台无页面时也能按真实会话格式发起未读�
 
 ### identity 理由 \*
 
-**已废弃，v0.11.0 移除**：本扩展已不再申请 `identity` 权限。Gmail 探测改为隐藏 Atom feed
+**已废弃，v1.0.2 移除**：本扩展已不再申请 `identity` 权限。Gmail 探测改为隐藏 Atom feed
 （`mail.google.com/mail/u/0/feed/atom`）+ 浏览器会话 Cookie 直调，零 token、无需 Google Cloud OAuth 商业授权；
 失败时标记「需手动同步」引导用户登录。
 

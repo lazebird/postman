@@ -1,7 +1,7 @@
 # GitHub 同步与 Pages 部署指南
 
 > 面向 **扩展商店上架（隐私政策 URL / 服务条款 URL）** 场景的最小化部署指南。
-> 注：v0.11.0 起 Gmail 改走隐藏 Atom feed + 浏览器会话 Cookie，不再使用 Google OAuth，无需 Google Cloud OAuth 品牌验证。
+> 注：v1.0.2 起 Gmail 改走隐藏 Atom feed + 浏览器会话 Cookie，不再使用 Google OAuth，无需 Google Cloud OAuth 品牌验证。
 > 核心结论：**不需要把整个项目源码同步到 GitHub**，只需要一个公开可访问的静态站点。
 
 ---
@@ -23,7 +23,7 @@ Google Cloud Console 的 **OAuth 同意屏幕（OAuth consent screen）** 在「
 
 1. **隐私政策是硬性要求**，必须在应用主页**同一域名**下可匿名访问（无需登录、无 JS 阻断）。
 2. **授权域名**只需填顶层域名（如 `github.io`），不需要填完整路径。
-3. ~~**敏感数据（Gmail 受限 scope）**~~ —— **已废弃，v0.11.0 移除**：Gmail 改走隐藏 Atom feed + 浏览器会话 Cookie，
+3. ~~**敏感数据（Gmail 受限 scope）**~~ —— **已废弃，v1.0.2 移除**：Gmail 改走隐藏 Atom feed + 浏览器会话 Cookie，
    不再申请受限 scope，无需 Google 品牌验证 + 数据使用审核。
    （历史要求：审核会检查隐私政策是否声明收集的数据范围与用途、遵循 Google API Services User Data Policy
    （含 Limited Use 限制）、数据不转售 / 不用于广告 / 画像 / AI 训练、数据删除方式与联系方式；

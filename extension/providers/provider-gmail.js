@@ -1,7 +1,7 @@
 /**
  * provider-gmail.js - Gmail 邮箱未读接口探测实现
  *
- * 仅保留 Atom feed（cookie）单路径（v0.11.0 起）。
+ * 仅保留 Atom feed（cookie）单路径（v1.0.2 起）。
  *   通过 SW 跨源 fetch + credentials:'include' 附带浏览器登录态 Cookie，
  *   直调 Google 隐藏 Atom feed（<fullcount> 即全邮箱精确未读数），
  *   零 token、无需 OAuth 商业授权。用户浏览器登录过 Gmail 即可用。

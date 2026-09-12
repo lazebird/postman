@@ -112,7 +112,7 @@
 - [x] **163 SW API 打通**（实测 unread=11）
 - [x] **QQ SW API 打通**（实测 unread=7）
 - [x] **USTC SW API 打通**（实测 unread=2）
-- [x] **Gmail Atom feed 接入**（v0.11.0，浏览器 Cookie 直调隐藏 Atom feed，零 token、无需 Google Cloud 商业授权；原 OAuth2 路径已彻底移除）
+- [x] **Gmail Atom feed 接入**（v1.0.2，浏览器 Cookie 直调隐藏 Atom feed，零 token、无需 Google Cloud 商业授权；原 OAuth2 路径已彻底移除）
 - [x] **新邮件通知系统**（检测变化并发送桌面通知）
 - [ ] 完整 UI 与生产功能
 - [ ] 多邮箱统一通知
