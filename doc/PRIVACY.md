@@ -15,7 +15,7 @@ Mail Notifier 是一款邮件未读提醒扩展，支持 **163 / QQ / USTC / Gma
 扩展仅在您于**本机浏览器**登录上述邮箱并授权的情况下，读取完成邮件提醒所必需的**最小数据**：
 
 - **邮箱账户的会话状态（sid）与未读计数**：用于向 webmail 查询是否有新邮件并展示角标 / 发送桌面通知；
-- **Gmail 账户数据**：经 Google 官方 REST API 以只读权限（`gmail.readonly`）读取未读邮件元数据；
+- **Gmail 账户数据**：经隐藏 Atom feed（`mail.google.com/mail/u/0/feed/atom`）读取未读邮件元数据，依赖浏览器已登录 Gmail 的会话 Cookie，零 token；
 - **浏览器 Cookies（会话 Cookie）**：仅用于向您已登录的 webmail 发出本机请求以获取未读数。
 
 > 我们**不**读取、收集、存储您的邮件正文内容用于任何分析；仅使用未读元数据。
@@ -34,7 +34,7 @@ Mail Notifier 是一款邮件未读提醒扩展，支持 **163 / QQ / USTC / Gma
 
 ## 5. 第三方（Google）数据处理
 
-- **Gmail** 通过 Google 官方 OAuth2 流程授权，仅申请只读权限；
+- **Gmail** 通过隐藏 Atom feed 读取未读，依赖浏览器已登录 Gmail 的会话 Cookie，零 token、无需 Google Cloud OAuth 授权；
 - Gmail 相关数据的处理遵循 **Google API 服务条款** 与 **Google 隐私政策**；
 - 扩展不会将 Gmail 数据用于任何 Google 限制之外的目的。
 
@@ -58,7 +58,7 @@ Mail Notifier 是一款邮件未读提醒扩展，支持 **163 / QQ / USTC / Gma
 | `alarms` | 定时后台静默检查新邮件 |
 | `notifications` | 发送新邮件桌面通知 |
 | `tabs` | 仅用于识别并复用您**已打开**的邮箱标签（绝不自动开标签） |
-| `identity` | Gmail OAuth2 授权（只读） |
+| ~~`identity`~~ | ~~Gmail OAuth2 授权（只读）~~ —— **已废弃，v0.11.0 移除**（Gmail 改走隐藏 Atom feed + 会话 Cookie，不再申请该权限） |
 | `scripting` / `declarativeNetRequest` | 注入脚本 / 网络规则以支撑混合检查（详见说明） |
 
 ## 9. 安全

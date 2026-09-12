@@ -54,63 +54,26 @@ function isTabVisible(tabId) {
 }
 
 // ========== 状态标签页：单账户「检查」按钮 ==========
-// 普通账户走被动探测；Gmail 走「读缓存令牌 → 未授权则弹交互授权 → 再探测」链路，
-// 让状态页 Gmail 的「检查」在未授权时也能真正把令牌拿下来（用户主动点击，符合 AGENTS 规则 1）。
+// 统一走被动探测：SW 侧按 provider 执行（Gmail 为 Atom feed + 浏览器 Cookie，
+// 零 token、不弹授权、不开标签）。未读到未读数时展示原因并提示确认浏览器已登录。
 async function checkAccountCard(provider, btn) {
   btn.disabled = true;
   btn.textContent = '…';
   try {
-    if (provider === 'gmail') {
-      // 1) 先被动探测：仅读缓存令牌，不开标签 / 不弹窗
-      const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
-      const acc = probe?.results?.[0];
-      const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
+    const probe = await sendMessage({ type: 'testProvider', provider });
+    const acc = probe?.results?.[0];
+    const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
 
-      // 是否已持有有效 Gmail 令牌（来自当前状态，hasSid 对 gmail 即令牌存在性）
-      const status = await sendMessage({ type: 'getStatus' });
-      const accSt = status?.accountStatus?.find((a) => a.provider === 'gmail');
-      const hasToken = accSt?.hasSid === true;
-
-      // 2) 已读到未读数 → 成功，无需处理
-      // 3) 未读到未读数：
-      //    a) 无有效令牌（未授权）→ 用户主动点击，弹交互授权拿令牌后重新探测
-      //    b) 已有有效令牌但 API 探测失败（如 Gmail API 未启用 / 配额受限）→
-      //       重授权无济于事，直接展示具体原因，避免「授权→再失败→又弹窗」的死循环
-      if (unread == null) {
-        if (!hasToken) {
-          const auth = await sendMessage({ type: 'gmailAuthorize' });
-          if (auth?.success) {
-            await sendMessage({ type: 'testProvider', provider: 'gmail' });
-          } else {
-            // 授权未成功：把具体原因展示出来，避免状态页只停留在「需授权」却无任何线索
-            showProbeResult(t('Gmail 授权未完成', 'Gmail authorization incomplete'), {
-              success: false,
-              message: t(
-                'Gmail 授权失败或已取消，请检查下方原因后重试',
-                'Gmail authorization failed or cancelled. Check the details below and retry.'
-              ),
-              error: auth?.error || t('未知原因', 'unknown reason'),
-              needsManual: auth?.needsManual === true,
-            });
-          }
-        } else {
-          // 已有有效令牌但仍未读到未读数：展示 API 返回的具体原因，不再重复弹授权
-          showProbeResult(t('Gmail 检查失败', 'Gmail check failed'), {
-            success: false,
-            message: t(
-              '已持有 Gmail 授权令牌，但未能读取未读数',
-              'Has a Gmail token but could not read unread'
-            ),
-            error: acc?.error || t('请检查下方原因后处理', 'Check the reason below'),
-            hint: t(
-              '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。',
-              'If Gmail API access is restricted, enable Gmail API in the Google Cloud console and verify the OAuth redirect URI.'
-            ),
-          });
-        }
-      }
-    } else {
-      await sendMessage({ type: 'testProvider', provider });
+    if (unread == null && provider === 'gmail') {
+      // Gmail：Atom feed 失败（401/403/网络）→ 提示确认浏览器已登录 Gmail
+      showProbeResult(t('Gmail 检查失败', 'Gmail check failed'), {
+        success: false,
+        message: t(
+          '未能读取 Gmail 未读数，请确认浏览器已登录 Gmail（mail.google.com）',
+          'Could not read Gmail unread. Confirm the browser is signed in to Gmail.'
+        ),
+        error: acc?.error || t('请检查下方原因后处理', 'Check the reason below'),
+      });
     }
     await refreshStatus();
   } catch (err) {
@@ -512,7 +475,6 @@ function renderStatsGrid(status) {
     [t('163 API 模式', '163 API patterns'), `${status.apiPatternCounts?.netease_163 || 0}`],
     [t('QQ API 模式', 'QQ API patterns'), `${status.apiPatternCounts?.qq || 0}`],
     [t('USTC API 模式', 'USTC API patterns'), `${status.apiPatternCounts?.ustc || 0}`],
-    [t('Gmail API 模式', 'Gmail API patterns'), `${status.apiPatternCounts?.gmail || 0}`],
     [
       t('定时闹钟', 'Alarm'),
       status.alarmConfigured
@@ -607,9 +569,45 @@ function renderRecentChecks(status) {
 }
 
 // ========== 探测标签页 ==========
-// 同步会话
+// 同步会话：163/QQ/USTC 走内容脚本页面探测（开标签）；
+// Gmail 无内容脚本（Atom feed 走 SW + Cookie），「同步」= 直接 SW 探测读未读数，
+// 未读到则提示确认浏览器已登录 mail.google.com。
 async function syncSession(provider) {
   const providerLabel = PROVIDER_LABELS[provider] || provider;
+
+  // Gmail：SW 侧 Atom feed 探测（零 token、不弹授权、不开标签）
+  if (provider === 'gmail') {
+    showProbeResult(`${t('同步', 'Sync')} ${providerLabel}`, {
+      message: t('正在读取未读数...', 'Reading unread...'),
+    });
+    try {
+      const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
+      const acc = probe?.results?.[0];
+      const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
+      if (unread != null) {
+        showProbeResult(`${providerLabel} ${t('已授权', 'authorized')}`, {
+          success: true,
+          authVerified: acc?.authVerified === true,
+          unreadCount: unread,
+          message: `${t('同步成功，未读', 'Synced, unread')} ${unread} ${t('封', 'msgs')}`,
+        });
+      } else {
+        showProbeResult(`${providerLabel} ${t('同步失败', 'sync failed')}`, {
+          success: false,
+          message: t(
+            '未能读取 Gmail 未读数，请确认浏览器已登录 Gmail（mail.google.com）',
+            'Could not read Gmail unread. Confirm the browser is signed in to Gmail.'
+          ),
+          detail: acc?.error || null,
+        });
+      }
+      refreshStatus();
+    } catch (err) {
+      showProbeResult(`${providerLabel} ${t('同步失败', 'sync failed')}`, { error: err.message });
+    }
+    return;
+  }
+
   showProbeResult(`${t('同步', 'Sync')} ${providerLabel}`, {
     message: t('正在同步...', 'Syncing...'),
   });
@@ -619,38 +617,8 @@ async function syncSession(provider) {
     let msgType = 'probeContent163';
     if (provider === 'qq') msgType = 'probeContentQQ';
     else if (provider === 'ustc') msgType = 'probeContentUSTC';
-    else if (provider === 'gmail') msgType = 'gmailAuthorize';
 
     const r = await sendMessage({ type: msgType, openTab: true });
-
-    // Gmail 走 OAuth2 授权，返回扁平结果 { success, token }，无 probe 字段。
-    if (provider === 'gmail' && r?.success) {
-      showProbeResult(`${providerLabel} ${t('授权成功', 'authorized')}`, {
-        success: true,
-        message: t('Gmail 授权成功，正在读取未读数...', 'Gmail authorized, reading unread...'),
-      });
-      // 授权完成后触发一次后台探测，读取未读数
-      const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
-      const acc = probe?.results?.[0];
-      const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
-      showProbeResult(`${providerLabel} ${t('授权成功', 'authorized')}`, {
-        success: true,
-        authVerified: acc?.authVerified === true,
-        unreadCount: unread,
-        message:
-          unread != null
-            ? `${t('授权成功，未读', 'Authorized, unread')} ${unread} ${t('封', 'msgs')}`
-            : acc?.needsAuth
-              ? t(
-                  '已授权但未能读取未读数，请稍后重试',
-                  'Authorized but failed to read unread; retry later'
-                )
-              : t('Gmail 授权成功', 'Gmail authorized'),
-        detail: acc?.error || null,
-      });
-      refreshStatus();
-      return;
-    }
 
     if (r?.probe?.success) {
       const sid = r.probe.sid;
@@ -708,92 +676,42 @@ async function runPlanC(provider) {
   if (pre) pre.textContent = t('探测中...', 'Probing...');
   const providerLabel = PROVIDER_LABELS[provider] || provider;
 
-  // 根据提供商选择正确的消息类型
-  let msgType = 'probeContent163';
-  if (provider === 'qq') msgType = 'probeContentQQ';
-  else if (provider === 'ustc') msgType = 'probeContentUSTC';
-  else if (provider === 'gmail') msgType = 'gmailAuthorize';
-
-  try {
-    // Gmail：不走开头的 gmailAuthorize（避免每次探测都先弹授权窗）。改为先被动探测，
-    // 仅当确认没有有效令牌时，才由用户主动点击触发交互授权（AGENTS 规则 1）。
-    const r = provider === 'gmail' ? null : await sendMessage({ type: msgType, openTab: true });
-
-    // Gmail：先直接后台探测（读缓存令牌）；未授权/令牌失效时引导交互授权
-    if (provider === 'gmail') {
-      if (pre) pre.textContent = t('读取未读数中...', 'Reading unread...');
+  // Gmail：无内容脚本，直接 SW 侧 Atom feed 探测（零 token、不弹授权、不开标签）
+  if (provider === 'gmail') {
+    if (pre) pre.textContent = t('读取未读数中...', 'Reading unread...');
+    try {
       const probe = await sendMessage({ type: 'testProvider', provider: 'gmail' });
       const acc = probe?.results?.[0];
-      let unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
-
-      // 是否已持有有效 Gmail 令牌（无令牌 → 需授权；有令牌但探测失败 → 展示原因，不重复弹窗）
-      const st = await sendMessage({ type: 'getStatus' });
-      const accSt = st?.accountStatus?.find((a) => a.provider === 'gmail');
-      const hasToken = accSt?.hasSid === true;
-
-      if (unread == null && !hasToken) {
-        // 无有效令牌 → 弹交互授权（仅用户主动点击时）
-        showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
-          success: false,
-          message: t(
-            'Gmail 未授权，正在弹出授权窗口，请在弹出的 Google 页面中确认...',
-            'Gmail not authorized. Opening the authorization window; confirm on the Google page...'
-          ),
-        });
-        const auth = await sendMessage({ type: 'gmailAuthorize' });
-        if (auth?.success) {
-          if (pre)
-            pre.textContent = t('授权成功，读取未读数中...', 'Authorized, reading unread...');
-          const probe2 = await sendMessage({ type: 'testProvider', provider: 'gmail' });
-          const acc2 = probe2?.results?.[0];
-          unread = acc2 && typeof acc2.unreadCount === 'number' ? acc2.unreadCount : null;
-          if (pre) {
-            showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
-              success: unread != null,
-              unreadCount: unread,
-              authVerified: acc2?.authVerified === true,
-              detail: acc2?.error || null,
-            });
-          }
-        } else {
-          if (pre)
-            showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
-              success: false,
-              message: t('Gmail 授权未完成或已取消', 'Gmail authorization incomplete or cancelled'),
-              error: auth?.error || null,
-            });
-        }
-        refreshStatus();
-        return;
-      }
-
+      const unread = acc && typeof acc.unreadCount === 'number' ? acc.unreadCount : null;
       if (pre) {
         showProbeResult(`${t('获取未读数', 'Fetch unread')} · ${providerLabel}`, {
           success: unread != null,
           unreadCount: unread,
           authVerified: acc?.authVerified === true,
-          message:
+          detail:
             unread != null
-              ? undefined
-              : hasToken
-                ? t(
-                    '已持有 Gmail 授权令牌，但未能读取未读数',
-                    'Has a Gmail token but could not read unread'
-                  )
-                : t('Gmail 未读取到未读数', 'Gmail returned no unread'),
-          detail: acc?.error || null,
-          hint:
-            unread == null && hasToken
-              ? t(
-                  '若提示 Gmail API 访问受限，请到 Google Cloud 控制台确认已启用 Gmail API，并核对授权重定向 URI。',
-                  'If Gmail API access is restricted, enable Gmail API in the Google Cloud console and verify the OAuth redirect URI.'
-                )
-              : undefined,
+              ? null
+              : acc?.error ||
+                t(
+                  '请确认浏览器已登录 Gmail（mail.google.com）',
+                  'Confirm the browser is signed in to Gmail.'
+                ),
         });
       }
       refreshStatus();
-      return;
+    } catch (err) {
+      if (pre) showProbeResult(t('获取未读数失败', 'Fetch unread failed'), { error: err.message });
     }
+    return;
+  }
+
+  // 根据提供商选择正确的消息类型
+  let msgType = 'probeContent163';
+  if (provider === 'qq') msgType = 'probeContentQQ';
+  else if (provider === 'ustc') msgType = 'probeContentUSTC';
+
+  try {
+    const r = await sendMessage({ type: msgType, openTab: true });
 
     const success = r?.probe?.success;
     if (pre) {
@@ -916,9 +834,8 @@ async function runFullCheck() {
     const result = await sendMessage({ type: 'runCheck' });
     showProbeResult(t('全量检查结果', 'Full check result'), result);
 
-    // 手动点击「全量检查」按钮同样属用户主动显式操作（AGENTS 规则 1 允许弹授权）。
-    // 若任一 Gmail 账户需要授权（无有效令牌），应一并弹出 OAuth 授权窗，授权成功后
-    // 再重跑一次全量，把 Gmail 的未读数也纳入结果，避免「需授权」却无从处理。
+    // Gmail 无需授权流程（Atom feed + 浏览器 Cookie）；若其检查失败，
+    // 提示用户确认浏览器已登录 mail.google.com 即可（不弹窗、不开标签）。
     const gmailNeedAuth = (result?.results || []).find(
       (r) => r.provider === 'gmail' && r.needsAuth === true
     );
@@ -927,27 +844,11 @@ async function runFullCheck() {
         success: false,
         needsAuth: true,
         message: t(
-          'Gmail 账户 {email} 需要授权，正在弹出 Google 授权窗口，请在弹出的页面中确认...',
-          'Gmail account {email} needs authorization. Opening the Google authorization window; confirm on the page...',
+          'Gmail 账户 {email} 未能读取未读数，请确认浏览器已登录 Gmail（mail.google.com）后重试',
+          'Gmail account {email} could not be read. Confirm the browser is signed in to Gmail, then retry.',
           { email: gmailNeedAuth.email || t('（未授权）', '(not authorized)') }
         ),
       });
-      const auth = await sendMessage({ type: 'gmailAuthorize' });
-      if (auth?.success) {
-        // 授权成功：重跑全量，让刚授权的 Gmail 也能读到未读数
-        const result2 = await sendMessage({ type: 'runCheck' });
-        showProbeResult(t('全量检查结果', 'Full check result'), result2);
-      } else {
-        showProbeResult(t('Gmail 授权未完成', 'Gmail authorization incomplete'), {
-          success: false,
-          message: t(
-            'Gmail 授权失败或已取消，请检查下方原因后重试',
-            'Gmail authorization failed or cancelled. Check the details below and retry.'
-          ),
-          error: auth?.error || t('未知原因', 'unknown reason'),
-          needsManual: auth?.needsManual === true,
-        });
-      }
     }
     refreshStatus();
   } catch (err) {

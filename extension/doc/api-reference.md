@@ -214,57 +214,44 @@ sid 从 URL 参数中提取：`http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid
 
 ## 4. Gmail（gmail）
 
-### 4.1 OAuth2 认证
+> v0.11.0 起改为 Atom feed + 浏览器 Cookie 直调，原 OAuth2 / gmail.googleapis.com REST
+> 路径已彻底移除（无需 Google Cloud 商业授权）。
 
-Gmail 使用 Google 官方 OAuth2 流程，通过 `chrome.identity.launchWebAuthFlow` 实现跨浏览器兼容（Chrome + Edge）。
+### 4.1 认证方式
 
-**OAuth2 配置：**
-- Client ID：已配置（`extension/shared/constants.js`）
-- Scope：`https://www.googleapis.com/auth/gmail.readonly`
-- Redirect URI：`https://{extension-id}.chromiumapp.org/`
+- **依赖**：浏览器已登录 Gmail（mail.google.com 的 session Cookie）
+- **机制**：SW 侧 `fetch(url, { credentials: 'include' })` 自动附带 Cookie，零 token
+- **host 权限**：`https://mail.google.com/*`（manifest.json `host_permissions`）
+- 未登录 / Cookie 失效 → 请求返回 401/403 → 标记「需手动同步」，引导用户登录 Gmail
 
-**令牌管理：**
-- 存储键：`gmail_access_token`（token）、`gmail_access_token_expiry`（过期时间戳）
-- TTL：约 55 分钟（Google access token 有效期 ~1 小时）
-- 静默续期：`launchWebAuthFlow(interactive=false, prompt=none)`，距上次尝试 ≥ 30 分钟时才允许重试
-- 令牌失效时自动清除缓存，引导用户手动重新授权
-
-### 4.2 未读查询接口
+### 4.2 未读查询接口（Atom feed）
 
 | 属性 | 值 |
 |------|-----|
 | 方法 | `GET` |
-| URL | `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=5` |
-| 认证 | `Authorization: Bearer {token}` |
+| URL | `https://mail.google.com/mail/u/0/feed/atom` |
+| 认证 | 浏览器 session Cookie（`credentials: 'include'` 自动附带） |
 
 **Response（成功）：**
-```json
-{
-  "resultSizeEstimate": 11,
-  "messages": [
-    { "id": "18c...", "threadId": "16e..." },
-    ...
-  ]
-}
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<feed version="0.3" xmlns="http://purl.org/atom/ns#">
+  <title>Gmail - Inbox for user@gmail.com</title>
+  <fullcount>3</fullcount>   <!-- 全邮箱精确未读数 -->
+  ...
+</feed>
 ```
 
-未读数 = `resultSizeEstimate`（Google 估算值，非精确计数，但对"有新邮件"判断足够）。
-
-**邮件详情接口（获取发件人 + 主题用于通知）：**
-```
-GET https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageId}?format=metadata&metadataName=from&metadataName=subject&metadataName=date
-```
+未读数 = `<fullcount>` 标签值（精确计数，非估算）。
 
 ### 4.3 错误处理
 
-| HTTP 状态 | 原因 | 处理 |
-|-----------|------|------|
-| 401 | 令牌失效 / 已撤销 | 清除缓存令牌，引导重新授权 |
-| 403 (accessNotConfigured) | Gmail API 未启用 | 提示检查 Google Cloud 控制台配置 |
-| 403 (dailyLimitExceeded) | 配额超限 | 等待后重试 |
-| 403 (insufficientPermissions) | scope 不足 | 引导重新授权（更广 scope） |
-| 400 | 请求参数错误 | 令牌仍有效，不清缓存 |
-| 5xx | Google 服务端错误 | 令牌仍有效，不清缓存 |
+| 现象 | 原因 | 处理 |
+|------|------|------|
+| 401 | 未登录 / Cookie 失效 / 端点风控 | 标记 needsAuth，引导用户登录 Gmail |
+| 403 | Google 风控或端点已废弃 | 同上 |
+| 200 但无 `<fullcount>` | 端点响应结构变更 | 视为不可用，标记需手动同步 |
+| 网络层错误（Failed to fetch） | 中国大陆网络 / GFW | 下次检查自动重试 |
 
 ---
 
@@ -281,8 +268,7 @@ GET https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageId}?format=m
 | QQ | 重定向到 ptlogin/login | 未登录 | 不清 sid（旧域接口正常现象） |
 | QQ | `gbIsNoCheck` / `需要登录` | 未登录 | 清除 wx 域 sid |
 | USTC | `FA_UNAUTHORIZED` / `未登录` | 未登录 | 清除 sid |
-| Gmail | 401 / `invalid_grant` | 令牌失效 | 清除 token，引导重授权 |
-| Gmail | 403 / `accessNotConfigured` | API 未启用 | 不清 token，提示配置 |
+| Gmail | 401 / 403（Cookie 失效 / 风控） | 未登录或端点风控 | 引导用户登录 Gmail |
 
 ---
 
@@ -294,5 +280,5 @@ GET https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageId}?format=m
 | v1.0.1 | 163 body 移除 `<string name="sentDate">2:</string>` 过滤器（遗漏旧未读邮件） |
 | v1.0.1 | 163 URL/Referer 移除 `&df=mail163_letter` 参数（页面已不再使用该参数） |
 | v1.0.1 | **修复** `parse163Response` 解析 Bug：改用括号计数替代 `indexOf(']')`，避免嵌套结构截断导致已读邮件误判为未读 |
-| v0.9.6 | Gmail 迁移到 `launchWebAuthFlow` 替代 `getAuthToken`（Edge 兼容） |
+| v0.11.0 | Gmail 改为 Atom feed + Cookie 直调（`mail.google.com/mail/u/0/feed/atom`），彻底移除 OAuth2 / REST 路径 |
 | v0.9.4 | CSP 问题修复，API 拦截器分离到独立文件 |

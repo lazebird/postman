@@ -66,7 +66,6 @@ export const ENDPOINT_OPTIONS = {
       zh: 'Gmail Atom Feed（Cookie）',
       en: 'Gmail Atom Feed (Cookie)',
     },
-    { name: 'gmail_api', zh: 'Gmail REST API', en: 'Gmail REST API' },
   ],
 };
 

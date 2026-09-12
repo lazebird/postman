@@ -16,7 +16,7 @@
 - Chrome Web Store 的商品描述**每种语言只有一份**（非中英两份并存），
   此处给出两种语言文本供你复制粘贴到对应语言的 listing 中。
 - 图片规格需严格满足（像素、纵横比），生成好的资源文件直接上传即可。
-- 本扩展涉及 `cookies` / `declarativeNetRequest` / `identity` 等敏感权限且涉及读取邮箱数据，
+- 本扩展涉及 `cookies` / `declarativeNetRequest` 等敏感权限且涉及读取邮箱数据，
   提交前务必先填好**隐私政策**（见 `doc/PRIVACY.md`），否则版本会被驳回。
 
 ---
@@ -68,7 +68,7 @@ Mail Notifier —— 多邮箱未读邮件提醒扩展（Chrome MV3）
 · 智能会话学习：偶尔打开一次邮箱即可学习真实接口格式并缓存会话，
   之后无需开着邮箱页面也能纯后台读取未读数（会话缓存 7 天）
 · 隐私优先：全部数据仅保存在本机浏览器(chrome.storage.local)，
-  无服务器、无账号、不上传邮件内容；支持 Gmail 官方 OAuth2 只读授权(gmail.readonly)
+  无服务器、无账号、不上传邮件内容；Gmail 走隐藏 Atom feed + 浏览器会话 Cookie（零 token、无需 Google Cloud OAuth 商业授权）
 
 检查间隔(1–30 分钟)与模式(混合/仅内容脚本/仅 SW API)均可自定义，适配不同习惯。
 邮箱未读提醒，就该这么安静、干净、省心。
@@ -97,7 +97,7 @@ Key features
   open mailbox page (session cached for 7 days)
 · Privacy-first: all data stays in your local browser storage (chrome.storage.local) —
   no servers, no account, no uploading of your email content; supports official
-  Gmail OAuth2 read-only access (gmail.readonly)
+  Gmail via hidden Atom feed + browser session cookie (zero tokens, no Google Cloud OAuth)
 
 Check interval (1–30 min) and checking modes (Hybrid / Content-script-only /
 SW-API-only) are fully customizable to fit your habits.

@@ -65,9 +65,9 @@ Cookie 附加，保证后台无页面时也能按真实会话格式发起未读�
 
 ### identity 理由 \*
 
-用于 Gmail 官方 OAuth2 授权（`gmail.readonly` 只读 scope），在用户主动授权下获取访问
-Gmail 未读元数据的只读权限。仅申请 `gmail.readonly` 只读范围，无发送、无删除、无全量读取权限。
-相关 `client_id` 为 Google OAuth 公开标识，非密钥。
+**已废弃，v0.11.0 移除**：本扩展已不再申请 `identity` 权限。Gmail 探测改为隐藏 Atom feed
+（`mail.google.com/mail/u/0/feed/atom`）+ 浏览器会话 Cookie 直调，零 token、无需 Google Cloud OAuth 商业授权；
+失败时标记「需手动同步」引导用户登录。
 
 ### 主机权限理由 \*
 
@@ -76,7 +76,7 @@ Gmail 未读元数据的只读权限。仅申请 `gmail.readonly` 只读范围�
 - `https://mail.163.com/*`、`https://*.163.com/*` —— 163 邮箱
 - `https://mail.qq.com/*`、`https://*.qq.com/*` —— QQ 邮箱
 - `http://mail.ustc.edu.cn/*`、`https://mail.ustc.edu.cn/*` —— 中科大邮箱
-- `https://gmail.googleapis.com/*` —— Gmail 官方 API
+- `https://mail.google.com/*` —— Gmail 隐藏 Atom feed（`/mail/u/0/feed/atom`）
 
 仅请求这几个已声明邮箱域，不申请 `<all_urls>` 或任意站点的匹配模式，无与邮件检查无关的主机访问。
 
@@ -92,7 +92,7 @@ manifest 的 `content_security_policy` 保持 `script-src 'self'`，代码明文
 
 ### 理由 \*
 
-扩展完全离线、自包含运行：全部探测、拦截、Gmail OAuth2、通知、定时逻辑均在本地执行，
+扩展完全离线、自包含运行：全部探测、拦截、Gmail Atom feed 读取、通知、定时逻辑均在本地执行，
 包内不含也不依赖任何外部脚本或 Wasm；`extension_pages` 的 CSP 为 `script-src 'self'; object-src 'self'`，
 从机制上杜绝了远程代码注入，便于商店审查且更安全。
 
@@ -107,7 +107,7 @@ manifest 的 `content_security_policy` 保持 `script-src 'self'`，代码明文
 **收集的最少必要数据（均仅本机处理、不对外上传）：**
 
 1. **认证信息 / Cookie / 会话令牌（sid）**：用户授权登录后，本地保存用于后台读取未读数的会话令牌
-   （163/QQ/USTC 的 sid 与 Gmail 的 OAuth2 访问令牌）。仅用于向对应邮箱读取未读数。
+   （163/QQ/USTC 的 sid 与 Gmail 的会话 Cookie）。仅用于向对应邮箱读取未读数。
 2. **用户内容（未读元数据，非正文）**：各邮箱未读数量与触发提醒所需的最小元信息，用于生成桌面通知，
    不含邮件正文、联系人、通讯录等敏感内容。
 
@@ -140,7 +140,7 @@ manifest 的 `content_security_policy` 保持 `script-src 'self'`，代码明文
 ## 提交前自查清单
 
 - [ ] 单一用途描述简洁明确，与商品名称/简介一致；
-- [ ] 8 项权限 + 主机权限理由均不超 1000 字符，且与 `manifest.json` 实际声明逐项一致；
+- [ ] 6 项权限 + 主机权限理由均不超 1000 字符，且与 `manifest.json` 实际声明逐项一致；
 - [ ] “使用远程代码”勾选“否”，CSP 为 `script-src 'self'`；
 - [ ] 数据使用量披露与 `doc/PRIVACY.md` 完全一致，无前后矛盾；
 - [ ] 已将 `doc/PRIVACY.md` 发布为公开 `https://` 页面并填入“隐私策略 URL”；

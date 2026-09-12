@@ -30,50 +30,15 @@
 - ⚠️ 需要用户在浏览器中先登录，然后点击「同步USTC」按钮
 
 ### Gmail 邮箱
-- ✅ OAuth2 认证流程
-- ✅ Gmail REST API 集成（`gmail.readonly` scope）
-- ✅ 客户端 ID 已配置（测试账号）
-- ⚠️ 需要用户首次手动授权
-- 📌 新邮件通知：检测未读数变化并发送桌面通知（优先显示发件人+主题）
+- ✅ Atom feed + 浏览器 Cookie 直调（v0.11.0 起，零 token、无需 Google Cloud 商业授权）
+- ✅ 端点：`GET https://mail.google.com/mail/u/0/feed/atom`（`<fullcount>` 即全邮箱未读数）
+- ⚠️ 需要浏览器已登录 Gmail（mail.google.com）；未登录时标记「需手动同步」
+- 📌 原 OAuth2 / gmail.googleapis.com REST 路径已彻底移除（2026-09-12）
 
 ---
 
-## 🟢 P0：Gmail 在 Microsoft Edge 同步失败——chrome.identity 不受支持（v0.9.6 修复）
 
-### 问题描述
-在 Microsoft Edge 中触发 Gmail 同步/探测时返回：
-
-```json
-{ "success": false, "error": "This API is not supported on Microsoft Edge. ..." }
-```
-
-### 根因
-- Gmail 走官方 REST API + OAuth2，原实现每次后台检查都调用 `chrome.identity.getAuthToken`。
-- **`chrome.identity`（Google OAuth 集成）在 Microsoft Edge 中不受支持**，任何调用都会抛上述引擎错误。
-  这是 Edge 平台限制，并非代码 Bug。错误链接（linkid=2186907）指向微软的"扩展不支持 API"文档。
-
-### 解决方案（v0.9.6）
-1. **token 持久化缓存（符合 AGENTS 规则 3）**：授权成功后把 access_token 写入 `chrome.storage.local`。
-   后台（alarm）检查优先读缓存，不再每次触碰 `chrome.identity` —— 消除了 Edge 上每轮后台检查必失败的问题。
-2. **浏览器感知**：`provider-gmail.js` 新增 `detectBrowser()`。Edge 上不再盲目调用 `chrome.identity`，
-   而是返回可读、可操作的中文提示。
-3. **跨浏览器复用**：若用户曾在 Chrome 完成过 Gmail 授权，缓存的 token 在 Edge 上可直接复用，
-   Edge 后台检查即可正常读取未读数。
-4. **去掉安装/更新时自动弹授权页**：`initGmailOAuth2` 不再于 onInstalled 时以 `interactive:true`
-   触发 `launchWebAuthFlow`（会干扰用户、且在 Edge 必然失败）。授权统一由用户在 Popup「同步Gmail」主动触发。
-
-### 修改文件
-- `extension/providers/provider-gmail.js` - 新增 token 缓存 / 浏览器检测 / 可读降级
-- `extension/background/service-worker.js` - `gmailAuthorize` 走 `authorizeGmail`；初始化去自动弹授权
-- `extension/shared/constants.js` - 新增 `GMAIL_TOKEN_KEYS`
-
-### 剩余边界
-- **Edge 首次授权**仍受限于 `chrome.identity` 缺失：Edge 上无现成 token 时无法就地弹出 Google 授权。
-  完整支持需为 Edge 走"手动 OAuth2 隐式授权（tabs 捕获 redirect token）"，并需 Web 类型 OAuth client；
-  属后续可选增强。
----
-
-## 🟡 P2：Gmail API "Failed to fetch" 网络层错误
+## 🟡 P2：（已随 v0.11.0 OAuth2 移除而失效，历史存档）Gmail API "Failed to fetch" 网络层错误
 
 ### 问题描述
 后台检查时出现 `Gmail API fetch failed: Failed to fetch`，属于 TypeError（网络层失败），非 HTTP 401/403。中国大陆用户频繁遇到此问题（Great Firewall 阻断 / VPN 不稳定）。
@@ -264,7 +229,8 @@ WASM 文件已加载，确认 QQ 新版使用 WebAssembly 技术。
 - [x] **163 SW API 打通**（已验证，unread=11）
 - [x] **QQ SW API 打通**（已验证，unread=7）
 - [x] **USTC SW API 打通**（已验证，unread=2）
-- [x] **Gmail REST API 接入**（OAuth2 + gmail.readonly scope）
+- [x] **Gmail Atom feed 接入**（v0.11.0，Cookie 直调，无需 OAuth 商业授权）
+- ~~Gmail REST API 接入（OAuth2）~~（v0.11.0 已移除，由 Atom feed 替代）
 - [ ] 接口失效自愈 / 热更规则
 - [ ] UI 完善（多账户统一显示、通知策略）
 
@@ -350,8 +316,7 @@ console.log(logs);
 | 163 | POST | `https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}` | Cookie + sid | ✅ v1.0.1 修复 |
 | QQ | GET | `https://wx.mail.qq.com/list/maillist?sid={sid}...` | Cookie + sid | ✅ |
 | USTC | GET | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | Cookie + sid | ✅ |
-| Gmail | GET | `https://mail.google.com/mail/u/0/feed/atom` | session Cookie（零 token） | ✅ 新增 |
-| Gmail | GET | `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread` | OAuth2 Bearer token | ✅ fallback |
+| Gmail | GET | `https://mail.google.com/mail/u/0/feed/atom` | session Cookie（零 token） | ✅ v0.11.0 |
 
 ---
 
@@ -361,6 +326,7 @@ console.log(logs);
 Gmail 官方 REST API 需 Google Cloud 项目商业授权（Gmail API enablement），审批麻烦。
 改用「网页逆向」思路：用户浏览器登录过 Gmail 后，直接调 Google 隐藏 Atom feed，
 靠 session Cookie 认证，零 token、零 API key。
+**原 OAuth2 / gmail.googleapis.com REST 路径已于 2026-09-12 彻底移除**（新方案实测可用，继续观察）。
 
 ### 实证结果（2026-09-12）
 - **服务端存活探测**（无 cookie）：`/mail/u/0/feed/atom` 与 `/mail/feed/atom` 均返回
@@ -373,27 +339,32 @@ Gmail 官方 REST API 需 Google Cloud 项目商业授权（Gmail API enablement
   即 **Atom feed 在 2026 年当前仍可用**，`<fullcount>` 为全邮箱精确未读数。
 
 ### 实现
-`provider-gmail.js` 改造为双路径探测：
-1. **路径 1（优先）Atom feed + Cookie**：`probeGmailAtomFeed()` 直接 fetch 隐藏端点，
-   浏览器登录态 Cookie 自动附带（credentials:'include'），解析 XML 的 `<fullcount>`。
-   端点 URL 由 `PROVIDER_CONFIG.gmail.probeEndpoints` 中 `name='atom_feed'` 的条目驱动
-   （配置缺失时回退内置默认 URL）。
-2. **路径 2（fallback）OAuth2 REST**：Atom feed 返回 401/403（风控/废弃）或 200 但缺
-   `<fullcount>`（结构变更）时，自动落到原有 `resolveGmailToken` 静默续期 +
-   `fetchGmailUnread` 路径，避免隐藏端点单点失效。
+`provider-gmail.js` 仅保留 Atom feed 单路径：
+- `probeGmailAtomFeed()` 直接 fetch 隐藏端点，浏览器登录态 Cookie 自动附带
+  （credentials:'include'），解析 XML 的 `<fullcount>`。
+  端点 URL 由 `PROVIDER_CONFIG.gmail.probeEndpoints` 中 `name='atom_feed'` 的条目驱动
+  （配置缺失时回退内置默认 URL）。
+- 失败（401/403/网络错误）→ 标记 `needsAuth` + `needsManualAuth`，
+  引导用户在浏览器登录 Gmail（不弹授权、不开标签，符合 AGENTS 规则 1/2）。
 
 ### 修改文件
-- `extension/providers/provider-gmail.js` — 新增 `probeGmailAtomFeed()`；
-  `probeGmail()` 改为按 `enabledEndpoints` 顺序逐个探测（atom_feed 优先、gmail_api fallback），
-  保留 OAuth2 全套逻辑与错误分类（tokenInvalid 判定不变）
-- `extension/shared/constants.js` — `PROVIDER_CONFIG.gmail.probeEndpoints` 填入
-  `atom_feed` 端点；`DEFAULT_SETTINGS.enabledEndpoints.gmail` 改为 `['atom_feed','gmail_api']`；
+- `extension/providers/provider-gmail.js` — 重写为 Atom feed 单路径；
+  删除 `fetchGmailUnread` / `classifyGmailApiError` / `fetchGmailMessageDetail` 及 OAuth2 import
+- `extension/shared/gmail-oauth.js` — **整个文件删除**
+- `extension/shared/constants.js` — 删除 `GMAIL_TOKEN_KEYS` / `GMAIL_RENEWAL_KEYS` /
+  `PROVIDER_CONFIG.gmail.oauth2`；`probeEndpoints` 仅 `atom_feed`；
+  `DEFAULT_SETTINGS.enabledEndpoints.gmail = ['atom_feed']`；
   `API_PATTERN_KEYS` 新增 `CAPTURED_USTC`/`CAPTURED_GMAIL`（见下条）
 - `extension/shared/api-patterns.js` — 存储键从「qq/非qq 二分」改为
   `PROVIDER_PATTERN_KEYS` 显式 provider→key 映射，未映射的 provider 不读不写
-- `extension/shared/ui-meta.js` — `ENDPOINT_OPTIONS.gmail` 增加 `atom_feed` 勾选项
-- `extension/manifest.json` — `host_permissions` 加 `https://mail.google.com/*`
-  （SW 跨源 fetch 附带 mail.google.com Cookie 所必需）
+- `extension/shared/ui-meta.js` — `ENDPOINT_OPTIONS.gmail` 仅 `atom_feed`
+- `extension/background/service-worker.js` — 删除 `gmailAuthorize` 消息分支、
+  `gmail-oauth` import、onInstalled 的 token 检测；`hasGmailToken` 判据改为
+  gmail 恒 false（授权判据由探测结果 `authVerified` 体现）
+- `extension/popup/popup.js` — Gmail「同步/探测/检查」按钮统一走 `testProvider`
+  （SW Atom feed 探测），移除所有 `gmailAuthorize` 调用与 Google 授权窗文案
+- `extension/manifest.json` — 删除 `oauth2` 块、`identity` 权限、`gmail.googleapis.com`
+  host 权限；`host_permissions` 保留 `mail.google.com/*`
 
 ### 隔离性（不影响其他邮箱）
 - 163/QQ/USTC 的捕获/回放链路零改动：`PROVIDER_PATTERN_KEYS` 显式映射下，
@@ -401,14 +372,15 @@ Gmail 官方 REST API 需 Google Cloud 项目商业授权（Gmail API enablement
   **USTC 从与 163 共享 `CAPTURED_163` 键改为独立 `CAPTURED_USTC` 键**（修遗留 bug，
   各邮箱捕获模式不再串键，且 USTC 的 Coremail 格式本就独立，行为更正确）
 - Gmail 走独立固定端点（atom feed），**不进入捕获/回放链路**，与 sid/Cookie 模型解耦
-- `service-worker.js` 的 `runSWApiProbe` switch 未改动，`probeGmail` 内部完成双路径
+- `service-worker.js` 的 `runSWApiProbe` switch 未改动，`probeGmail` 内部完成探测
 
 ### 风险与降级
 - **非官方端点**：Google 随时可能 403/废弃 Atom feed（2026-01 有文章称 2023-12 已弃用
-  公共 feed，但 2026-08 实测仍可用，状态有争议）——atom feed 失败自动落 OAuth2，不会中断
-- **风控**：轮询复用现有 alarm 间隔（≥60s），不单独加密；失效时标记「需手动同步」
-  引导用户打开 Gmail（符合 AGENTS 规则 1）
-- **中国大陆网络**：atom feed 与 OAuth2 同样受 GFW 影响，网络错误不清 token、下次自动重试
+  公共 feed，但 2026-08 实测仍可用，状态有争议）——失效时标记「需手动同步」，
+  引导用户登录 Gmail 后可自动恢复
+- **风控**：轮询复用现有 alarm 间隔（≥60s），不单独加密；无 token 可被吊销
+- **中国大陆网络**：atom feed 同样受 GFW 影响，网络错误下次检查自动重试
+- **多账户**：当前固定 `u/0`（主账户），多 Gmail 账户需按 authuser 参数扩展
 
 ### 验证
 - [x] 服务端端点存活（401 非 404）

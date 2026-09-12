@@ -131,14 +131,30 @@
 
 ## API 捕获与回放策略
 
-### 如何实现「不开标签也能读未读」？
+### 163 / QQ / USTC（Coremail 类，sid + Cookie）
 
 核心链路：
 1. 用户偶尔打开邮箱（登录态）→ 内容脚本捕获页面实际发出的 API 请求格式
    （URL、method、headers、body），sid 自动替换为 `{sid}` 占位符
-2. 捕获的 API 模式持久化到 `chrome.storage.local`（`api_patterns_163` / `api_patterns_qq`）
+2. 捕获的 API 模式持久化到 `chrome.storage.local`（`api_patterns_163` / `api_patterns_qq` / `api_patterns_ustc`）
 3. 用户关闭邮箱标签后 → SW 后台自动检查时，直接使用**捕获的真实 API 请求格式**进行调用
 4. 浏览器 Cookie 自动附带（`credentials: 'include'`），sid 从缓存读取并替换
 
 此策略避免了「猜测接口格式」的不确定性，利用页面打开时的真实 API 调用来
 「学习」正确格式，实现后台无感检查。
+
+### Gmail（Atom feed + 会话 Cookie，v0.11.0 起）
+
+Gmail **不走**上述捕获/回放链路，也不依赖 OAuth / Google Cloud 商业授权：
+
+1. 用户浏览器登录过 Gmail（mail.google.com）后，其会话 Cookie 持续有效
+2. SW 后台检查时直接调用隐藏 Atom feed：
+   `GET https://mail.google.com/mail/u/0/feed/atom`（`credentials: 'include'` 附带 Cookie）
+3. 响应 XML 的 `<fullcount>` 标签即全邮箱精确未读数
+4. 零 token、零 API key；失效（401/403/结构变更）时标记「需手动同步」，
+   引导用户登录 Gmail 后自动恢复
+
+已知限制与风险：
+- 端点为 Google 非官方维护，可能随时 403/废弃（2026-08 实测仍可用，持续观察）
+- 轮询复用现有 alarm 间隔（≥60s），不单独加密，避免触发 abuse detection
+- 中国大陆网络受 GFW 影响，网络错误自动重试

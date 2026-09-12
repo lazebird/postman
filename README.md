@@ -112,7 +112,7 @@
 - [x] **163 SW API 打通**（实测 unread=11）
 - [x] **QQ SW API 打通**（实测 unread=7）
 - [x] **USTC SW API 打通**（实测 unread=2）
-- [x] **Gmail OAuth2 接入**（测试账号已配置）
+- [x] **Gmail Atom feed 接入**（v0.11.0，浏览器 Cookie 直调隐藏 Atom feed，零 token、无需 Google Cloud 商业授权；原 OAuth2 路径已彻底移除）
 - [x] **新邮件通知系统**（检测变化并发送桌面通知）
 - [ ] 完整 UI 与生产功能
 - [ ] 多邮箱统一通知
@@ -153,7 +153,7 @@
 - 首次使用需在 GitHub 仓库 **Settings → Pages → Source 选择「GitHub Actions」**，随后运行一次工作流；
 - 站点为 GitHub 项目页面，路径前缀是**仓库名**，即
   `https://<owner>.github.io/postman/`、`https://<owner>.github.io/postman/privacy/`；
-- **不需要把项目源码同步到 GitHub**：只发布 `docs/` 即可满足商店与 Google OAuth 的页面要求；
+- **不需要把项目源码同步到 GitHub**：只发布 `docs/` 即可满足扩展商店的页面要求；
 - 详细说明见 [`docs/README.md`](docs/README.md) 与
   [`doc/GitHub同步与Pages部署指南.md`](doc/GitHub同步与Pages部署指南.md)。
 

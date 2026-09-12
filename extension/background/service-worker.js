@@ -37,7 +37,6 @@ import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
 import { probeUSTC } from '../providers/provider-ustc.js';
 import { probeGmail } from '../providers/provider-gmail.js';
-import { authorizeGmailInteractive, hasGmailToken } from '../shared/gmail-oauth.js';
 import { diagnoseAll, diagnoseCookies } from '../shared/session-diagnose.js';
 import { saveApiPatterns, getApiPatterns, clearApiPatterns } from '../shared/api-patterns.js';
 import { runPossibilityTests } from './possibility-tests.js';
@@ -54,7 +53,7 @@ const logger = createLogger('service-worker');
 
 // ===== 触发来源（手动 vs 自动）=====
 // 手动（manual）→ Popup 按钮点击等用户显式操作：允许完整交互流程（开邮箱页、复用/新建
-//   后台标签读未读、弹出 Gmail OAuth 授权窗等）。符合 AGENTS 规则 1 的「用户主动显式触发」。
+//   后台标签读未读等）。符合 AGENTS 规则 1 的「用户主动显式触发」。
 // 自动（auto）→ chrome.alarms 定时、onInstalled/onStartup、内容脚本页面事件等周期/被动事件：
 //   **绝不**擅自打开可见标签、**绝不**自动弹出授权窗，仅标记「需手动同步」，交由用户显式处理。
 // context.source 沿用既有字符串值（manual / manual-test / alarm / content-probe / unknown）。
@@ -97,11 +96,6 @@ chrome.runtime.onInstalled.addListener((details) => {
     setupAlarms().catch((err) => {
       logger.error(`注册定时检查闹钟失败: ${err.message}`);
     });
-    // 注意：安装/更新时不再自动触发 Gmail OAuth（避免非用户主动弹授权页）。
-    // 需等用户在 Popup/Options 点击"同步 Gmail"才走 launchWebAuthFlow 授权。
-    void hasGmailToken().then((has) =>
-      logger.info(has ? '检测到已缓存 Gmail 令牌' : '尚未授权 Gmail，需手动同步')
-    );
   }
 });
 
@@ -236,29 +230,6 @@ async function handleMessage(message, sender) {
       // 探测后更新 badge（含当前所有账户的未读总和）
       await updateBadgeFromLatest();
       return result;
-    }
-
-    case 'gmailAuthorize': {
-      // Gmail OAuth2 授权流程（Chrome / Edge 通用，基于 launchWebAuthFlow）。
-      // launchWebAuthFlow 会弹出 Google 授权页，**只允许**用户显式手动触发。
-      // 守卫：消息未带 trigger='manual'（即非 Popup 按钮发出）→ 拒绝执行，绝不自动弹窗。
-      if (sourceFromMessage(message) !== TRIGGER_SOURCE.MANUAL_SINGLE) {
-        logger.warn('[guard] gmailAuthorize 触发来源非手动，拒绝弹出授权窗');
-        return {
-          success: false,
-          error: 'Gmail 授权仅支持在界面手动触发（自动检查不会自动弹出授权窗）',
-          needsManual: true,
-        };
-      }
-      const result = await authorizeGmailInteractive();
-      if (result.success) {
-        return { success: true, token: 'obtained' };
-      }
-      return {
-        success: false,
-        error: result.error || 'Gmail 授权失败',
-        needsManual: !!result.needsManual,
-      };
     }
 
     case 'openMailboxTab':
@@ -1415,7 +1386,7 @@ function markAuthNotifySent(email) {
  *  - 仅对「曾成功工作过（有 last-ok 记录）、本次却授权失效」的账号弹提醒，从而区分
  *    「授权过期/出错」与「新增账号从未首次授权」——后者不打扰，交由用户在界面主动发起。
  *  - 同一账号距上次提醒不足 AUTH_ALERT_NOTIFY_THROTTLE_MS 时不重复通知，避免骚扰。
- *  - 全程仅用 chrome.notifications，绝不开标签、绝不弹 OAuth 授权窗。
+ *  - 全程仅用 chrome.notifications，绝不开标签。
  *
  * @param {Array} results 本次全量检查的账户级结果
  */
@@ -1707,15 +1678,16 @@ async function getStatus() {
   ];
   const sidByProvider = {};
   for (const p of STATUS_PROVIDER_KEYS) {
-    // Gmail 走 OAuth2 令牌而非 sid：此处用「是否存在有效令牌」作为其「已授权」判据，
-    // 否则 gmail 账户 hasSid 恒为 false，导致即使授权成功也一直停留在「需授权」。
-    sidByProvider[p] =
-      p === PROVIDERS.GMAIL ? !!(await hasGmailToken()) : !!(await getCachedSid(p));
+    // Gmail 走 Cookie 而非 sid：Atom feed 不依赖本地缓存的会话凭据（浏览器登录态
+    // Cookie 自动附带），故其「已授权」判据由探测结果（authVerified）体现，
+    // 此处 hasSid 对 gmail 恒为 false（不代表未授权，UI 层按探测结果判定）。
+    sidByProvider[p] = p === PROVIDERS.GMAIL ? false : !!(await getCachedSid(p));
   }
 
   // 检查 API pattern 数量
   const apiP163 = await getApiPatterns('netease_163');
   const apiPQQ = await getApiPatterns('qq');
+  const apiPUstc = await getApiPatterns('ustc');
 
   // ===== 聚合每个账户的最新状态 =====
   // recentResults 中保存了各账户单独的检查结果（含 email/provider/unreadCount 字段），
@@ -1759,6 +1731,7 @@ async function getStatus() {
     apiPatternCounts: {
       netease_163: apiP163.length,
       qq: apiPQQ.length,
+      ustc: apiPUstc.length,
     },
     alarmConfigured: !!alarm,
     alarmInfo: alarm

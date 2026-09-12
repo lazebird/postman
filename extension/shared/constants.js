@@ -19,25 +19,6 @@ export const PROVIDERS = {
 // 具体 sid 存储键映射见 shared/session-cache.js 的 sidStorageKey()
 export const SID_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-// Gmail OAuth2 token 缓存键（chrome.storage.local 持久化，浏览器重启保留）
-// 符合 AGENTS 规则 3：会话令牌优先持久化存储，后台直调时从缓存读取，
-// 避免每次后台检查都依赖 chrome.identity（在 Microsoft Edge 上不受支持）。
-export const GMAIL_TOKEN_KEYS = {
-  TOKEN: 'gmail_access_token',
-  EXPIRY: 'gmail_access_token_expiry',
-};
-
-// Gmail 静默续期 / 授权提醒的节流时间戳存储键（chrome.storage.local 持久化）。
-// 符合 AGENTS 规则 3：节流状态同样持久化，浏览器重启不清零，避免漏/重提醒。
-//  - SILENT_LAST_ATTEMPT：最近一次静默续期尝试时间；用于避免每次 alarm 都打一次
-//    Google 授权端点（无会话时反复失败既浪费又可能触达限流）。
-//  - NOTIFY_LAST_TIME：最近一次「需手动授权」提醒通知时间；用于对通知节流，
-//    避免自动检查每次失败都弹一条骚扰用户。
-export const GMAIL_RENEWAL_KEYS = {
-  SILENT_LAST_ATTEMPT: 'gmail_silent_renew_last_attempt',
-  NOTIFY_LAST_TIME: 'gmail_auth_notify_last_time',
-};
-
 // 已捕获 API 模式的存储键
 // 各 provider 独立存储，互不串键。CAPTURED_USTC / CAPTURED_GMAIL 为显式对称预留
 //（USTC 走 Coremail 捕获回放；Gmail 走 Atom feed 公开端点、不需捕获回放，键仅作完整映射占位）。
@@ -56,7 +37,7 @@ export const API_PATTERN_KEYS = {
  *
  *   - 手动（manual）：由用户在界面（Popup）点击按钮/控件显式触发。
  *     此类触发**可以**走完整交互流程——自动打开邮箱页、复用/新建标签、
- *     弹出 Gmail OAuth 授权窗等（AGENTS 规则 1：用户主动显式操作允许）。
+ *     打开邮箱收件箱等（AGENTS 规则 1：用户主动显式操作允许）。
  *
  *   - 自动（auto）：由定时闹钟（chrome.alarms）、onInstalled/onStartup、
  *     内容脚本页面事件等周期/被动事件触发。此类触发**绝不**擅自打开可见标签、
@@ -307,12 +288,12 @@ export const PROVIDER_CONFIG = {
     entryPoints: [],
     sessionEndpoints: [],
     // Gmail 未读检查候选接口
-    // v0.11.0 新增：Atom feed（隐藏端点，session cookie 认证，零 token、无需 OAuth 商业授权）。
+    // Atom feed（隐藏端点，session cookie 认证，零 token、无需 OAuth 商业授权）。
     //   端点固定 + Cookie 鉴权，不依赖 {sid} 占位符（requiresSid:false，回放时无 sid 也放行）；
     //   响应为 Atom XML，未读数在 <fullcount> 标签，由 provider-gmail.js 专用解析器处理，
     //   不走通用 JSON 解析。
-    // 风控约束：端点由 Google 非官方维护、可能随时 403/废弃，故与 OAuth2 路径互为 fallback；
-    //   且轮询复用现有 alarm 间隔（≥60s），不为此单独加密（避免触发 abuse detection）。
+    // 风控约束：端点由 Google 非官方维护、可能随时 403/废弃，轮询复用现有 alarm 间隔
+    //   （≥60s），不单独加密（避免触发 abuse detection）。
     probeEndpoints: [
       {
         name: 'atom_feed',
@@ -326,11 +307,6 @@ export const PROVIDER_CONFIG = {
       },
     ],
     contentDomains: ['mail.google.com'],
-    // Gmail OAuth2 配置
-    oauth2: {
-      clientId: '428257971477-hgals4i0e445jdl1ame35i8ir3nll9ua.apps.googleusercontent.com',
-      scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
-    },
   },
 };
 
@@ -354,9 +330,8 @@ export const DEFAULT_SETTINGS = {
     netease_163: ['js6_rpc_list'],
     qq: ['wx_maillist'],
     ustc: ['ustc_getallfolders'],
-    // atom_feed 优先（cookie 路径，零 token）；gmail_api（OAuth2）为 fallback，
-    // 与 provider-gmail.js 的「先 atom 后 OAuth」探测顺序一致。
-    gmail: ['atom_feed', 'gmail_api'],
+    // atom_feed：Cookie 路径，零 token、无需 OAuth 商业授权
+    gmail: ['atom_feed'],
   },
 };
 

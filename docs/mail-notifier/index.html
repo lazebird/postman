@@ -15,7 +15,7 @@
       content="Mail Notifier 是一款浏览器扩展（MV3），在工具栏集中显示 163 / QQ / USTC / Gmail 未读邮件数量并弹出桌面通知。纯本地处理、无服务器、后台检查完全静默，绝不自动打开标签页。"
     />
     <meta name="theme-color" content="#1a73e8" />
-    <!-- Google Search Console / OAuth 品牌验证：
+    <!-- Google Search Console 站点验证：
          将 Search Console 提供的 HTML 标记中的 content 值填入下方 meta 标签并取消注释即可完成站点所有权验证。
     <meta name="google-site-verification" content="REPLACE_WITH_YOUR_VERIFICATION_TOKEN" />
     -->
@@ -88,7 +88,7 @@
             <span class="chip" data-zh="163 邮箱" data-en="163 Mail">163 邮箱</span>
             <span class="chip" data-zh="QQ 邮箱" data-en="QQ Mail">QQ 邮箱</span>
             <span class="chip" data-zh="USTC 邮箱（中科大）" data-en="USTC Mail (China)">USTC 邮箱（中科大）</span>
-            <span class="chip" data-zh="Gmail（OAuth2 只读）" data-en="Gmail (OAuth2 read-only)">Gmail（OAuth2 只读）</span>
+            <span class="chip" data-zh="Gmail（Atom feed）" data-en="Gmail (Atom feed)">Gmail（Atom feed）</span>
           </div>
         </section>
 
@@ -150,11 +150,11 @@
               <span class="icon" aria-hidden="true">🔒</span>
               <h3 data-zh="隐私优先" data-en="Privacy first">隐私优先</h3>
               <p
-                data-zh="全部数据仅保存在本机浏览器（chrome.storage.local），无服务器、无账号、不上传邮件内容；Gmail 走官方 OAuth2 只读授权（gmail.readonly）。"
-                data-en="All data stays in your local browser (chrome.storage.local) — no servers, no accounts, no mail content uploaded; Gmail uses the official read-only OAuth2 scope (gmail.readonly)."
+                data-zh="全部数据仅保存在本机浏览器（chrome.storage.local），无服务器、无账号、不上传邮件内容；Gmail 走隐藏 Atom feed + 浏览器会话 Cookie（零 token、无需 Google Cloud OAuth 商业授权）。"
+                data-en="All data stays in your local browser (chrome.storage.local) — no servers, no accounts, no mail content uploaded; Gmail uses a hidden Atom feed plus your browser's session cookie (zero tokens, no Google Cloud OAuth commercial approval required)."
               >
                 全部数据仅保存在本机浏览器（chrome.storage.local），无服务器、无账号、不上传邮件内容；Gmail
-                走官方 OAuth2 只读授权（gmail.readonly）。
+                走隐藏 Atom feed + 浏览器会话 Cookie（零 token、无需 Google Cloud OAuth 商业授权）。
               </p>
             </div>
           </div>
@@ -233,10 +233,11 @@
           <h3 data-zh="可以只用 Gmail 吗？" data-en="Can I use Gmail only?">可以只用 Gmail 吗？</h3>
           <p
             class="lead"
-            data-zh="可以。Gmail 通过 Google 官方 REST API 与 OAuth2 只读权限授权，无需其他邮箱配置。"
-            data-en="Yes. Gmail uses Google's official REST API with read-only OAuth2 authorization, so no other mailbox setup is required."
+            data-zh="可以。Gmail 通过隐藏 Atom feed（mail.google.com/mail/u/0/feed/atom）读取未读，依赖浏览器已登录 Gmail 的会话 Cookie，无需其他邮箱配置。"
+            data-en="Yes. Gmail unread counts are read from a hidden Atom feed (mail.google.com/mail/u/0/feed/atom) using your browser's existing Gmail session cookie — no other mailbox setup required."
           >
-            可以。Gmail 通过 Google 官方 REST API 与 OAuth2 只读权限授权，无需其他邮箱配置。
+            可以。Gmail 通过隐藏 Atom feed（mail.google.com/mail/u/0/feed/atom）读取未读，
+            依赖浏览器已登录 Gmail 的会话 Cookie，无需其他邮箱配置。
           </p>
         </section>
       </div>

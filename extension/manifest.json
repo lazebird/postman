@@ -11,12 +11,9 @@
     "notifications",
     "tabs",
     "cookies",
-    "scripting",
-    "declarativeNetRequest",
-    "identity"
+    "scripting"
   ],
   "host_permissions": [
-    "https://gmail.googleapis.com/*",
     "https://mail.163.com/*",
     "https://*.163.com/*",
     "https://mail.qq.com/*",
@@ -27,12 +24,6 @@
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
-  },
-  "oauth2": {
-    "client_id": "428257971477-hgals4i0e445jdl1ame35i8ir3nll9ua.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/gmail.readonly"
-    ]
   },
   "web_accessible_resources": [
     {

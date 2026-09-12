@@ -66,7 +66,8 @@
             </li>
             <li>
               <strong>Gmail 账户数据</strong
-              >：经 Google 官方 REST API 以只读权限（<code>gmail.readonly</code>）读取未读邮件元数据；
+              >：经隐藏 Atom feed（<code>mail.google.com/mail/u/0/feed/atom</code>）读取未读邮件元数据，
+              依赖浏览器已登录 Gmail 的会话 Cookie，零 token；
             </li>
             <li>
               <strong>浏览器 Cookies（会话 Cookie）</strong
@@ -93,7 +94,8 @@
 
           <h2>5. 第三方（Google）数据处理</h2>
           <p>
-            本扩展使用 Google 官方 OAuth2 流程与 Gmail REST API，仅申请 <code>gmail.readonly</code>（只读）权限。
+            本扩展通过隐藏 Atom feed（<code>mail.google.com/mail/u/0/feed/atom</code>）读取 Gmail 未读，
+            依赖浏览器已登录 Gmail 的会话 Cookie，零 token、无需 Google Cloud OAuth 商业授权。
             Gmail 数据的使用遵循 <a
               href="https://developers.google.com/terms/api-services-user-data-policy"
               rel="noopener"
@@ -117,7 +119,7 @@
               除非您明确请求支持、为安全目的调查滥用，或法律要求；
             </li>
             <li>
-              <strong>数据保留与删除</strong>：Gmail 相关令牌与未读状态保存在本机
+              <strong>数据保留与删除</strong>：Gmail 相关会话数据与未读状态保存在本机
               <code>chrome.storage.local</code>，可随时在扩展设置页清除；卸载扩展即全部删除。
             </li>
           </ul>
@@ -165,8 +167,8 @@
                 <td>仅用于识别并复用您<strong>已打开</strong>的邮箱标签（绝不自动开标签）</td>
               </tr>
               <tr>
-                <td><code>identity</code></td>
-                <td>Gmail OAuth2 授权（只读）</td>
+                <td><s><code>identity</code></s></td>
+                <td><s>Gmail OAuth2 授权（只读）</s> —— 已废弃，v0.11.0 移除（Gmail 改走隐藏 Atom feed + 会话 Cookie）</td>
               </tr>
               <tr>
                 <td><code>scripting</code> / <code>declarativeNetRequest</code></td>
@@ -210,8 +212,9 @@
               render the badge / send desktop notifications;
             </li>
             <li>
-              <strong>Gmail account data</strong> — read-only unread message metadata via the official Google REST API
-              (<code>gmail.readonly</code>);
+              <strong>Gmail account data</strong> — unread message metadata via the hidden Atom feed
+              (<code>mail.google.com/mail/u/0/feed/atom</code>), relying on your browser's signed-in Gmail session
+              cookie, with zero tokens;
             </li>
             <li>
               <strong>Browser cookies (session cookies)</strong> — used solely to send local requests to webmail sites
@@ -253,8 +256,9 @@
 
           <h2>5. Third-Party (Google) Data Processing</h2>
           <p>
-            The Extension uses the official Google OAuth2 flow and the Gmail REST API, requesting only the
-            <code>gmail.readonly</code> scope. Use of Gmail data complies with the <a
+            The Extension reads Gmail unread counts via the hidden Atom feed
+            (<code>mail.google.com/mail/u/0/feed/atom</code>), relying on your browser's signed-in Gmail session
+            cookie — zero tokens, no Google Cloud OAuth required. Use of Gmail data complies with the <a
               href="https://developers.google.com/terms/api-services-user-data-policy"
               rel="noopener"
               >Google API Services User Data Policy</a
@@ -279,7 +283,7 @@
               with your explicit request for support, for security investigations, or as required by law;
             </li>
             <li>
-              <strong>Retention and deletion</strong>: Gmail tokens and unread state are stored locally in
+              <strong>Retention and deletion</strong>: Gmail session data and unread state are stored locally in
               <code>chrome.storage.local</code>, can be cleared from the extension settings at any time, and are
               removed when the Extension is uninstalled.
             </li>
@@ -339,8 +343,8 @@
                 </td>
               </tr>
               <tr>
-                <td><code>identity</code></td>
-                <td>Gmail OAuth2 authorization (read-only)</td>
+                <td><s><code>identity</code></s></td>
+                <td><s>Gmail OAuth2 authorization (read-only)</s> — deprecated, removed in v0.11.0 (Gmail now uses the hidden Atom feed + session cookie)</td>
               </tr>
               <tr>
                 <td><code>scripting</code> / <code>declarativeNetRequest</code></td>
