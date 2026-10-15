@@ -323,6 +323,13 @@ export const CHECK_INTERVALS = [
 ];
 
 // 默认设置
+// 冷启动（无有效基线：首次检查 / 基线过期）时的通知策略默认值：
+//  - 首次检查会建立基线；
+//  - 基线缺失或过期但本次确有未读时，发一条「当前有 N 封未读」的计数提示，
+//    让用户能确认「提醒链路是活的」——这正是 ISSUE #56 里期望看到的数量类通知。
+//    可由用户关闭（settings.notifyColdStart = false）。
+export const DEFAULT_NOTIFY_COLD_START = true;
+
 export const DEFAULT_SETTINGS = {
   checkIntervalMinutes: 5,
   logLevel: 'WARN',
@@ -336,6 +343,9 @@ export const DEFAULT_SETTINGS = {
     // atom_feed：Cookie 路径，零 token、无需 OAuth 商业授权
     gmail: ['atom_feed'],
   },
+  // 冷启动（首次检查 / 基线过期）且确实有未读时，是否发一条「有 N 封未读」的
+  // 计数通知。关掉后只在「相对基线确有新增」时才提醒。
+  notifyColdStart: DEFAULT_NOTIFY_COLD_START,
 };
 
 // 存储键
@@ -369,3 +379,25 @@ export const AUTH_ALERT_KEYS = {
 
 // 「授权需处理」系统提醒的最小间隔：同一账号在距离上次提醒不足该时长时不重复通知。
 export const AUTH_ALERT_NOTIFY_THROTTLE_MS = 6 * 60 * 60 * 1000; // 6 小时
+
+// 新邮件提醒的未读基线（chrome.storage.local，持久化）
+//  - UNREAD_BASELINE_BY_EMAIL：每个账号最近一次被「认账」的未读数 + 时间戳。
+//    { [email]: { count: number, at: number } }
+//
+// 为什么需要独立的基线键（替代原先「从 checkResults 里翻上一次 summary」的做法）：
+//  1. checkResults 由全量检查 summary 与单账户结果共享写入，单账户条目占多时
+//     summary 会被挤出最近 N 条，基线查找随之失效 → 静默漏报（ISSUE #56）。
+//  2. 基线需按账号独立演进：每个账号各自记住「上次看到的未读数」，互不干扰。
+//  3. 需要记录基线写入时间，用于判断基线是否已过期（见下方 NOTIFY_BASELINE_MAX_AGE_MS）。
+export const NOTIFY_BASELINE_KEYS = {
+  UNREAD_BASELINE_BY_EMAIL: 'notify_unread_baseline_by_email',
+};
+
+// 同一账号「新邮件数」提醒的最小间隔：防止短时间内反复提醒（AGENTS 规则 2：
+// 后台运行不得打扰用户）。与授权告警一样属节流窗口。
+export const NEW_MAIL_NOTIFY_THROTTLE_MS = 60 * 1000; // 1 分钟
+
+// 基线最大年龄：超过该时长未更新的基线不再作为对比依据，改按「冷启动」处理。
+// 起因：svc 被回收/浏览器休眠数天后旧基线仍留在存储里，此时未读数差异早已不代表
+// 「本次新增」，若直接对比会把积压的旧未读当成新邮件一次性报出来（噪声）。
+export const NOTIFY_BASELINE_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 小时

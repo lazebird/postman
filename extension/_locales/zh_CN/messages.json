@@ -131,6 +131,10 @@
     "message": "界面语言",
     "description": "Mail Notifier UI text"
   },
+  "lblNotifyColdStart": {
+    "message": "首次/恢复时提示未读总数（否则仅新增才提醒）",
+    "description": "Mail Notifier UI text"
+  },
   "langAuto": {
     "message": "跟随系统语言（自动）",
     "description": "Mail Notifier UI text"

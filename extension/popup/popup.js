@@ -238,6 +238,9 @@ async function populateSettingsForm() {
   if (currentSettings.checkMode) {
     document.getElementById('mode-select').value = currentSettings.checkMode;
   }
+  // 冷启动通知开关：默认开启（与 constants.DEFAULT_SETTINGS.notifyColdStart 一致）
+  const coldStartBox = document.getElementById('notify-coldstart');
+  if (coldStartBox) coldStartBox.checked = currentSettings.notifyColdStart !== false;
   await syncLanguageSelect();
 }
 
@@ -345,12 +348,15 @@ async function _saveSettings() {
     }
   }
 
+  const notifyColdStart = document.getElementById('notify-coldstart')?.checked !== false;
+
   currentSettings = {
     ...currentSettings,
     checkIntervalMinutes: interval,
     logLevel,
     checkMode,
     enabledEndpoints,
+    notifyColdStart,
   };
 
   await chrome.storage.local.set({ settings: currentSettings });
