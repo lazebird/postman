@@ -225,6 +225,55 @@ WASM 文件已加载，确认 QQ 新版使用 WebAssembly 技术。
 
 ---
 
+## 🟡 P1：新邮件通知从未弹出——基线查找失效导致静默漏报（ISSUE #56，已修复）
+
+### 问题描述
+
+插件在定时检查期间能正常更新工具栏未读数字（说明读取链路是通的），
+但用户**从未见过任何新邮件系统通知**：既没有邮件内容通知，也没有数量类简单通知。
+
+### 根因（三处叠加，任一处命中都会静默不通知）
+
+1. **基线查找失效**：旧实现用 `getCheckResults(10)` 取最近 10 条记录，再从中找
+   「含嵌套 results 数组的全量检查 summary」当基准。但 `checkResults` 是
+   `saveCheckResult()` 写入的**同一张表**——全量检查 summary 与每次单账户结果/内容脚本
+   探测结果混存。单账户条目一多，summary 就被挤出最近 10 条窗口 →
+   找不到基准 → 直接 `return`，永不通知。
+2. **过度严苛的准入条件**：旧实现要求 `result.authVerified === true` 才继续。
+   而部分探测路径（内容脚本 raw probe 落库等）只带 `unreadCount`、不带 `authVerified`，
+   这些账户被静默跳过——工具栏数字照常显示，通知却永远不发。
+3. **首次/冷启动静默**：`lastResults` 为空时直接 return，既不建基线也不提示，
+   用户无法区分「确实没有新邮件」与「提醒功能根本没工作」。
+
+### 修复
+
+将基线从「检查历史里翻 summary」改为**按账号独立持久化的未读基线**
+（`shared/storage.js`，键 `notify_unread_baseline_by_email`）：
+
+- `{ [email]: { count, at } }`：每账号记住最近一次被认账的未读数与时间戳。
+- 判定规则：`本次未读数 > 基线` 即为有新邮件，`delta = 本次 - 基线`。
+- 不再要求 `authVerified`——能读到具体数字即证明读取成功。
+- 基线带写入时间，超过 `NOTIFY_BASELINE_MAX_AGE_MS`（6 小时）视为过期：
+  svc 被回收/休眠数天后不会把积压未读一次性爆报成「新邮件」。
+- 冷启动（首次检查 / 基线过期）且确有未读时，发一条「当前有 N 封未读」的计数通知
+  （`notifyColdStart` 开关可关），让用户确知提醒链路是活的——即 ISSUE #56 期望的
+  「新邮件数量类的简单通知」。
+- 同一账号 `NEW_MAIL_NOTIFY_THROTTLE_MS`（1 分钟）内只提醒一次；被节流吞掉的那次
+  仍会前移基线，避免节流窗口结束后把同一批邮件补报成新邮件。
+- 每步判定都写 INFO 日志（`新邮件检查：xxx 有 N 封新邮件 / 无新邮件 / 冷启动…`），
+  用户可在「调试」页自查是否走到了通知这一步。
+
+### 修改文件
+
+- `extension/background/service-worker.js`（`checkNewEmails` 重写、`sendNewEmailNotification`
+  增加冷启动文案与 error 级失败日志、新增 `newMailNotifyGate`）
+- `extension/shared/storage.js`（基线读写与清理、通知节流表读写）
+- `extension/shared/constants.js`（`NOTIFY_BASELINE_KEYS` / 节流与过期常量 / 设置项默认值）
+- `extension/popup/index.html`、`extension/popup/popup.js`（冷启动提示开关）
+- `extension/_locales/{zh_CN,en}/messages.json`（新增文案）
+
+---
+
 ## 📋 下一步行动清单
 
 ### 近期目标

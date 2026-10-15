@@ -29,7 +29,12 @@
  * 4. 明确持久化/会话两级存储分层，账号配置等用户数据统一落 chrome.storage.local
  */
 
-import { DEFAULT_SETTINGS, STORAGE_KEYS, AUTH_ALERT_KEYS } from './constants.js';
+import {
+  DEFAULT_SETTINGS,
+  STORAGE_KEYS,
+  AUTH_ALERT_KEYS,
+  NOTIFY_BASELINE_KEYS,
+} from './constants.js';
 
 /* ============================================================
  * 持久级用户数据（chrome.storage.local）
@@ -261,4 +266,96 @@ export async function setLastAuthNotify(email) {
   } catch (e) {
     console.error('[storage] setLastAuthNotify failed:', e.message);
   }
+}
+
+/* ============================================================
+ * 新邮件提醒基线（chrome.storage.local，持久化）
+ * —— 每个账号独立记住「最近一次被认账的未读数」，用于判断本次是否有新邮件到达。
+ *    与 checkResults（检查历史，会被各种条目挤占）分离，避免基线查找失效导致
+ *    静默漏报（ISSUE #56）。所有读写收敛在本模块，业务层不直接接触存储键。
+ * ============================================================ */
+
+/**
+ * 读取全部账号的未读基线。
+ * @returns {Promise<Object>} { [email]: { count: number, at: number } }
+ */
+export async function getUnreadBaselines() {
+  try {
+    const data = await chrome.storage.local.get(NOTIFY_BASELINE_KEYS.UNREAD_BASELINE_BY_EMAIL);
+    const map = data[NOTIFY_BASELINE_KEYS.UNREAD_BASELINE_BY_EMAIL];
+    return map && typeof map === 'object' ? map : {};
+  } catch (e) {
+    console.error('[storage] getUnreadBaselines failed:', e.message);
+    return {};
+  }
+}
+
+/**
+ * 读取单个账号的未读基线。
+ * @param {string} email
+ * @returns {Promise<{count:number, at:number}|null>} 无记录返回 null
+ */
+export async function getUnreadBaseline(email) {
+  if (!email) return null;
+  const map = await getUnreadBaselines();
+  const entry = map[email];
+  if (!entry || typeof entry.count !== 'number') return null;
+  return { count: entry.count, at: typeof entry.at === 'number' ? entry.at : 0 };
+}
+
+/**
+ * 写入单个账号的未读基线（不改动其它账号）。
+ * @param {string} email
+ * @param {number} count
+ */
+export async function setUnreadBaseline(email, count) {
+  if (!email || typeof count !== 'number') return;
+  try {
+    const map = await getUnreadBaselines();
+    map[email] = { count, at: Date.now() };
+    await chrome.storage.local.set({ [NOTIFY_BASELINE_KEYS.UNREAD_BASELINE_BY_EMAIL]: map });
+  } catch (e) {
+    console.error('[storage] setUnreadBaseline failed:', e.message);
+  }
+}
+
+/**
+ * 一致性清理：删除已不在账号列表中的基线记录，避免存储无限增长。
+ * @param {string[]} emails 现存账号邮箱列表
+ */
+export async function pruneUnreadBaselines(emails) {
+  const keep = new Set(Array.isArray(emails) ? emails : []);
+  try {
+    const map = await getUnreadBaselines();
+    let changed = false;
+    for (const key of Object.keys(map)) {
+      if (!keep.has(key)) {
+        delete map[key];
+        changed = true;
+      }
+    }
+    if (changed) {
+      await chrome.storage.local.set({ [NOTIFY_BASELINE_KEYS.UNREAD_BASELINE_BY_EMAIL]: map });
+    }
+  } catch (e) {
+    console.error('[storage] pruneUnreadBaselines failed:', e.message);
+  }
+}
+
+/**
+ * 读取某账号最近一次「新邮件提醒」发送时间（用于节流），无记录返回 0。
+ * 复用授权告警同一张通知时间表：一个账号同一时刻只需一条提醒，避免两类
+ * 通知互相不知情地在数秒内各弹一次。
+ * @param {string} email
+ */
+export async function getLastMailNotify(email) {
+  return getLastAuthNotify(email);
+}
+
+/**
+ * 记录某账号本次「新邮件提醒」已发送时间。
+ * @param {string} email
+ */
+export async function setLastMailNotify(email) {
+  return setLastAuthNotify(email);
 }

@@ -131,6 +131,10 @@
     "message": "UI Language",
     "description": "Mail Notifier UI text"
   },
+  "lblNotifyColdStart": {
+    "message": "Show unread total on first/recovery (otherwise only new mail)",
+    "description": "Mail Notifier UI text"
+  },
   "langAuto": {
     "message": "Follow system language (auto)",
     "description": "Mail Notifier UI text"

@@ -26,12 +26,20 @@ import {
   setLastAuthOk,
   getLastAuthNotify,
   setLastAuthNotify,
+  getUnreadBaselines,
+  setUnreadBaseline,
+  pruneUnreadBaselines,
+  getLastMailNotify,
+  setLastMailNotify,
 } from '../shared/storage.js';
 import {
   PROVIDERS,
   TRIGGER_SOURCE,
   isManualSource,
   AUTH_ALERT_NOTIFY_THROTTLE_MS,
+  NEW_MAIL_NOTIFY_THROTTLE_MS,
+  NOTIFY_BASELINE_MAX_AGE_MS,
+  DEFAULT_NOTIFY_COLD_START,
 } from '../shared/constants.js';
 import { probe163 } from '../providers/provider-163.js';
 import { probeQQ } from '../providers/provider-qq.js';
@@ -1439,42 +1447,115 @@ async function maybeNotifyAuthIssues(results) {
 /**
  * 检查是否有新邮件并发送桌面通知。
  *
- * 判定逻辑：以最近一次「全量检查」的未读数作为基准，
- * 当当前未读数高于基准且账户已授权（authVerified）时，判定有新邮件到达。
- * 新增数量 delta = 当前未读数 - 基准未读数（用于通知里提示"新邮件数目"）。
+ * 判定基准：每个账号自己的「未读基线」（由 shared/storage 持久化，与 checkResults
+ * 检查历史解耦）。本次未读数 > 基线 → 新邮件到达，delta = 本次 - 基线。
+ *
+ * 与旧实现的区别（ISSUE #56：从未见过任何新邮件通知）：
+ *  - 旧实现从 checkResults 最近 10 条里翻上一次「全量检查 summary」当基准。但
+ *    checkResults 是全量 summary 与单账户结果**共用**的一张表（saveCheckResult），
+ *    单账户条目一多，summary 就被挤出窗口 → 找不到基准 → 静默 return，永不通知。
+ *  - 旧实现还要求 result.authVerified === true，而部分探测路径只带 unreadCount
+ *    不带 authVerified，也被一并静默跳过。
+ *  - 旧实现首次检查（无历史）不建基线也不提示，用户无法分辨「没有新邮件」与
+ *    「提醒功能根本没在工作」。
+ *
+ * 现在的策略：
+ *  1. 能读到未读数的账号即为有效样本（有具体数字就说明读取成功，不再苛求 authVerified）；
+ *  2. 基线按账号独立持久化，且带写入时间，超过 NOTIFY_BASELINE_MAX_AGE_MS 视为过期，
+ *     改按冷启动处理，避免把休眠数天后的积压未读一次性当成新邮件爆报；
+ *  3. 冷启动（无基线/基线过期）时，若确实有未读且用户未关闭该策略，发一条
+ *     「有 N 封未读」的计数通知 —— 这正是 ISSUE #56 期望能看到的「数量类通知」；
+ *  4. 同一账号 1 分钟内只提醒一次（NEW_MAIL_NOTIFY_THROTTLE_MS），后台保持安静；
+ *  5. 每步判定都写 info 日志，供用户在「调试」页自查：到底有没有走到通知这一步。
+ *
+ * @param {Array} results 本次全量检查的账户级结果
  */
 async function checkNewEmails(results) {
   try {
-    const lastResults = await getCheckResults(10);
-    if (!lastResults.length) return;
-
-    // 基准：最近一次全量检查（summary 含嵌套 results 数组）
-    const lastSummary = lastResults.find((r) => r.results && Array.isArray(r.results));
-    if (!lastSummary) return;
-
-    const lastByEmail = {};
-    for (const r of lastSummary.results) {
-      if (r.email && typeof r.unreadCount === 'number') {
-        lastByEmail[r.email] = r.unreadCount;
-      }
+    const list = (Array.isArray(results) ? results : []).filter(
+      (r) => r && r.email && typeof r.unreadCount === 'number'
+    );
+    if (!list.length) {
+      logger.info('新邮件检查：本次无任何账户读到未读数，跳过');
+      return;
     }
 
-    for (const result of results) {
-      if (!result.email || typeof result.unreadCount !== 'number') continue;
-      if (!result.authVerified) continue;
+    const settings = await getSettings();
+    const coldStartNotify = settings.notifyColdStart !== false;
+    const baselines = await getUnreadBaselines();
+    const now = Date.now();
+    let notified = 0;
 
-      const lastCount = lastByEmail[result.email] || 0;
-      const newCount = result.unreadCount;
-      const delta = newCount - lastCount;
+    for (const result of list) {
+      const entry = baselines[result.email];
+      const baseValid =
+        entry &&
+        typeof entry.count === 'number' &&
+        now - (typeof entry.at === 'number' ? entry.at : 0) <= NOTIFY_BASELINE_MAX_AGE_MS;
 
+      if (!baseValid) {
+        // 冷启动：无基线或基线已过期。只提示「当前有 N 封未读」，不谎报为新增。
+        const reason = entry ? '基线已过期' : '首次检查无基线';
+        if (result.unreadCount > 0 && coldStartNotify) {
+          if (await newMailNotifyGate(result.email)) {
+            logger.info(
+              `新邮件检查：${result.email} ${reason}，发冷启动未读提示 count=${result.unreadCount}`
+            );
+            await sendNewEmailNotification(result, result.unreadCount, { coldStart: true });
+            notified++;
+          } else {
+            logger.info(`新邮件检查：${result.email} ${reason}，命中节流窗口不重复提醒`);
+          }
+        } else {
+          logger.info(
+            `新邮件检查：${result.email} ${reason}，建立基线 count=${result.unreadCount}（不提醒）`
+          );
+        }
+        await setUnreadBaseline(result.email, result.unreadCount);
+        continue;
+      }
+
+      const delta = result.unreadCount - entry.count;
       if (delta > 0) {
-        // 有新邮件到达，发送通知
-        await sendNewEmailNotification(result, delta);
+        if (await newMailNotifyGate(result.email)) {
+          logger.info(
+            `新邮件检查：${result.email} 有新邮件 delta=${delta}（基准=${entry.count} 本次=${result.unreadCount}），发通知`
+          );
+          await sendNewEmailNotification(result, delta);
+          notified++;
+        } else {
+          logger.info(
+            `新邮件检查：${result.email} 有 ${delta} 封新邮件，但命中节流窗口，静默并前移基线`
+          );
+        }
+      } else {
+        logger.info(
+          `新邮件检查：${result.email} 无新邮件（基准=${entry.count} 本次=${result.unreadCount} delta=${delta}）`
+        );
       }
+      // 无论是否提醒，都把基线前移到本次读到的值：即使被节流吞掉一次提醒，
+      // 也不会在下一轮重复计算同一批新邮件（避免节流结束后补报成新的）。
+      await setUnreadBaseline(result.email, result.unreadCount);
     }
+
+    // 清掉已删除账号的基线，避免存储随账号增删无限增长
+    const accounts = await getAccounts();
+    await pruneUnreadBaselines(accounts.map((a) => a.email));
+
+    logger.info(`新邮件检查完成：样本=${list.length} 已发通知=${notified}`);
   } catch (err) {
     logger.warn(`新邮件检查失败: ${err.message}`);
   }
+}
+
+/**
+ * 新邮件提醒节流门：同一账号距上次提醒不足 NEW_MAIL_NOTIFY_THROTTLE_MS 时返回 false。
+ * 与授权告警共用同一张时间表（shared/storage 的 getLastMailNotify），后台保持安静。
+ * @param {string} email
+ */
+async function newMailNotifyGate(email) {
+  const last = await getLastMailNotify(email);
+  return Date.now() - last >= NEW_MAIL_NOTIFY_THROTTLE_MS;
 }
 
 /**
@@ -1508,46 +1589,57 @@ function extractLatestEmails(result) {
  * @param {Object} result - 账户级检查结果（含 email/provider/unreadCount/detail）
  * @param {number} delta   - 自上次检查以来新增的邮件数（>0 才触发）
  */
-async function sendNewEmailNotification(result, delta) {
-  try {
-    const provider = result.provider;
-    const providerNames = {
-      netease_163: '163邮箱',
-      qq: 'QQ邮箱',
-      ustc: '中科大',
-      gmail: 'Gmail',
-    };
-    const providerName = providerNames[provider] || provider;
+async function sendNewEmailNotification(result, delta, options = {}) {
+  const provider = result.provider;
+  const providerNames = {
+    netease_163: '163邮箱',
+    qq: 'QQ邮箱',
+    ustc: '中科大',
+    gmail: 'Gmail',
+  };
+  const providerName = providerNames[provider] || provider;
+  const coldStart = options.coldStart === true;
 
-    const latestEmails = extractLatestEmails(result);
-
-    let message;
-    if (latestEmails.length > 0) {
-      // 优先展示最新一封的发件人 + 主题（多封时叠加摘要）
-      const latest = latestEmails[0];
-      const subject = latest.subject || '(无主题)';
-      const from = latest.from ? `发件人：${latest.from}` : '发件人：未知';
-      message = `📧 新邮件：${subject}\n${from}`;
-      if (latestEmails.length > 1) {
-        message += `\n（还有 ${latestEmails.length - 1} 封新邮件）`;
-      }
-    } else {
-      // 接口取不到发件人/主题 → 退化为提示新邮件数目
-      const count = delta > 0 ? delta : result.unreadCount;
-      message = `您有 ${count} 封新邮件`;
+  // 消息体只做「拼文案」，真正发通知单独包 try —— 这样文案逻辑出问题
+  // 不会把「权限/接口失败」这种真正需要诊断的错误混在一起。
+  let message;
+  const latestEmails = extractLatestEmails(result);
+  if (latestEmails.length > 0) {
+    // 优先展示最新一封的发件人 + 主题（多封时叠加摘要）
+    const latest = latestEmails[0];
+    const subject = latest.subject || '(无主题)';
+    const from = latest.from ? `发件人：${latest.from}` : '发件人：未知';
+    message = `📧 新邮件：${subject}\n${from}`;
+    if (latestEmails.length > 1) {
+      message += `\n（还有 ${latestEmails.length - 1} 封新邮件）`;
     }
+  } else if (coldStart) {
+    // 冷启动：只报告当前未读总数，不谎称「新增」
+    message = `当前有 ${result.unreadCount} 封未读邮件（后台提醒已就绪）`;
+  } else {
+    // 接口取不到发件人/主题 → 退化为提示新邮件数目
+    const count = delta > 0 ? delta : result.unreadCount;
+    message = `您有 ${count} 封新邮件`;
+  }
 
-    const notification = {
-      type: 'basic',
-      iconUrl: 'icons/icon-ok-48.png',
-      title: `📧 新邮件通知 · ${providerName}`,
-      message,
-    };
+  const notification = {
+    type: 'basic',
+    iconUrl: 'icons/icon-ok-48.png',
+    title: coldStart ? `📬 未读邮件 · ${providerName}` : `📧 新邮件通知 · ${providerName}`,
+    message,
+  };
 
-    await chrome.notifications.create(`new-email-${Date.now()}`, notification);
-    logger.info(`已发送新邮件通知: ${providerName}, 新增=${delta}, 未读=${result.unreadCount}`);
+  try {
+    const id = `new-email-${Date.now()}-${result.email || provider}`;
+    await chrome.notifications.create(id, notification);
+    await setLastMailNotify(result.email);
+    logger.info(
+      `已发送新邮件通知: ${providerName} ${result.email || ''}, 新增=${delta}, 未读=${result.unreadCount}, coldStart=${coldStart}`
+    );
   } catch (err) {
-    logger.warn(`发送新邮件通知失败: ${err.message}`);
+    // 通知发不出去是 ISSUE #56 的另一半真相（如系统层面关闭了通知）。
+    // 打 error 级日志，便于用户在调试页自查 Chrome/系统通知权限。
+    logger.error(`发送新邮件通知失败（请检查系统/浏览器通知权限）: ${err.message}`);
   }
 }
 
