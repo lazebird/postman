@@ -25,9 +25,11 @@
 ### USTC 邮箱
 - ✅ SW API 探测成功
 - ✅ 未读数：2 封
-- ✅ API：`GET http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}`
+- ✅ API：`GET https://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}`
 - ✅ Response：JSON，包含各文件夹的 `unreadMessageCount` 字段
 - ⚠️ 需要用户在浏览器中先登录，然后点击「同步USTC」按钮
+- ✅ v1.0.2 修复：会话过期时「打开邮箱」落到站点首页 `https://mail.ustc.edu.cn/`
+  重新登录（详见下方 USTC 会话过期条目）
 
 ### Gmail 邮箱
 - ✅ Atom feed + 浏览器 Cookie 直调（v1.0.2 起，零 token、无需 Google Cloud 商业授权）
@@ -245,7 +247,7 @@ WASM 文件已加载，确认 QQ 新版使用 WebAssembly 技术。
 
 ### 登录要求
 USTC 邮箱需要使用 **Cookie + sid** 双重认证：
-1. 用户必须在浏览器中打开并登录 `http://mail.ustc.edu.cn/`
+1. 用户必须在浏览器中打开并登录 `https://mail.ustc.edu.cn/`
 2. 点击扩展 Popup → 「🔑同步USTC」按钮同步会话
 3. 扩展会缓存 sid 供后台 SW API 使用
 
@@ -257,7 +259,62 @@ USTC 邮箱需要使用 **Cookie + sid** 双重认证：
 ### 当前状态
 - ✅ SW API 探测成功（已验证）
 - ✅ 内容脚本支持（需用户先登录）
-- ⚠️ 自动打开标签时需要带 sid 参数
+- ✅ 会话过期后可重新登录：入口固定为站点首页 `https://mail.ustc.edu.cn/`
+
+---
+
+## 🟡 P1：USTC 会话过期后无法重新登录（v1.0.2 修复）
+
+### 问题描述
+USTC 会话过期时，「打开邮箱」跳转到 `https://mail.ustc.edu.cn/coremail/XT/index.jsp`
+（webmail 应用页）并附上缓存的（已失效）sid。该页直接报 `No sid` / `FA_UNAUTHORIZED`
+（HTTP 500），用户点击确认后浏览器关闭页面 —— 没有重新登录的入口，扩展也就永远
+恢复不了会话。
+
+### 根因
+- `/coremail/XT/index.jsp` 是 **webmail 应用页**，不是登录入口。它在 sid 缺失/失效时
+  只返回错误页（实测 2026-09：无 sid → HTTP 500 页面含 `No sid` + `FA_UNAUTHORIZED`；
+  sid 失效 → HTTP 500 或 JSON `{"errorCode":"FA_INVALID_SESSION","errorMsg":"会话已过期, 请重新登录"}`），
+  不会重定向到登录页。
+- 扩展此前两条链路都把「打开邮箱」指向该页，并在有缓存 sid 时拼上 `?sid=...`，
+  正好触发了「带失效 sid 访问 → 报错关闭」的最差路径。
+
+### 修复（v1.0.2）
+- **入口改为站点首页** `https://mail.ustc.edu.cn/`：首页即 Coremail 登录/门户页，
+  无有效会话时由服务端重定向到登录页，用户可重新登录 + 授权。
+  统一在 `PROVIDER_OPEN_URL` / `PROVIDER_CONFIG.ustc` 的 `homepage` / `entryPoints`。
+- **不再给 USTC 拼缓存 sid**：新增 `buildMailboxOpenUrl()`，USTC 显式丢弃残留的
+  `sid` 查询参数；`openMailboxTab`、内容脚本失败后的降级导航、`autoRecoverSid`
+  三处统一走它（原先三处各写一份拼 sid 逻辑，属重复实现，一并收敛）。
+- **识别会话失效签名**：`provider-ustc.js` 的 `analyzeAuth` 增加 `No sid` 与
+  `FA_INVALID_SESSION` 判定（两者可能以 HTTP 200 返回），使失败被正确归为
+  「会话过期」→ 清缓存 sid → Popup 显示「需授权」→ 用户点「打开邮箱」落首页重新登录。
+- **降级提示补指引**：检查失败时的 hint 明确告知 USTC 重新登录入口为
+  `https://mail.ustc.edu.cn/`。
+- 全链路由 `http://` 改为 `https://`（首页实测会强制跳 HTTPS），
+  manifest 的 host_permissions / content_scripts 匹配顺序也把 HTTPS 提前（HTTP 仍保留兼容）。
+
+### 验证结果
+```bash
+# webmail 应用页（旧入口）：无 sid → 500 + No sid
+curl -s -o /dev/null -w '%{http_code}\n' https://mail.ustc.edu.cn/coremail/XT/index.jsp   # 500
+# 站点首页（新入口）：200，含登录表单
+curl -s -o /dev/null -w '%{http_code}\n' https://mail.ustc.edu.cn/                        # 200
+```
+
+### 修改文件
+- `extension/shared/constants.js` — `homepage` / `entryPoints` / 两个 probeEndpoints 改 HTTPS
+- `extension/background/service-worker.js` — 新增 `buildMailboxOpenUrl()` 并收敛三处入口
+- `extension/providers/provider-ustc.js` — `analyzeAuth` 识别 `No sid` / `FA_INVALID_SESSION`
+- `extension/manifest.json` — host_permissions / content_scripts 匹配顺序
+- `extension/content/probe-content.js` — 修正 USTC sid 注释
+- `extension/doc/api-reference.md` — 端点与重新授权入口说明
+
+### AGENTS 规则符合性
+- 未新增任何 `chrome.tabs.create` / `chrome.tabs.update` 调用路径：仅修改了**已有**的
+  用户手动触发链路（「打开邮箱」按钮 / 手动探测）的落地 URL。
+- 自动检查（`alarm`）行为不变：仍然绝不打开标签，仅在失败时标记「需手动同步」。
+- 无「常驻/保活标签」逻辑引入。
 
 ---
 
@@ -315,7 +372,7 @@ console.log(logs);
 |------|------|------|---------|------|
 | 163 | POST | `https://mail.163.com/js6/s?func=mbox:listMessages&sid={sid}` | Cookie + sid | ✅ v1.0.1 修复 |
 | QQ | GET | `https://wx.mail.qq.com/list/maillist?sid={sid}...` | Cookie + sid | ✅ |
-| USTC | GET | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | Cookie + sid | ✅ |
+| USTC | GET | `https://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | Cookie + sid | ✅ v1.0.2 修复重新登录 |
 | Gmail | GET | `https://mail.google.com/mail/u/0/feed/atom` | session Cookie（零 token） | ✅ v1.0.2 |
 
 ---

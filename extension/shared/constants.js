@@ -249,30 +249,33 @@ export const PROVIDER_CONFIG = {
   [PROVIDERS.USTC]: {
     name: '中科大邮箱',
     domain: 'mail.ustc.edu.cn',
-    homepage: 'http://mail.ustc.edu.cn/',
-    entryPoints: ['http://mail.ustc.edu.cn/', 'http://mail.ustc.edu.cn/coremail/XT/index.jsp'],
+    // 首页即登录入口：会话过期时访问它会被重定向到登录页，可重新登录 + 授权。
+    // 不走 /coremail/XT/index.jsp（webmail 应用入口）——带失效 sid 访问该页会直接
+    // 抛「No sid」错误并关闭页面，用户没有重新登录的机会。
+    homepage: 'https://mail.ustc.edu.cn/',
+    entryPoints: ['https://mail.ustc.edu.cn/'],
     sessionEndpoints: [],
     // USTC 使用 Coremail 系统，API 格式与 163 类似
     probeEndpoints: [
       {
         name: 'ustc_getallfolders',
-        url: 'http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}',
+        url: 'https://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}',
         method: 'GET',
         headers: {
           Accept: 'text/javascript, application/json',
-          Referer: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
+          Referer: 'https://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
         },
         requiresSid: true,
         description: '获取所有文件夹及未读数（返回 unreadMessageCount）',
       },
       {
         name: 'ustc_getattrs',
-        url: 'http://mail.ustc.edu.cn/coremail/s/json?sid={sid}&func=user%3AgetAttrs',
+        url: 'https://mail.ustc.edu.cn/coremail/s/json?sid={sid}&func=user%3AgetAttrs',
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
           Accept: 'text/javascript, application/json',
-          Referer: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
+          Referer: 'https://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}',
         },
         requiresSid: true,
         bodyTemplate: '',

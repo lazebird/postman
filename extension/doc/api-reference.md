@@ -1,7 +1,7 @@
 # 邮箱 API 接口参考
 
 > 记录各邮箱提供商的实际可用接口格式，供开发者查阅与后续维护。
-> 最后更新：2026-09-08 ｜ 当前版本：v1.0.1
+> 最后更新：2026-09-12 ｜ 当前版本：v1.0.2
 
 ---
 
@@ -159,14 +159,14 @@ sid 从登录跳转 URL 中提取：
 | 属性 | 值 |
 |------|-----|
 | 方法 | `GET` |
-| URL | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` |
+| URL | `https://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` |
 | 认证 | Cookie（`mail.ustc.edu.cn` 域）+ URL 中的 sid |
 | 需要 sid | ✅ 是（无 sid 返回 500） |
 
 **Headers：**
 ```
 Accept: text/javascript, application/json
-Referer: http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}
+Referer: https://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}
 ```
 
 **Response（成功）：**
@@ -198,17 +198,31 @@ Referer: http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}
 
 | 接口名 | URL | 状态 |
 |--------|-----|------|
-| `ustc_getallfolders` | `http://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | ✅ 有效 |
-| `ustc_getattrs` | `http://mail.ustc.edu.cn/coremail/s/json?sid={sid}&func=user%3AgetAttrs` | ⚠️ POST，body 为空 |
+| `ustc_getallfolders` | `https://mail.ustc.edu.cn/coremail/XT/jsp/mail.jsp?func=getAllFolders&sid={sid}` | ✅ 有效 |
+| `ustc_getattrs` | `https://mail.ustc.edu.cn/coremail/s/json?sid={sid}&func=user%3AgetAttrs` | ⚠️ POST，body 为空 |
 
 ### 3.3 认证失败响应
 
 - 响应体包含 `FA_UNAUTHORIZED` 或 `未登录` → 需重新授权
+- `No sid`：无 sid 访问 webmail 应用页（`/coremail/XT/index.jsp`）时返回
+  HTTP 500 + 该文案（2026-09 实测），同样判定为会话过期，需清 sid 并引导重新授权
+- `FA_INVALID_SESSION` / `会话已过期, 请重新登录`：sid 传入但已失效时的签名
+  （`/coremail/s/json` 返回 JSON `{"result":"error","errorCode":"FA_INVALID_SESSION",
+  "errorMsg":"会话已过期, 请重新登录"}`，2026-09 实测）
 - USTC 使用 Coremail 系统，与 163 认证机制类似
 
 ### 3.4 会话获取
 
-sid 从 URL 参数中提取：`http://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}`
+sid 从 URL 参数中提取：`https://mail.ustc.edu.cn/coremail/XT/index.jsp?sid={sid}`
+
+### 3.5 重新授权入口（重要）
+
+会话过期后的重新登录入口是**站点首页** `https://mail.ustc.edu.cn/`（会重定向到登录页）。
+
+**不要**用带失效 sid 的 webmail 应用页 `/coremail/XT/index.jsp` 作为入口：该页在 sid
+缺失/失效时直接报 `No sid` / `FA_INVALID_SESSION`（HTTP 500）并关闭页面，用户没有
+重新登录的机会。扩展的「打开邮箱」按钮与内容脚本失败后的降级导航均固定落在首页，
+且不携带缓存 sid。
 
 ---
 

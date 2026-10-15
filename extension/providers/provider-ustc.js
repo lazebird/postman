@@ -110,6 +110,18 @@ function analyzeAuth(text, httpStatus) {
     return { authBlocked: true, reason: '未登录' };
   }
 
+  // USTC (Coremail) 会话失效的两类签名（实测 https://mail.ustc.edu.cn/coremail/XT/index.jsp）：
+  //   - 无 sid：HTTP 500 页面含「No sid」+ FA_UNAUTHORIZED
+  //   - sid 失效：FA_INVALID_SESSION
+  // 二者都可能以 HTTP 200 返回，若不识别会被误判为「返回但未解析出未读数」，
+  // 从而漏掉「会话过期需重新登录」这一结论（清 sid + 引导重新授权）。
+  if (/No sid/i.test(text)) {
+    return { authBlocked: true, reason: 'No sid（会话已过期）' };
+  }
+  if (text.includes('FA_INVALID_SESSION') || text.includes('会话已过期')) {
+    return { authBlocked: true, reason: 'FA_INVALID_SESSION（会话已过期，请重新登录）' };
+  }
+
   return { authBlocked: false, reason: null };
 }
 

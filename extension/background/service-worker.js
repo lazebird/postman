@@ -426,7 +426,7 @@ async function handleMessage(message, sender) {
 const PROVIDER_HOME = {
   netease_163: 'https://mail.163.com/',
   qq: 'https://mail.qq.com/',
-  ustc: 'http://mail.ustc.edu.cn/',
+  ustc: 'https://mail.ustc.edu.cn/',
   gmail: 'https://mail.google.com/',
 };
 
@@ -434,7 +434,10 @@ const PROVIDER_HOME = {
 const PROVIDER_OPEN_URL = {
   netease_163: 'https://mail.163.com/js6/main.jsp',
   qq: 'https://wx.mail.qq.com/',
-  ustc: 'http://mail.ustc.edu.cn/coremail/XT/index.jsp',
+  // USTC 用站点首页而非 /coremail/XT/index.jsp：首页在会话过期时会重定向到登录页，
+  // 用户可重新登录 + 授权；而带失效 sid 直达 XT 应用页只会抛「No sid」并关闭页面。
+  // 定时自动检查本来就不会开标签（AGENTS 规则 1），此处仅服务用户手动「打开邮箱」。
+  ustc: 'https://mail.ustc.edu.cn/',
   gmail: 'https://mail.google.com/mail/u/0/#inbox',
 };
 
@@ -461,20 +464,30 @@ function isQQLoginUrl(url) {
 }
 
 /**
+ * 构建「打开邮箱」的落地 URL。
+ *
+ * USTC 固定落在站点首页（登录入口），并显式丢弃可能残留的 sid 查询参数：
+ * 失效的 sid 会让 USTC 前端直接弹「No sid」并关闭页面，用户便无从重新登录。
+ * 首页在无有效会话时由服务端重定向到登录页，正好满足「过期后重新登录 + 授权」。
+ */
+function buildMailboxOpenUrl(provider) {
+  const url = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
+  if (!url) return null;
+  if (provider !== 'ustc') return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('sid');
+    return u.toString();
+  } catch {
+    return url.replace(/[?&]sid=[^&#]*/g, '');
+  }
+}
+
+/**
  * 打开目标邮箱首页（用于注入内容脚本并获取真实登录态 + sid）
  */
 async function openMailboxTab(provider, opts = {}) {
-  let url = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
-
-  // USTC 需要 sid 参数，尝试从缓存读取
-  if (provider === 'ustc') {
-    const cachedSid = await getCachedSid('ustc');
-    if (cachedSid) {
-      const sep = url.includes('?') ? '&' : '?';
-      url = `${url}${sep}sid=${cachedSid}`;
-    }
-  }
-
+  const url = buildMailboxOpenUrl(provider);
   if (!url) return { success: false, error: `Unknown provider: ${provider}` };
   // 默认后台打开（active:false）：避免当从 Popup 触发"获取未读数"时，因新建前台标签抢焦点
   // 而把 Popup 自动关闭，导致只打开了邮箱页面却看不到任何输出。
@@ -665,15 +678,9 @@ async function runContentProbe(provider, opts = {}) {
     } else if (tabId && (needsNav || probe.reason === 'connection')) {
       // 已有标签但连接失败或落在辅助页 → 导航到邮箱主应用刷新
       try {
-        let openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
-        // USTC 需要 sid 参数
-        if (provider === 'ustc') {
-          const cachedSid = await getCachedSid('ustc');
-          if (cachedSid) {
-            const sep = openUrl.includes('?') ? '&' : '?';
-            openUrl = `${openUrl}${sep}sid=${cachedSid}`;
-          }
-        }
+        // USTC 落在首页登录入口（不带缓存 sid）：若会话已过期，缓存 sid 已失效，
+        // 带着它直达 webmail 应用页只会触发「No sid」并关闭页面（见 buildMailboxOpenUrl）
+        const openUrl = buildMailboxOpenUrl(provider);
         await chrome.tabs.update(tabId, { url: openUrl, active: false });
         logger.info(`导航 ${provider} 标签(tabId=${tabId})到主应用刷新`);
       } catch (e) {
@@ -1055,6 +1062,12 @@ async function checkSingleAccount(account, settings, context) {
     const userTriggered = isUserInitiated(context);
     // 是否自动触发（定时/被动事件）：自动来源不允许任何交互弹窗/开标签
     const autoCheck = trigger.auto;
+    // USTC 的重新授权入口是站点首页（未被会话重定向到登录页才能重新登录），
+    // 而 webmail 应用页在 sid 失效时会直接报「No sid」并关闭页面，故单独给出指引。
+    const reloginHint =
+      account.provider === PROVIDERS.USTC
+        ? '中科大会话过期时请打开 https://mail.ustc.edu.cn/ 重新登录（该入口会跳转到登录页；不要用带失效 sid 的 webmail 页面，它会直接报「No sid」并关闭）。'
+        : '';
     const accountResult = {
       email: account.email,
       provider: account.provider,
@@ -1077,8 +1090,8 @@ async function checkSingleAccount(account, settings, context) {
         hint: unsupported
           ? `提供商 ${account.provider} 尚未接入内容脚本或 API 探测，暂时无法自动读取未读数。`
           : autoCheck && !userTriggered
-            ? '请在浏览器中打开并登录对应邮箱网页，扩展会自动同步会话并恢复后台自动检查。'
-            : '请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。',
+            ? `请在浏览器中打开并登录对应邮箱网页，扩展会自动同步会话并恢复后台自动检查。${reloginHint}`
+            : `请先在浏览器打开并登录对应邮箱网页（163 / QQ），再点击「同步会话」授权一次，之后扩展即可后台自动读取未读数。${reloginHint}`,
         action: unsupported ? 'providerNotSupported' : 'openMailboxAndSync',
       },
       timestamp: new Date().toISOString(),
@@ -1201,17 +1214,9 @@ async function autoRecoverSid(provider, { keepTabOpen = false } = {}) {
         logger_ar.info(`从现有标签恢复 ${provider} sid 成功`);
         return { success: true, probe, tabId: existingTab.id };
       }
-      // 已有标签但未提取到 sid，尝试导航刷新
+      // 已有标签但未提取到 sid，尝试导航刷新（USTC 落到首页登录入口，不带缓存 sid）
       try {
-        let openUrl = PROVIDER_OPEN_URL[provider] || PROVIDER_HOME[provider];
-        // USTC 需要 sid 参数
-        if (provider === 'ustc') {
-          const cachedSid = await getCachedSid('ustc');
-          if (cachedSid) {
-            const sep = openUrl.includes('?') ? '&' : '?';
-            openUrl = `${openUrl}${sep}sid=${cachedSid}`;
-          }
-        }
+        const openUrl = buildMailboxOpenUrl(provider);
         await chrome.tabs.update(existingTab.id, {
           url: openUrl,
           active: false,
