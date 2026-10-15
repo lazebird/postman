@@ -47,7 +47,7 @@
   const is163 = HOST.includes('163.com');
   const isUSTC = HOST.includes('ustc.edu.cn');
 
-  // USTC 使用 http://，需要特殊处理 sid 提取
+  // USTC 的 sid 不在页面 JS 变量里，需从 URL 查询参数提取（首页/登录页无 sid → null）
   let sid = null;
   if (isUSTC) {
     const sidMatch = location.href.match(/[?&]sid=([a-zA-Z0-9_\-]+)/);

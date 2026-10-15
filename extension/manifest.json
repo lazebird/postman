@@ -18,8 +18,8 @@
     "https://*.163.com/*",
     "https://mail.qq.com/*",
     "https://*.qq.com/*",
-    "http://mail.ustc.edu.cn/*",
     "https://mail.ustc.edu.cn/*",
+    "http://mail.ustc.edu.cn/*",
     "https://mail.google.com/*"
   ],
   "content_security_policy": {
@@ -47,8 +47,8 @@
         "https://mail.qq.com/*",
         "https://*.mail.qq.com/*",
         "https://wx.mail.qq.com/*",
-        "http://mail.ustc.edu.cn/*",
-        "https://mail.ustc.edu.cn/*"
+        "https://mail.ustc.edu.cn/*",
+        "http://mail.ustc.edu.cn/*"
       ],
       "js": [
         "content/api-interceptor.js",
